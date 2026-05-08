@@ -1,0 +1,88 @@
+{
+  "theme": "dark",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "typography": {
+    "heading_font": "JetBrains Mono",
+    "body_font": "IBM Plex Sans",
+    "code_font": "JetBrains Mono",
+    "weights": ["400", "500", "700"],
+    "scales": {
+      "h1": "text-4xl tracking-tight leading-none",
+      "h2": "text-2xl tracking-tight",
+      "h3": "text-xl font-medium",
+      "body": "text-sm",
+      "small": "text-xs tracking-wider uppercase"
+    }
+  },
+  "colors": {
+    "background": {
+      "base": "#09090B",
+      "surface": "#18181B",
+      "panel": "#121215"
+    },
+    "text": {
+      "primary": "#FAFAFA",
+      "secondary": "#A1A1AA",
+      "muted": "#71717A"
+    },
+    "border": {
+      "default": "#27272A",
+      "focus": "#FAFAFA"
+    },
+    "agents": {
+      "scout": "#FF5722",
+      "architect": "#2962FF",
+      "coder": "#00E676",
+      "reviewer": "#FFC107"
+    }
+  },
+  "layout": {
+    "strategy": "Control Room Grid",
+    "spacing": "Dense, strict pixel alignments. Containers must use border-collapse style layouts with 1px zinc-800 borders to establish the 'Technical Skeleton'.",
+    "border_radius": "rounded-md",
+    "panels": {
+      "header": "h-14 border-b border-zinc-800 flex items-center justify-between px-4 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-50",
+      "workspace_container": "flex h-[calc(100vh-3.5rem-2rem)] w-full overflow-hidden",
+      "left_sidebar": "w-[35%] border-r border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden",
+      "right_workspace": "w-[65%] flex flex-col bg-[#121215] overflow-hidden",
+      "bottom_bar": "h-8 border-t border-zinc-800 flex items-center px-4 text-xs font-mono text-zinc-500 bg-zinc-950 justify-between"
+    }
+  },
+  "components": {
+    "buttons": "Flat, 1px solid border, sharp hover states (hover:bg-zinc-800 hover:text-white). No soft drop shadows. Emphasize utility.",
+    "agent_timeline": "Vertical stepped list. The currently active agent container must have a visible highlight (e.g., a left-border with their specific agent color) and a pulsing status dot.",
+    "chat_input": "Fixed at the bottom of the left sidebar. Minimalist, border-t border-zinc-800. Shadcn Textarea without default blue focus rings; use white/zinc-500 rings.",
+    "tabs": "Shadcn Tabs customized to look like VSCode file tabs. Active tab gets a top-border highlight (e.g., 2px solid white) and lighter background. Inactive tabs are muted.",
+    "code_preview_split": "Within the right workspace, utilize a top half for the Code Viewer and bottom half for the Live WebContainer preview, or use Tabs to switch. Provide clear file tree navigation in a narrow left-column of this right workspace."
+  },
+  "motion": {
+    "transitions": "Utilitarian. Fast 150ms ease-in-out for hover states.",
+    "agent_activity": "Framer Motion layout transitions for incoming chat messages. Pulse opacity (0.5 to 1) for the active agent status indicator.",
+    "loader": "Use ASCII-style text loaders like '[ scanning... ]' or blinking cursors instead of generic spinning circles."
+  },
+  "icons": "lucide-react (stroke-width 1.5, utilitarian, un-styled)",
+  "media": {
+    "image_urls": [
+      {
+        "url": "https://images.unsplash.com/photo-1739922288581-882f8f91b2a6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwxfHxnZW9tZXRyaWMlMjBsZXR0ZXIlMjBFJTIwbG9nbyUyMGRhcmslMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc3ODIzNjEwNHww&ixlib=rb-4.1.0&q=85",
+        "description": "Emergent platform geometric E logo icon. Use for branding in the top-left header.",
+        "category": "logo"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1762279389042-9439bfb6c155?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTZ8MHwxfHNlYXJjaHwxfHxkYXJrJTIwYWJzdHJhY3QlMjB0ZWNobm9sb2d5JTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3NzgyMzYxMDR8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract dark tech background. Use for empty states (e.g., before a project is generated) or behind modal overlays.",
+        "category": "background"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Strictly adhere to Archetype 4 (Swiss & High-Contrast) in DARK mode. Do not use generic AI purple or teal gradients.",
+    "Implement the 'Control Room Grid' layout: Left panel (35%) for Chat & Agent Timeline, Right panel (65%) for File Tree, Code Editor, and Live Preview.",
+    "Use JetBrains Mono for ALL headings, UI labels, agent names, and code. Use IBM Plex Sans exclusively for paragraph/body text.",
+    "Ensure strict adherence to the agent color map: Scout (Orange #FF5722), Architect (Blue #2962FF), Coder (Green #00E676), Reviewer (Yellow #FFC107). Use these to colorize the agent timeline and model routing indicators.",
+    "Build the settings panel (for API keys) using heavily customized, sharp Shadcn components (Dialog/Sheet, Input). Avoid Vercel-like soft styling.",
+    "Include a token usage/cost tracker in the bottom utility bar (e.g., 'Tokens: 4,021 | Cost: $0.04').",
+    "All interactive elements MUST include a 'data-testid' attribute (e.g., data-testid='chat-input-textarea').",
+    "For the 'Finalize & Push to GitHub' button, use a high-contrast style (white background, black text) in the header to draw attention."
+  ]
+}
