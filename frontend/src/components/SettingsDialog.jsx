@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Settings as SettingsApi } from "@/lib/emergent-api";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,6 +53,9 @@ export default function SettingsDialog({ open, onOpenChange }) {
           <DialogTitle className="font-mono text-sm tracking-tight uppercase">
             // API Keys
           </DialogTitle>
+          <DialogDescription className="font-mono text-[11px] text-emergent-fg3">
+            Configure provider keys. Empty fields fall back to mocks.
+          </DialogDescription>
         </DialogHeader>
         <div className="p-5 space-y-4">
           {FIELDS.map((f) => {

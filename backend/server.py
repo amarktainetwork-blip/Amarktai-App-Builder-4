@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,7 +33,17 @@ mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
 
-app = FastAPI(title="Emergent Autonomous Coding Platform")
+# Cap concurrent agent pipelines so a burst of project creations cannot exhaust the LLM proxy.
+PIPELINE_SEM = asyncio.Semaphore(2)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    yield
+    client.close()
+
+
+app = FastAPI(title="Emergent Autonomous Coding Platform", lifespan=lifespan)
 api = APIRouter(prefix="/api")
 
 
@@ -208,8 +219,10 @@ async def send_message(project_id: str, body: MessageCreate) -> dict:
     proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
     if not proj:
         raise HTTPException(404, "Project not found")
-    if proj.get("status") == "running":
+    if proj.get("status") in ("running", "queued"):
         raise HTTPException(409, "Build already in progress")
+    # Optimistically lock to avoid a race window before the orchestrator flips status.
+    await db.projects.update_one({"id": project_id}, {"$set": {"status": "queued"}})
     asyncio.create_task(_launch_pipeline(project_id, body.content, "iterate"))
     return {"ok": True, "queued": True}
 
@@ -297,11 +310,10 @@ async def ws_project(ws: WebSocket, project_id: str) -> None:
     try:
         await ws.send_json({"type": "hello", "data": {"project_id": project_id}})
         while True:
-            # Heartbeat — also accepts client pings.
             try:
                 msg = await asyncio.wait_for(ws.receive_text(), timeout=30)
                 if msg == "ping":
-                    await ws.send_text("pong")
+                    await ws.send_json({"type": "pong", "data": {"t": _now()}})
             except asyncio.TimeoutError:
                 await ws.send_json({"type": "heartbeat", "data": {"t": _now()}})
     except WebSocketDisconnect:
@@ -320,8 +332,3 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    client.close()

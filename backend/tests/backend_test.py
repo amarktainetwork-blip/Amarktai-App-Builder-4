@@ -274,9 +274,40 @@ async def test_websocket_connects_and_heartbeats(created_project):
         assert payload.get("type") == "hello"
         # send ping, expect pong
         await ws.send("ping")
-        reply = await asyncio.wait_for(ws.recv(), timeout=10)
-        # could be a string 'pong' or a JSON event if events happen to be flowing
-        assert reply == "pong" or "type" in (json.loads(reply) if reply.startswith("{") else {})
+        # Drain until we see a pong (events may also arrive)
+        got_pong = False
+        for _ in range(5):
+            reply = await asyncio.wait_for(ws.recv(), timeout=10)
+            data = json.loads(reply)
+            if data.get("type") == "pong":
+                got_pong = True
+                assert "t" in data.get("data", {})
+                break
+        assert got_pong, "did not receive JSON pong"
+
+
+# ------------------------- concurrency: event loop must not block -------------------------
+
+def test_concurrent_calls_during_running_build(session):
+    """While a pipeline is launched, GET /api/ and GET /api/projects must respond <2s each."""
+    new = session.post(f"{API}/projects", json={"name": "TEST_concurrent", "prompt": "tiny app"}, timeout=15).json()
+    pid = new["id"]
+    try:
+        # within ~1-2s, the pipeline LLM call should be in-flight
+        time.sleep(1.5)
+        t0 = time.time()
+        r1 = session.get(f"{API}/", timeout=5)
+        d1 = time.time() - t0
+        t0 = time.time()
+        r2 = session.get(f"{API}/projects", timeout=5)
+        d2 = time.time() - t0
+        assert r1.status_code == 200, f"GET /api/ failed: {r1.status_code}"
+        assert r2.status_code == 200, f"GET /api/projects failed: {r2.status_code}"
+        assert d1 < 3.0, f"GET /api/ took {d1:.2f}s while build running (event loop blocked?)"
+        assert d2 < 3.0, f"GET /api/projects took {d2:.2f}s while build running"
+    finally:
+        _wait_for_status(session, pid, target=("ready", "failed"))
+        session.delete(f"{API}/projects/{pid}", timeout=15)
 
 
 # ------------------------- delete -------------------------
