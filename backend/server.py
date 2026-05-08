@@ -126,15 +126,16 @@ class SettingsUpdate(BaseModel):
 # ---------------------------- Orchestrator launcher ----------------------------
 
 async def _launch_pipeline(project_id: str, prompt: str, mode: str) -> None:
-    provider = GenXProvider()
-    orch = Orchestrator(db, provider, project_id, emitter_for(project_id))
-    try:
-        if mode == "iterate":
-            await orch.run_iteration(prompt)
-        else:
-            await orch.run_full_build(prompt)
-    except Exception as e:
-        logger.exception("pipeline failed: %s", e)
+    async with PIPELINE_SEM:
+        provider = GenXProvider()
+        orch = Orchestrator(db, provider, project_id, emitter_for(project_id))
+        try:
+            if mode == "iterate":
+                await orch.run_iteration(prompt)
+            else:
+                await orch.run_full_build(prompt)
+        except Exception as e:
+            logger.exception("pipeline failed: %s", e)
 
 
 # ---------------------------- Routes ----------------------------
