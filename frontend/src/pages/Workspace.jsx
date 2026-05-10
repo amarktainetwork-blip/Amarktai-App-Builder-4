@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { LogOut } from "lucide-react";
+import { LogOut, Square, RotateCcw, Zap, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import Header from "@/components/Header";
@@ -30,6 +30,8 @@ export default function WorkspacePage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prOpen, setPrOpen] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [tab, setTab] = useState("preview");
 
   const wsRef = useRef(null);
@@ -72,7 +74,12 @@ export default function WorkspacePage() {
       setRefreshKey((k) => k + 1);
       setActivePath((cur) => cur || evt.data.path);
     } else if (evt.type === "project_status") {
-      setProject((p) => p ? { ...p, status: evt.data.status } : p);
+      setProject((p) => p ? {
+        ...p,
+        status: evt.data.status,
+        error: evt.data.error ?? p.error,
+        failed_agent: evt.data.failed_agent ?? p.failed_agent,
+      } : p);
     } else if (evt.type === "build_complete") {
       Projects.get(projectId).then(setProject);
       Projects.files(projectId).then(setFiles);
@@ -112,6 +119,30 @@ export default function WorkspacePage() {
     }
   };
 
+  const stopBuild = async () => {
+    setCancelling(true);
+    try {
+      await Projects.cancel(projectId);
+      toast.success("Build stopped.");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to stop build");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const retryAgent = async (agent, quality_tier) => {
+    setRetrying(true);
+    try {
+      await Projects.retry(projectId, agent, quality_tier);
+      toast.success(`Retry queued: ${agent}`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Retry failed");
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   const finalize = async () => {
     setFinalizing(true);
     try {
@@ -128,7 +159,8 @@ export default function WorkspacePage() {
     return Projects.openPR(projectId, body);
   };
 
-  const busy = project?.status === "running";
+  const busy = project?.status === "running" || project?.status === "queued";
+  const failed = project?.status === "failed" || project?.status === "cancelled";
 
   return (
     <div className="h-screen flex flex-col bg-amk-base">
@@ -143,13 +175,58 @@ export default function WorkspacePage() {
         onFinalize={finalize}
         onOpenSettings={() => setSettingsOpen(true)}
         rightExtra={
-          <button
-            data-testid="header-logout-btn"
-            onClick={logout}
-            className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white"
-          >
-            <LogOut className="w-3 h-3" strokeWidth={1.5} /> sign out
-          </button>
+          <div className="flex items-center gap-1">
+            {busy && (
+              <button
+                data-testid="stop-build-btn"
+                onClick={stopBuild}
+                disabled={cancelling}
+                title="Stops the pipeline after the current model request and prevents further GenX credit usage."
+                className="inline-flex items-center gap-1.5 px-3 h-8 border border-red-700 hover:bg-red-900/30 font-mono text-[10px] uppercase tracking-wider text-red-400 hover:text-red-300 disabled:opacity-50"
+              >
+                <Square className="w-3 h-3" strokeWidth={1.5} />
+                {cancelling ? "stopping..." : "Stop Build"}
+              </button>
+            )}
+            {failed && (
+              <>
+                <button
+                  data-testid="retry-coder-btn"
+                  onClick={() => retryAgent("coder")}
+                  disabled={retrying}
+                  title="Retry Coder using stored Scout/Architect outputs."
+                  className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white disabled:opacity-50"
+                >
+                  <RotateCcw className="w-3 h-3" strokeWidth={1.5} /> Retry Coder
+                </button>
+                <button
+                  data-testid="retry-premium-btn"
+                  onClick={() => retryAgent("coder", "premium")}
+                  disabled={retrying}
+                  title="Retry Coder with premium model tier."
+                  className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white disabled:opacity-50"
+                >
+                  <Zap className="w-3 h-3" strokeWidth={1.5} /> Retry Premium
+                </button>
+                <button
+                  data-testid="restart-build-btn"
+                  onClick={() => retryAgent("pipeline")}
+                  disabled={retrying}
+                  title="Restart the full build pipeline from scratch."
+                  className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white disabled:opacity-50"
+                >
+                  <RefreshCw className="w-3 h-3" strokeWidth={1.5} /> Restart Build
+                </button>
+              </>
+            )}
+            <button
+              data-testid="header-logout-btn"
+              onClick={logout}
+              className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white"
+            >
+              <LogOut className="w-3 h-3" strokeWidth={1.5} /> sign out
+            </button>
+          </div>
         }
       />
 
@@ -161,6 +238,12 @@ export default function WorkspacePage() {
           {!connected && (
             <div className="border-y border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px] text-agent-scout">
               WebSocket disconnected. Reopen the workspace or check the backend if updates stop streaming.
+            </div>
+          )}
+          {failed && project?.error && (
+            <div className="border-y border-red-900 bg-red-950/30 px-3 py-2 font-mono text-[10px] text-red-400">
+              {project.failed_agent && <span className="font-semibold">{project.failed_agent}: </span>}
+              {project.error}
             </div>
           )}
           <ChatPanel messages={messages} onSend={send} disabled={busy} busy={busy} />
@@ -189,7 +272,13 @@ export default function WorkspacePage() {
             </div>
 
             <TabsContent value="preview" className="flex-1 m-0 min-h-0">
-              <LivePreview projectId={projectId} refreshKey={refreshKey} />
+              <LivePreview
+                projectId={projectId}
+                refreshKey={refreshKey}
+                projectStatus={project?.status}
+                projectError={project?.error}
+                failedAgent={project?.failed_agent}
+              />
             </TabsContent>
 
             <TabsContent value="code" className="flex-1 m-0 min-h-0">
