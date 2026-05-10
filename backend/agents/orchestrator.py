@@ -226,9 +226,10 @@ class Orchestrator:
                 await self._record_event(agent, "repaired",
                                          f"JSON repair succeeded for {agent}.")
             except Exception as repair_err:
-                err_msg = f"Coder returned invalid JSON and automatic repair failed." \
-                    if agent == "coder" else \
-                    f"{agent.title()} returned invalid JSON and automatic repair failed."
+                if agent == "coder":
+                    err_msg = "Coder returned invalid JSON and automatic repair failed."
+                else:
+                    err_msg = f"{agent.title()} returned invalid JSON and automatic repair failed."
                 await self._record_event(agent, "failed",
                                          f"Repair also failed: {repair_err}",
                                          meta={"repair_error": str(repair_err)})

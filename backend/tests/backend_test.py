@@ -1,10 +1,14 @@
+import asyncio
 import json
+import unittest.mock as mock
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agents.mcp_tools import safe_project_path
+from agents.orchestrator import Orchestrator, BuildCancelled
+from agents.genx_provider import GenXProvider
 from config import valid_fernet_key
 
 
@@ -95,8 +99,6 @@ def _make_provider_bad_json(bad_text):
 @pytest.mark.asyncio
 async def test_json_parse_failure_does_not_mark_ready():
     """When Coder returns malformed JSON and repair also fails, project must be 'failed', not 'ready'."""
-    from agents.orchestrator import Orchestrator
-
     db, proj, files, events, messages = _make_db()
 
     # Provider always returns unparseable text (repair also fails)
@@ -128,8 +130,6 @@ async def test_json_parse_failure_does_not_mark_ready():
 @pytest.mark.asyncio
 async def test_project_cannot_be_ready_with_no_generated_files():
     """When Coder returns valid JSON but with empty files list, project must be failed."""
-    from agents.orchestrator import Orchestrator
-
     db, proj, files, events, messages = _make_db()
     # Provide valid responses for all agents but coder returns empty files
     call_count = [0]
@@ -177,8 +177,6 @@ async def test_project_cannot_be_ready_with_no_generated_files():
 @pytest.mark.asyncio
 async def test_cancel_sets_cancelled_and_stops_pipeline():
     """cancel_requested=True must raise BuildCancelled and mark project cancelled."""
-    from agents.orchestrator import Orchestrator, BuildCancelled
-
     db, proj, files, events, messages = _make_db()
     # Set cancel flag immediately
     proj["cancel_requested"] = True
@@ -211,8 +209,6 @@ async def test_cancel_sets_cancelled_and_stops_pipeline():
 @pytest.mark.asyncio
 async def test_iteration_blocked_when_no_app_files():
     """Iteration must not run when there are no app files."""
-    from agents.orchestrator import Orchestrator
-
     db, proj, files, events, messages = _make_db()
 
     provider = MagicMock()
@@ -244,10 +240,7 @@ async def test_iteration_blocked_when_no_app_files():
 
 def test_readiness_scanner_ignores_system_paths():
     """The readiness source scan must never flag files under /usr, /lib, etc."""
-    import asyncio
     from server import _forbidden_source_check
-    from pathlib import Path
-    import unittest.mock as mock
 
     # Simulate REPO_ROOT.rglob returning a file from /usr/include
     fake_path = Path("/usr/include/linux/bfs_fs.h")
@@ -265,7 +258,6 @@ def test_readiness_scanner_ignores_system_paths():
 
 def test_router_tiers_exist():
     """GenXProvider must expose cheap/balanced/premium-equivalent internal tiers."""
-    from agents.genx_provider import GenXProvider
     tiers = GenXProvider.list_tiers()
     assert "edits" in tiers or "lightweight" in tiers, "cheap tier missing"
     assert "research" in tiers or "fast" in tiers, "balanced tier missing"

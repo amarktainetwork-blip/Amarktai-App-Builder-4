@@ -245,7 +245,7 @@ async def _launch_pipeline(project_id: str, prompt: str, mode: str) -> None:
         try:
             provider = await _genx_provider()
             orch = Orchestrator(db, provider, project_id, emit)
-            # Global timeouts: web/PWA 15 min, full-stack 25 min
+            # Global timeouts: build 25 min, iterate 10 min
             global_timeout = 1500 if mode == "build" else 600
             if mode == "iterate":
                 await asyncio.wait_for(orch.run_iteration(prompt), timeout=global_timeout)
