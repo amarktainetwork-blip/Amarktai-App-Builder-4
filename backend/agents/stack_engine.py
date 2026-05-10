@@ -184,8 +184,13 @@ def decide_stack(
         complexity = "standard"
 
     # Upgrade prompt complexity if certain keywords present
-    if any(kw in prompt_lower for kw in ("ai", "ml", "trading", "payment", "stripe",
-                                          "real-time", "realtime", "websocket")):
+    # Use word-boundary-safe patterns to avoid false positives from common words
+    _upgrade_keywords = (
+        r"\bai\b", r"\bml\b", r"\btrading\b", r"\bpayment\b", r"\bstripe\b",
+        r"\breal-time\b", r"\brealtime\b", r"\bwebsocket\b",
+    )
+    import re as _re
+    if any(_re.search(kw, prompt_lower) for kw in _upgrade_keywords):
         if complexity == "simple":
             complexity = "standard"
         elif complexity == "standard":

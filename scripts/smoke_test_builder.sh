@@ -130,6 +130,9 @@ fi
 
 # ── Branding check (no forbidden legacy names) ────────────────────────────────
 say "branding check"
+# Legacy brand patterns are assembled from fragments to prevent this script's
+# own grep scan in go_live_check.sh from flagging these as false positives.
+# This is the same approach used in go_live_check.sh.
 legacy_a="${LEGACY_A:-AI}"
 legacy_b="${LEGACY_B:-VA}"
 legacy_e1="eme"

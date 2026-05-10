@@ -75,6 +75,18 @@ export default function ProjectListPage() {
     await doCreate(false);
   };
 
+  const handleUpgradeAndCreate = () => {
+    const tier = upgradeModal?.recommended_tier;
+    setUpgradeModal(null);
+    if (tier) setQualityTier(tier);
+    doCreate(true);
+  };
+
+  const handleContinueAnyway = () => {
+    setUpgradeModal(null);
+    doCreate(true);
+  };
+
   const importRepo = async (e) => {
     e?.preventDefault();
     if (!repoUrl.trim()) {
@@ -258,14 +270,14 @@ export default function ProjectListPage() {
                       <div className="flex gap-2">
                         <Button
                           data-testid="upgrade-confirm-btn"
-                          onClick={() => { setUpgradeModal(null); setQualityTier(upgradeModal.recommended_tier); doCreate(true); }}
+                          onClick={handleUpgradeAndCreate}
                           className="flex-1 bg-amk-accent text-black hover:bg-emerald-300 font-mono text-xs h-9"
                         >
                           Upgrade to {upgradeModal.recommended_tier}
                         </Button>
                         <Button
                           data-testid="upgrade-continue-btn"
-                          onClick={() => { setUpgradeModal(null); doCreate(true); }}
+                          onClick={handleContinueAnyway}
                           variant="outline"
                           className="flex-1 font-mono text-xs h-9 border-amk-line hover:bg-amk-surface"
                         >

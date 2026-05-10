@@ -605,6 +605,17 @@ async def list_models() -> dict:
     return {"tiers": GenXProvider.list_tiers(), "agents": AGENT_TIER, "tools": TOOL_SCHEMAS, "available": models}
 
 
+def _coder_tier(tier: str, tiers: dict) -> str | None:
+    """Select the internal tier key for the Coder agent based on the user's quality tier."""
+    if tier == "premium":
+        key = "reasoning"
+    elif tier == "balanced":
+        key = "research"
+    else:
+        key = "edits"
+    return tiers.get(key, {}).get("model")
+
+
 @secured.get("/models/router")
 async def models_router(tier: str = "balanced") -> dict:
     """Return the model routed for a given tier (cheap|balanced|premium).
@@ -630,7 +641,7 @@ async def models_router(tier: str = "balanced") -> dict:
     selected_models = {
         "scout":     tiers.get("research", {}).get("model"),
         "architect": tiers.get("reasoning", {}).get("model"),
-        "coder":     tiers.get("reasoning" if tier_lower == "premium" else "research" if tier_lower == "balanced" else "edits", {}).get("model"),
+        "coder":     _coder_tier(tier_lower, tiers),
         "reviewer":  tiers.get("reasoning", {}).get("model"),
         "iteration": tiers.get("edits", {}).get("model"),
         "assistant": tiers.get("research", {}).get("model"),
