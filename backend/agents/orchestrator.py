@@ -322,9 +322,35 @@ class Orchestrator:
             await self._record_message("system", None, f"Build failed: {err}", meta={"error": err})
             raise
 
+    # ---------- repair limit by tier ----------
+
+    _REPAIR_LIMITS: dict[str, int] = {"cheap": 1, "balanced": 2, "premium": 3}
+
+    async def _repair_limit(self) -> int:
+        """Return the max allowed file-content repair attempts for the current quality tier."""
+        proj = await self._load_project()
+        tier = proj.get("quality_tier", "balanced")
+        return self._REPAIR_LIMITS.get(tier, 2)
+
+    async def _emit_validation_event(self, event_type: str, detail: str, meta: dict | None = None) -> None:
+        """Emit a validation lifecycle event to the WebSocket hub and record as agent_event."""
+        evt = {
+            "id": str(uuid.uuid4()),
+            "project_id": self.project_id,
+            "agent": "validator",
+            "status": event_type,
+            "detail": detail,
+            "meta": meta or {},
+            "created_at": _now(),
+        }
+        await self.db.agent_events.insert_one(dict(evt))
+        evt.pop("_id", None)
+        await self.emit({"type": "agent_event", "data": evt})
+        await self.emit({"type": event_type, "data": {"detail": detail, **(meta or {})}})
+
     async def _run_build_pipeline(self, user_prompt: str, mode: str,
                                    stack_decision: dict | None) -> None:
-        """Standard Scout → Architect → Coder → Reviewer pipeline."""
+        """Standard Scout → Architect → Coder → Reviewer → Validate → Repair loop pipeline."""
         sd = stack_decision or {}
 
         # 1) Scout
@@ -341,11 +367,20 @@ class Orchestrator:
         scout_data = scout["data"]
         await self.fs.write("requirements.md", scout_data.get("requirements_md", ""), "markdown")
         await self.emit({"type": "file_written", "data": {"path": "requirements.md"}})
-        await self._record_message(
-            "agent", "scout",
+        # Include enriched scout fields in the message if present
+        make_better = scout_data.get("make_it_better", [])
+        pain_points = scout_data.get("pain_points", [])
+        scout_msg = (
             f"**Brief:** {scout_data.get('summary', '')}\n\n"
             f"**Audience:** {scout_data.get('audience', '')}\n\n"
-            f"**Core features:**\n" + "\n".join(f"- {f}" for f in scout_data.get("core_features", [])),
+            f"**Core features:**\n" + "\n".join(f"- {f}" for f in scout_data.get("core_features", []))
+        )
+        if pain_points:
+            scout_msg += "\n\n**Pain points:**\n" + "\n".join(f"- {p}" for p in pain_points)
+        if make_better:
+            scout_msg += "\n\n**Make it better:**\n" + "\n".join(f"- {m}" for m in make_better)
+        await self._record_message(
+            "agent", "scout", scout_msg,
             meta={"model": scout["model_label"]},
         )
 
@@ -407,7 +442,7 @@ class Orchestrator:
             meta={"model": coder["model_label"], "files": [f["path"] for f in generated_files]},
         )
 
-        # 4) Reviewer
+        # 4) Reviewer (first pass)
         await self._check_cancel()
         current_files = await self.fs.list_full()
         review_input = json.dumps({
@@ -431,24 +466,118 @@ class Orchestrator:
             meta={"model": rev["model_label"], "patched": [f["path"] for f in rev_data.get("patched_files", [])]},
         )
 
-        # 5) Validate required files
-        final_files = await self.fs.list_full()
-        final_paths = {f["path"] for f in final_files}
+        # 5) Validation + bounded repair loop
         required = sd.get("required_files", [])
-        missing = [r for r in required if r not in final_paths]
-        present = [r for r in required if r in final_paths]
-        validation_state = {
-            "status": "passed" if not missing else "failed",
-            "required_files_present": present,
-            "required_files_missing": missing,
-            "warnings": rev_data.get("issues", []),
-            "errors": [f"Missing required file: {m}" for m in missing] if missing else [],
-        }
-        await self.db.projects.update_one(
-            {"id": self.project_id},
-            {"$set": {"validation_state": validation_state, "repair_attempts": self._repair_attempts}},
+        review_issues = rev_data.get("issues", [])
+        max_repairs = await self._repair_limit()
+
+        await self._emit_validation_event(
+            "validation_started",
+            f"Validating {len(required)} required files for {mode} mode.",
+            {"required_files": required},
         )
-        await self.emit({"type": "validation_state", "data": validation_state})
+
+        for repair_pass in range(max_repairs + 1):
+            await self._check_cancel()
+            final_files = await self.fs.list_full()
+            final_paths = {f["path"] for f in final_files}
+            missing = [r for r in required if r not in final_paths]
+            present = [r for r in required if r in final_paths]
+
+            validation_state = {
+                "status": "passed" if not missing else "failed",
+                "required_files_present": present,
+                "required_files_missing": missing,
+                "warnings": review_issues,
+                "errors": [f"Missing required file: {m}" for m in missing] if missing else [],
+                "repair_pass": repair_pass,
+            }
+            await self.db.projects.update_one(
+                {"id": self.project_id},
+                {"$set": {"validation_state": validation_state, "repair_attempts": repair_pass}},
+            )
+            await self.emit({"type": "validation_state", "data": validation_state})
+
+            if not missing:
+                await self._emit_validation_event(
+                    "validation_passed",
+                    "All required files present. Validation passed." if repair_pass == 0
+                    else f"Validation passed after {repair_pass} repair attempt(s).",
+                    {"repair_pass": repair_pass},
+                )
+                break
+
+            # Validation failed — attempt repair if within limit
+            await self._emit_validation_event(
+                "validation_failed",
+                f"Missing required files: {', '.join(missing)}",
+                {"missing": missing, "repair_pass": repair_pass},
+            )
+
+            if repair_pass >= max_repairs:
+                # Exhausted all repair attempts
+                await self._emit_validation_event(
+                    "validation_exhausted",
+                    f"Repair limit reached ({max_repairs} attempt(s)). "
+                    f"Still missing: {', '.join(missing)}",
+                    {"missing": missing, "max_repairs": max_repairs},
+                )
+                err = (
+                    f"Build completed but required files are still missing after {repair_pass} "
+                    f"repair attempt(s): {', '.join(missing)}"
+                )
+                await self._fail_project("validator", err)
+                await self._record_message("system", None, err, meta={"error": err})
+                return
+
+            # Run a repair pass
+            self._repair_attempts = repair_pass + 1
+            await self._emit_validation_event(
+                "repair_started",
+                f"Repair attempt {repair_pass + 1}/{max_repairs}: "
+                f"asking Reviewer to add missing files: {', '.join(missing)}",
+                {"missing": missing, "attempt": repair_pass + 1},
+            )
+            await self._check_cancel()
+            repair_files = await self.fs.list_full()
+            repair_input = json.dumps({
+                "mode": mode,
+                "required_files": required,
+                "missing_files": missing,
+                "repair_attempt": repair_pass + 1,
+                "files": [{"path": f["path"], "content": f["content"]} for f in repair_files
+                          if f["path"] not in _META_FILES],
+                "shared_context": shared_ctx,
+            }, indent=2)
+            repair_prompt = (
+                REVIEWER_PROMPT
+                + f"\n\nCRITICAL: The following required files are MISSING and MUST be generated now: "
+                + json.dumps(missing)
+                + "\nYou MUST include all missing files in patched_files with complete content."
+            )
+            try:
+                repair_res = await self._run_agent("reviewer", repair_prompt, repair_input)
+                repair_data = repair_res["data"]
+                patched = repair_data.get("patched_files", [])
+                for f in patched:
+                    await self.fs.write(f["path"], f["content"], f.get("language", "text"))
+                    await self.emit({"type": "file_written", "data": {"path": f["path"]}})
+                await self._emit_validation_event(
+                    "repair_applied",
+                    f"Repair applied {len(patched)} file(s).",
+                    {"patched": [f["path"] for f in patched]},
+                )
+                review_issues = repair_data.get("issues", review_issues)
+            except Exception as repair_err:
+                await self._emit_validation_event(
+                    "repair_started",
+                    f"Repair attempt {repair_pass + 1} failed: {repair_err}",
+                    {"error": str(repair_err)},
+                )
+                # Continue to next iteration — will hit exhaustion check
+
+        # Post-validation readiness checks
+        final_files = await self.fs.list_full()
 
         # Readiness check: modes that output HTML need app files
         if mode in _REQUIRES_APP_FILES_MODES and not _has_app_files(final_files):
@@ -485,14 +614,39 @@ class Orchestrator:
         build_prompt = rd.get("build_prompt", "")
         await self.fs.write("requirements.md", brief, "markdown")
         await self.emit({"type": "file_written", "data": {"path": "requirements.md"}})
-        # Store build prompt as a message
+
+        # Compose a rich research message with all Phase 4 fields
+        msg_parts = [f"**Research Complete**\n\n{rd.get('summary', '')}"]
+        if rd.get("target_audience"):
+            msg_parts.append(f"\n**Target audience:** {rd['target_audience']}")
+        if rd.get("user_pain_points"):
+            msg_parts.append("\n**User pain points:**\n" + "\n".join(f"- {p}" for p in rd["user_pain_points"]))
+        if rd.get("competing_approaches"):
+            msg_parts.append(f"\n**Competing approaches:** {rd['competing_approaches']}")
+        if rd.get("mvp_recommendation"):
+            msg_parts.append(f"\n**MVP recommendation:** {rd['mvp_recommendation']}")
+        if rd.get("make_it_better"):
+            msg_parts.append("\n**Make it better:**\n" + "\n".join(f"- {m}" for m in rd["make_it_better"]))
+        if rd.get("monetization_ideas"):
+            msg_parts.append("\n**Monetization ideas:**\n" + "\n".join(f"- {m}" for m in rd["monetization_ideas"]))
+        if rd.get("risk_assumption_list"):
+            msg_parts.append("\n**Risks & assumptions:**\n" + "\n".join(f"- {r}" for r in rd["risk_assumption_list"]))
+        if rd.get("recommended_stack"):
+            msg_parts.append(f"\n**Recommended stack:** {rd['recommended_stack']}")
+        msg_parts.append(
+            f"\n**Recommended mode:** {rd.get('recommended_mode', 'web_app')}"
+            f" · **Recommended tier:** {rd.get('recommended_tier', 'balanced')}"
+        )
+        if build_prompt:
+            msg_parts.append(f"\n**Build prompt ready:**\n```\n{build_prompt}\n```")
+
         await self._record_message(
             "agent", "scout",
-            f"**Research Complete**\n\n{rd.get('summary', '')}\n\n"
-            f"**Recommended mode:** {rd.get('recommended_mode', 'web_app')}\n\n"
-            f"**Build prompt ready:**\n```\n{build_prompt}\n```",
+            "\n".join(msg_parts),
             meta={"model": research["model_label"],
                   "recommended_mode": rd.get("recommended_mode"),
+                  "recommended_tier": rd.get("recommended_tier"),
+                  "recommended_stack": rd.get("recommended_stack"),
                   "build_prompt": build_prompt},
         )
         await self._set_status("ready", {
@@ -583,7 +737,7 @@ class Orchestrator:
     async def run_retry(self, target: str, quality_tier: str | None = None) -> None:
         """Retry a specific agent or the full pipeline.
 
-        target: "coder" | "reviewer" | "pipeline"
+        target: "coder" | "reviewer" | "repair" | "pipeline"
         """
         await self._set_status("running")
         try:
@@ -639,14 +793,16 @@ class Orchestrator:
                 await self.emit({"type": "build_complete", "data": {}})
                 return
 
-            if target == "reviewer":
+            if target in ("reviewer", "repair"):
+                # "repair" is an alias for reviewer retry — re-runs Reviewer to patch/fix missing files
                 current_files = await self.fs.list_full()
                 app_files = [f for f in current_files if f["path"] not in _META_FILES]
                 if not app_files:
                     raise ValueError(
-                        "Cannot retry Reviewer: no app files exist. Retry Coder first."
+                        "Cannot retry Reviewer/Repair: no app files exist. Retry Coder first."
                     )
-                await self._record_event("reviewer", "retry", "Retrying Reviewer.")
+                label = "Repair" if target == "repair" else "Reviewer"
+                await self._record_event("reviewer", "retry", f"Retrying {label}.")
                 review_input = json.dumps(
                     {"files": [{"path": f["path"], "content": f["content"]} for f in app_files]},
                     indent=2,

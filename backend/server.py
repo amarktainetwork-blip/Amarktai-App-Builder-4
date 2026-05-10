@@ -235,7 +235,7 @@ class SettingsUpdate(BaseModel):
 
 
 class RetryBody(BaseModel):
-    agent: str = Field(pattern="^(coder|reviewer|pipeline)$")
+    agent: str = Field(pattern="^(coder|reviewer|repair|pipeline)$")
     quality_tier: Optional[str] = None
     repair_only: Optional[bool] = False
 

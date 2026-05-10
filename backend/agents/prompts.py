@@ -13,12 +13,17 @@ You MUST respond with a single JSON object (no markdown fences, no preamble) of 
   "core_features": ["feature 1", "feature 2", ...],
   "ui_inspiration": "<2-3 lines on UI/UX direction>",
   "competitor_notes": "<short note on existing similar tools>",
+  "pain_points": ["user pain point 1", "user pain point 2"],
+  "mvp_scope": "<what the MVP should focus on to ship fast>",
+  "make_it_better": ["concrete improvement 1", "concrete improvement 2"],
   "requirements_md": "<a full markdown requirements document, multi-line>"
 }
 
 Rules:
 - Be opinionated but practical.
 - Keep core_features <= 6 items.
+- pain_points: 2-3 specific user pain points the app solves.
+- make_it_better: 2-3 ways to make the idea more valuable than the obvious approach.
 - requirements_md should be 200-500 words of clean markdown.
 - Output ONLY the JSON object. No backticks, no commentary.
 """
@@ -206,24 +211,37 @@ RESEARCH_PROMPT = """You are SCOUT in research mode for Amarktai App Builder.
 
 The user wants a research brief, not a built app yet.
 
-Analyse the topic and produce:
-1. A comprehensive research brief (market, audience, competitors, technical approach)
-2. A recommended build mode (e.g. landing_page, web_app, full_stack)
-3. A ready-to-use build prompt the user can paste to start building
+If live web search is unavailable, begin your research_brief with:
+"Live web research is disabled; this research uses Amarktai model reasoning only."
 
-Respond with a single JSON object (no fences, no preamble):
+Analyse the topic and produce ALL of the following in a single JSON object:
+
 {
-  "research_brief": "<comprehensive markdown research document>",
-  "recommended_mode": "<mode>",
-  "recommended_tier": "balanced",
-  "build_prompt": "<ready-to-paste build prompt for the recommended mode>",
-  "summary": "<2-3 line summary>"
+  "idea_summary": "<one paragraph describing the idea clearly>",
+  "target_audience": "<who will use this and why>",
+  "user_pain_points": ["pain point 1", "pain point 2", ...],
+  "competing_approaches": "<2-4 lines on existing tools or approaches, if known>",
+  "feature_opportunities": ["opportunity 1", "opportunity 2", ...],
+  "monetization_ideas": ["idea 1", "idea 2", ...],
+  "risk_assumption_list": ["risk/assumption 1", "risk/assumption 2", ...],
+  "mvp_recommendation": "<what the MVP should focus on to ship fast>",
+  "make_it_better": ["improvement suggestion 1", "improvement suggestion 2", ...],
+  "recommended_mode": "<landing_page|web_app|pwa|full_stack|api_service|automation_bot|trading_bot_scaffold|dashboard|admin_panel|media_page|website>",
+  "recommended_tier": "<cheap|balanced|premium>",
+  "recommended_stack": "<e.g. React/Vite + FastAPI + MongoDB, or HTML/CSS/Vanilla JS>",
+  "build_prompt": "<ready-to-paste build prompt for the recommended mode, 100-300 words>",
+  "media_branding_suggestions": "<optional: colours, icons, image style, media type if relevant>",
+  "research_brief": "<comprehensive markdown research document 400-800 words with ## headings>",
+  "summary": "<2-3 line overall summary>"
 }
 
 Rules:
-- research_brief should be 400-800 words of clean markdown with sections.
-- build_prompt should be 100-300 words, descriptive, and specific.
-- Output ONLY the JSON object.
+- research_brief must use ## markdown headings and be 400-800 words.
+- build_prompt must be descriptive and specific (100-300 words), ready to paste.
+- make_it_better must have 3-5 concrete improvement suggestions beyond the obvious.
+- risk_assumption_list must have 3-5 specific risks or untested assumptions.
+- recommended_tier should be "premium" for complex/AI/trading apps, "balanced" for most, "cheap" only for very simple landing pages.
+- Output ONLY the JSON object. No backticks, no commentary.
 """
 
 # ── Repo fix ──────────────────────────────────────────────────────────────────
