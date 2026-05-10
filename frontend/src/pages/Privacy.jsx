@@ -48,9 +48,9 @@ export default function PrivacyPage() {
             <h2 className="font-display font-semibold text-lg text-amk-fg mb-3">API key storage</h2>
             <p>
               API keys you configure in Settings (such as your GENX_API_KEY, GitHub Personal Access Token, or
-              Brave Search API key) are encrypted at rest using AES-128 Fernet symmetric encryption before being
-              stored in the database. Keys are decrypted in memory only when needed to make API requests on your
-              behalf. We do not log or expose your API keys.
+              Brave Search API key) are encrypted at rest using Fernet symmetric encryption (AES-128-CBC with
+              HMAC-SHA256) before being stored in the database. Keys are decrypted in memory only when needed
+              to make API requests on your behalf. We do not log or expose your API keys.
             </p>
           </section>
 
