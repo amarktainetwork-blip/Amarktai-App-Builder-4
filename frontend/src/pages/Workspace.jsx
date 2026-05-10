@@ -115,11 +115,10 @@ export default function WorkspacePage() {
   const finalize = async () => {
     setFinalizing(true);
     try {
-      const res = await Projects.finalize(projectId);
-      if (res.mocked) toast.message("Finalized (mock).", { description: "Add a GitHub PAT in Settings to push for real." });
-      else toast.success("Pushed to GitHub.");
+      await Projects.finalize(projectId);
+      toast.success("Created GitHub repository.");
     } catch (e) {
-      toast.error("Failed to finalize");
+      toast.error(e.response?.data?.detail || "Failed to finalize");
     } finally {
       setFinalizing(false);
     }
@@ -159,6 +158,11 @@ export default function WorkspacePage() {
         {/* LEFT 35% — chat & timeline */}
         <aside className="w-[35%] min-w-[360px] border-r border-amk-line bg-amk-base flex flex-col overflow-hidden">
           <AgentTimeline events={events} />
+          {!connected && (
+            <div className="border-y border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px] text-agent-scout">
+              WebSocket disconnected. Reopen the workspace or check the backend if updates stop streaming.
+            </div>
+          )}
           <ChatPanel messages={messages} onSend={send} disabled={busy} busy={busy} />
         </aside>
 

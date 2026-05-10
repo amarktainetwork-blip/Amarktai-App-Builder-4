@@ -27,7 +27,7 @@ function Nav({ user }) {
             <span className="font-mono text-[13px] font-bold">A</span>
           </div>
           <span className="font-display font-semibold tracking-tight">
-            AmarktAI <span className="text-amk-accent">Network</span>
+            Amarktai <span className="text-amk-accent">App Builder</span>
           </span>
         </Link>
         <div className="hidden md:flex items-center gap-8 font-mono text-xs text-amk-fg2">
@@ -38,7 +38,7 @@ function Nav({ user }) {
         <div className="flex items-center gap-2">
           {user ? (
             <Link to="/app" data-testid="nav-app-btn" className="inline-flex items-center gap-2 h-9 px-4 bg-white text-black hover:bg-zinc-200 font-mono text-xs">
-              Open Workspace <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+              Open Dashboard <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
             </Link>
           ) : (
             <Link to="/login" data-testid="nav-login-btn" className="inline-flex items-center gap-2 h-9 px-4 bg-white text-black hover:bg-zinc-200 font-mono text-xs">
@@ -65,8 +65,8 @@ function Hero() {
             <span className="text-amk-accent">build it live<span className="blink" /></span>
           </h1>
           <p className="text-base md:text-lg text-amk-fg2 max-w-xl leading-relaxed mb-8">
-            AmarktAI Network is your autonomous coding studio. Four specialised agents — Scout,
-            Architect, Coder, Reviewer — collaborate over a single GenX key to ship working web
+            Amarktai App Builder is your production coding workspace. Scout,
+            Architect, Coder, and Reviewer collaborate over a single GenX key to ship working web
             apps, websites, and pull requests against your GitHub repos. In real-time.
           </p>
           <div className="flex flex-wrap items-center gap-3" data-testid="hero-ctas">
@@ -137,7 +137,7 @@ function HeroPreviewCard() {
 }
 
 function Marquee() {
-  const items = ["scout", "architect", "coder", "reviewer", "github pr", "genx router", "claude", "gpt-5", "gemini", "grok"];
+  const items = ["scout", "architect", "coder", "reviewer", "github pr", "GenX Router", "Amarktai Assistant", "Amarktai Coding Agents"];
   return (
     <div data-testid="logo-marquee" className="border-y border-amk-line py-5 overflow-hidden">
       <div className="flex gap-12 whitespace-nowrap animate-[marquee_25s_linear_infinite]" style={{ animation: "scroll 30s linear infinite" }}>
@@ -153,10 +153,10 @@ function Marquee() {
 }
 
 const FEATURES = [
-  { icon: Network,        title: "One key. 40+ models.", body: "GenX Router fans your single API key out to Claude, GPT-5, Gemini, and Grok. We pick cheap models for research and edits, premium models for architecture and code." },
+  { icon: Network,        title: "One key. GenX routed.", body: "GenX Router is the only required AI key. Amarktai routes research, reasoning, code, and edits through that single provider." },
   { icon: Boxes,          title: "Modular agentic build", body: "Scout briefs → Architect plans → Coder writes → Reviewer audits. Every step is logged, colour-coded, and replayable." },
   { icon: GitPullRequest, title: "Pull from GitHub. Push a PR.", body: "Paste a public repo URL. Agents iterate. Click Open PR — we fork, commit, and open a pull request against the original." },
-  { icon: Sparkles,       title: "Live preview, every keystroke", body: "An inlined-iframe renderer hot-reloads your generated app instantly. Drop in a WebContainer key for full Node sandboxes." },
+  { icon: Sparkles,       title: "Authenticated live preview", body: "A static iframe renderer refreshes generated files instantly while keeping preview access tied to your signed-in session." },
   { icon: Cpu,            title: "Cost-aware routing", body: "Cheap edits don't burn premium tokens. The token & cost meter is always visible — no surprises at billing time." },
   { icon: Zap,            title: "Real-time WebSockets", body: "Every agent message, file write, and status change streams over a project-scoped socket. The UI never feels stale." },
 ];
@@ -230,11 +230,11 @@ function CTA() {
           Your next app is one prompt away.
         </h2>
         <p className="text-base md:text-lg text-amk-fg2 leading-relaxed mb-10 max-w-xl mx-auto">
-          Sign in, paste an idea, and let AmarktAI Network build it for you — running entirely on
+          Sign in, paste an idea, and let Amarktai App Builder build it for you, running entirely on
           your GenX key, deployed on your VPS.
         </p>
         <Link to="/login" data-testid="cta-primary" className="inline-flex items-center gap-2 h-12 px-7 bg-amk-accent text-black hover:bg-emerald-300 font-mono text-xs uppercase tracking-wider">
-          Open the studio <ArrowRight className="w-4 h-4" strokeWidth={2} />
+          Open the dashboard <ArrowRight className="w-4 h-4" strokeWidth={2} />
         </Link>
       </div>
     </section>
@@ -246,7 +246,7 @@ function Footer() {
     <footer data-testid="landing-footer" className="border-t border-amk-line py-10">
       <div className="max-w-6xl mx-auto px-5 flex flex-col md:flex-row items-center justify-between gap-4 text-amk-fg3 font-mono text-[11px]">
         <div className="flex items-center gap-2">
-          <span className="font-display font-semibold text-amk-fg">AmarktAI Network</span>
+          <span className="font-display font-semibold text-amk-fg">Amarktai App Builder</span>
           <span>· built on GenX Router</span>
         </div>
         <div className="flex items-center gap-5">

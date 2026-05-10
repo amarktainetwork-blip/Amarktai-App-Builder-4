@@ -9,6 +9,8 @@ import LoginPage from "@/pages/Login";
 import ContactPage from "@/pages/Contact";
 import ProjectListPage from "@/pages/ProjectList";
 import WorkspacePage from "@/pages/Workspace";
+import SystemHealthPage from "@/pages/SystemHealth";
+import AdminUsersPage from "@/pages/AdminUsers";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -35,6 +37,8 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/contact" element={<ContactPage />} />
             <Route path="/app" element={<Protected><ProjectListPage /></Protected>} />
+            <Route path="/system" element={<Protected><SystemHealthPage /></Protected>} />
+            <Route path="/admin/users" element={<Protected><AdminUsersPage /></Protected>} />
             <Route path="/workspace/:projectId" element={<Protected><WorkspacePage /></Protected>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
