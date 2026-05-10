@@ -138,9 +138,10 @@ def _parse_amarktai_blocks(text: str) -> dict:
     for m in _AMARKTAI_FILE_PAT.finditer(text):
         path = m.group("path").strip()
         content = m.group("content")
-        # Strip a single trailing newline that is part of the block delimiter
-        if content.endswith("\n"):
-            content = content[:-1]
+        # Preserve content verbatim.  The regex already excludes the newline
+        # immediately after the opening delimiter; any trailing newlines in the
+        # captured group are part of the file's actual content (e.g. the
+        # conventional POSIX trailing newline) and must not be stripped.
         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
         language = _EXT_LANG.get(ext, "text")
         files.append({"path": path, "language": language, "content": content})
