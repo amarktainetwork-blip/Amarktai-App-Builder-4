@@ -278,6 +278,8 @@ export default function WorkspacePage() {
                 projectStatus={project?.status}
                 projectError={project?.error}
                 failedAgent={project?.failed_agent}
+                projectMode={project?.mode}
+                previewStrategy={project?.preview_strategy}
               />
             </TabsContent>
 

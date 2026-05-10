@@ -50,7 +50,7 @@ export default function LoginPage() {
             <span className="text-amk-accent">Single-admin.</span>
           </h1>
           <p className="text-sm text-amk-fg2 leading-relaxed">
-            Your VPS, your GenX credits, your code. The agents wait inside. Sign in to start a
+            Your VPS, your AI credits, your code. The agents wait inside. Sign in to start a
             new build or pull in a public GitHub repo and let them iterate.
           </p>
         </div>

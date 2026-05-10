@@ -1,4 +1,4 @@
-import { Cpu, Activity, DollarSign } from "lucide-react";
+import { Cpu, Activity, DollarSign, Layers } from "lucide-react";
 
 export default function StatusBar({ project, lastModel, connected }) {
   const tokens = project?.usage?.tokens || 0;
@@ -13,6 +13,14 @@ export default function StatusBar({ project, lastModel, connected }) {
         </span>
         <span className="hidden sm:inline">project: {project?.id?.slice(0, 8) || "—"}</span>
         <span className="hidden md:inline">status: {project?.status || "—"}</span>
+        {project?.mode && (
+          <span className="hidden lg:inline-flex items-center gap-1">
+            <Layers className="w-3 h-3" strokeWidth={1.5} /> {project.mode.replace(/_/g, " ")}
+          </span>
+        )}
+        {project?.quality_tier && (
+          <span className="hidden lg:inline text-amk-fg3">tier: {project.quality_tier}</span>
+        )}
       </div>
       <div className="flex items-center gap-4">
         <span className="inline-flex items-center gap-1">

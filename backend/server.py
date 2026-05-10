@@ -23,6 +23,8 @@ from agents.genx_provider import AGENT_TIER, GenXProvider
 from agents.mcp_tools import TOOL_SCHEMAS, ProjectFS
 from agents.orchestrator import Orchestrator
 from agents.preview import render_preview
+from agents.stack_engine import decide_stack
+from agents.prompts import ASSISTANT_PROMPT
 from auth import (
     decode_token,
     hash_password,
@@ -36,6 +38,7 @@ from auth import (
 from config import (
     APP_NAME,
     AGENTS_NAME,
+    ASSISTANT_NAME,
     ROUTER_NAME,
     assert_startup_config,
     cors_origins,
@@ -145,6 +148,17 @@ class ContactBody(BaseModel):
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     prompt: str = Field(min_length=1, max_length=12000)
+    # Optional build parameters (all have safe defaults for backward compat)
+    mode: Optional[str] = "web_app"
+    quality_tier: Optional[str] = "balanced"
+    stack_preference: Optional[str] = None
+    database_preference: Optional[str] = None
+    auth_required: Optional[bool] = False
+    realtime_required: Optional[bool] = False
+    repo_visibility: Optional[str] = "public"
+    deployment_target: Optional[str] = None
+    media_requirements: Optional[str] = None
+    upgrade_confirmation_acknowledged: Optional[bool] = False
 
 
 class RepoImportBody(BaseModel):
@@ -164,6 +178,8 @@ class Project(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     prompt: str
+    mode: str = "web_app"
+    quality_tier: str = "balanced"
     status: str = "queued"
     error: str | None = None
     failed_agent: str | None = None
@@ -177,10 +193,24 @@ class Project(BaseModel):
     owner_id: str | None = None
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
+    # Extended fields
+    recommended_tier: str | None = None
+    requires_upgrade_confirmation: bool = False
+    upgrade_reason: str | None = None
+    selected_stack: dict | None = None
+    preview_strategy: str = "iframe"
+    actual_models_used: list = Field(default_factory=list)
+    deployment_target: str | None = None
+    repo_visibility: str = "public"
+    manifest_status: str | None = None
 
 
-class MessageCreate(BaseModel):
+class AssistantMessage(BaseModel):
     content: str = Field(min_length=1, max_length=12000)
+    project_id: Optional[str] = None
+
+
+MessageCreate = AssistantMessage  # backward compat alias
 
 
 class SettingsUpdate(BaseModel):
@@ -195,7 +225,7 @@ class RetryBody(BaseModel):
     repair_only: Optional[bool] = False
 
 
-
+class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=12)
     role: str = Field(default="user", pattern="^(admin|user)$")
@@ -230,7 +260,9 @@ async def _genx_provider() -> GenXProvider:
     return GenXProvider(api_key=key)
 
 
-async def _launch_pipeline(project_id: str, prompt: str, mode: str) -> None:
+async def _launch_pipeline(project_id: str, prompt: str, mode: str,
+                            build_mode: str = "web_app",
+                            stack_decision: dict | None = None) -> None:
     async with PIPELINE_SEM:
         emit = emitter_for(project_id)
         started = _now()
@@ -250,7 +282,10 @@ async def _launch_pipeline(project_id: str, prompt: str, mode: str) -> None:
             if mode == "iterate":
                 await asyncio.wait_for(orch.run_iteration(prompt), timeout=global_timeout)
             else:
-                await asyncio.wait_for(orch.run_full_build(prompt), timeout=global_timeout)
+                await asyncio.wait_for(
+                    orch.run_full_build(prompt, mode=build_mode, stack_decision=stack_decision),
+                    timeout=global_timeout,
+                )
             # Only update completed_at if project was not already failed by orchestrator
             proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1})
             if proj and proj.get("status") not in ("failed", "cancelled"):
@@ -570,6 +605,17 @@ async def list_models() -> dict:
     return {"tiers": GenXProvider.list_tiers(), "agents": AGENT_TIER, "tools": TOOL_SCHEMAS, "available": models}
 
 
+def _coder_tier(tier: str, tiers: dict) -> str | None:
+    """Select the internal tier key for the Coder agent based on the user's quality tier."""
+    if tier == "premium":
+        key = "reasoning"
+    elif tier == "balanced":
+        key = "research"
+    else:
+        key = "edits"
+    return tiers.get(key, {}).get("model")
+
+
 @secured.get("/models/router")
 async def models_router(tier: str = "balanced") -> dict:
     """Return the model routed for a given tier (cheap|balanced|premium).
@@ -583,22 +629,42 @@ async def models_router(tier: str = "balanced") -> dict:
         "balanced": "research",
         "premium": "reasoning",
     }
-    internal_tier = tier_map.get(tier.lower())
+    tier_lower = tier.lower()
+    internal_tier = tier_map.get(tier_lower)
     if not internal_tier:
         raise HTTPException(400, f"Unknown tier '{tier}'. Use cheap, balanced, or premium.")
     tiers = GenXProvider.list_tiers()
     info = tiers.get(internal_tier)
     if not info:
         raise HTTPException(503, "Router tier configuration error.")
+
+    selected_models = {
+        "scout":     tiers.get("research", {}).get("model"),
+        "architect": tiers.get("reasoning", {}).get("model"),
+        "coder":     _coder_tier(tier_lower, tiers),
+        "reviewer":  tiers.get("reasoning", {}).get("model"),
+        "iteration": tiers.get("edits", {}).get("model"),
+        "assistant": tiers.get("research", {}).get("model"),
+    }
+
+    warnings: list[str] = []
+    if tier_lower == "premium":
+        warnings.append("Premium tier uses the most capable model and incurs higher GenX credit usage.")
+    elif tier_lower == "cheap":
+        warnings.append("Cheap tier may struggle with complex apps. Balanced is recommended for most builds.")
+
     return {
-        "tier": tier,
+        "tier": tier_lower,
         "internal_tier": internal_tier,
         "model": info["model"],
         "label": info["label"],
-        "warning": (
-            "Premium tier uses the most capable model and incurs higher GenX credit usage."
-            if tier.lower() == "premium" else None
-        ),
+        "selected_models": selected_models,
+        "reasons": {
+            "cheap": "Fast and affordable. Good for simple landing pages and minor edits.",
+            "balanced": "Recommended for most builds. Balances quality and cost.",
+            "premium": "Best for complex apps, full-stack, and trading bots.",
+        }.get(tier_lower, ""),
+        "warnings": warnings,
     }
 
 
@@ -606,10 +672,53 @@ async def models_router(tier: str = "balanced") -> dict:
 async def create_project(body: ProjectCreate, claims: dict = Depends(require_user)) -> Project:
     if not await _runtime_secret("GENX_API_KEY"):
         raise HTTPException(503, "GENX_API_KEY is required for Amarktai Assistant and Amarktai Coding Agents.")
-    proj = Project(name=body.name, prompt=body.prompt, owner_id=claims["sub"])
+
+    # Normalize mode
+    build_mode = (body.mode or "web_app").lower().strip()
+    quality_tier = (body.quality_tier or "balanced").lower().strip()
+    if quality_tier not in ("cheap", "balanced", "premium"):
+        quality_tier = "balanced"
+
+    # Run stack decision engine
+    sd = decide_stack(
+        prompt=body.prompt,
+        mode=build_mode,
+        quality_tier=quality_tier,
+        stack_preference=body.stack_preference,
+        database_preference=body.database_preference,
+        auth_required=body.auth_required or False,
+        realtime_required=body.realtime_required or False,
+        media_requirements=body.media_requirements,
+        deployment_target=body.deployment_target,
+    )
+
+    # If upgrade confirmation required but not acknowledged, return a 402 so frontend can prompt
+    if sd["requires_upgrade_confirmation"] and not body.upgrade_confirmation_acknowledged:
+        raise HTTPException(402, detail={
+            "requires_upgrade_confirmation": True,
+            "recommended_tier": sd["recommended_tier"],
+            "upgrade_reason": sd["upgrade_reason"],
+            "complexity": sd["complexity"],
+        })
+
+    proj = Project(
+        name=body.name,
+        prompt=body.prompt,
+        mode=build_mode,
+        quality_tier=quality_tier,
+        recommended_tier=sd["recommended_tier"],
+        requires_upgrade_confirmation=sd["requires_upgrade_confirmation"],
+        upgrade_reason=sd["upgrade_reason"],
+        selected_stack=sd["stack"],
+        preview_strategy=sd["preview_strategy"],
+        deployment_target=body.deployment_target,
+        repo_visibility=body.repo_visibility or "public",
+        owner_id=claims["sub"],
+    )
     await db.projects.insert_one(dict(proj.model_dump()))
     await hub.broadcast(proj.id, {"type": "project_status", "data": {"status": "queued"}})
-    asyncio.create_task(_launch_pipeline(proj.id, body.prompt, "build"))
+    asyncio.create_task(_launch_pipeline(proj.id, body.prompt, "build",
+                                          build_mode=build_mode, stack_decision=sd))
     return proj
 
 
@@ -798,10 +907,101 @@ async def send_message(project_id: str, body: MessageCreate, claims: dict = Depe
     return {"ok": True, "queued": True}
 
 
+@secured.post("/assistant/message")
+async def assistant_message(body: AssistantMessage, claims: dict = Depends(require_user)) -> dict:
+    """Amarktai Wingman — help with prompts, modes, failures, and next steps.
+
+    If project_id is provided, the assistant uses the project's current state
+    to answer context-aware questions. Uses a cheap/fast model to avoid burning
+    premium credits on assistant queries.
+    """
+    if not await _runtime_secret("GENX_API_KEY"):
+        raise HTTPException(503, "GENX_API_KEY is required for Amarktai Wingman.")
+
+    context_parts: list[str] = []
+    if body.project_id:
+        proj = await db.projects.find_one(
+            {"id": body.project_id}, {"_id": 0, "status": 1, "error": 1, "failed_agent": 1,
+                                       "mode": 1, "quality_tier": 1, "name": 1, "prompt": 1}
+        )
+        if proj:
+            context_parts.append(
+                f"Project: {proj.get('name', '?')}\n"
+                f"Mode: {proj.get('mode', 'web_app')}\n"
+                f"Quality tier: {proj.get('quality_tier', 'balanced')}\n"
+                f"Status: {proj.get('status', '?')}\n"
+                f"Build prompt: {proj.get('prompt', '')[:300]}\n"
+            )
+            if proj.get("error"):
+                context_parts.append(f"Error: {proj['error']}")
+            if proj.get("failed_agent"):
+                context_parts.append(f"Failed agent: {proj['failed_agent']}")
+            # Include last 5 messages for context (no secrets)
+            recent_msgs = await db.messages.find(
+                {"project_id": body.project_id},
+                {"_id": 0, "role": 1, "agent": 1, "content": 1},
+            ).sort("created_at", -1).limit(5).to_list(5)
+            if recent_msgs:
+                context_parts.append("Recent messages (newest first):")
+                for m in recent_msgs:
+                    who = m.get("agent") or m.get("role") or "?"
+                    context_parts.append(f"  [{who}] {m.get('content', '')[:300]}")
+
+    context = "\n".join(context_parts)
+    user_message = f"{context}\n\nUser question: {body.content}" if context else body.content
+
+    try:
+        provider = await _genx_provider()
+        # Use fast/research tier for assistant — avoid premium credits
+        result = await provider.complete(
+            agent="iteration",  # maps to research/fast tier
+            system_prompt=ASSISTANT_PROMPT,
+            user_message=user_message,
+            max_tokens=1024,
+        )
+        return {
+            "reply": result["text"].strip(),
+            "model": result["model_label"],
+            "assistant": ASSISTANT_NAME,
+        }
+    except Exception as exc:
+        raise HTTPException(503, f"{ASSISTANT_NAME} is unavailable: {exc}")
+
+
+@api.post("/assistant/message")
+async def assistant_message_unauth(body: AssistantMessage) -> dict:
+    """Public assistant endpoint — no project context, limited to general help."""
+    if not await _runtime_secret("GENX_API_KEY"):
+        raise HTTPException(503, "GENX_API_KEY is required for Amarktai Wingman.")
+    try:
+        provider = await _genx_provider()
+        result = await provider.complete(
+            agent="iteration",
+            system_prompt=ASSISTANT_PROMPT,
+            user_message=body.content,
+            max_tokens=512,
+        )
+        return {"reply": result["text"].strip(), "model": result["model_label"], "assistant": ASSISTANT_NAME}
+    except Exception as exc:
+        raise HTTPException(503, f"{ASSISTANT_NAME} is unavailable: {exc}")
+
+
+@api.get("/stack/decide")
+async def stack_decide(
+    prompt: str = "",
+    mode: str = "web_app",
+    tier: str = "balanced",
+) -> dict:
+    """Quick stack decision — no auth required. Use for pre-build recommendations."""
+    return decide_stack(prompt=prompt, mode=mode, quality_tier=tier)
+
+
 @secured.get("/projects/{project_id}/preview", response_class=HTMLResponse)
 async def project_preview(project_id: str, claims: dict = Depends(require_user)) -> HTMLResponse:
     await _own(project_id, claims)
-    proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1, "error": 1, "failed_agent": 1})
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1, "error": 1,
+                                                             "failed_agent": 1, "mode": 1,
+                                                             "preview_strategy": 1})
     files = await ProjectFS(db, project_id).list_full()
     _meta = {"requirements.md", "tech_stack.json"}
     app_files = [f for f in files if f["path"] not in _meta]
@@ -826,12 +1026,17 @@ async def finalize(project_id: str, claims: dict = Depends(require_user)) -> dic
     files = await ProjectFS(db, project_id).list_full()
     payload_files = [{"path": f["path"], "content": f["content"]} for f in files]
     repo_name = re.sub(r"[^a-z0-9-]+", "-", proj["name"].lower()).strip("-")[:60] or "amarktai-app"
+    private = (proj.get("repo_visibility", "public") == "private")
     try:
-        repo = await gh.create_repo_with_files(name=repo_name, description=proj["prompt"][:120],
-                                               private=False, files=payload_files, pat=pat)
+        repo = await gh.create_repo_with_files(
+            name=repo_name, description=proj["prompt"][:120],
+            private=private, files=payload_files, pat=pat,
+        )
     except Exception as exc:
         raise HTTPException(400, f"Failed to finalize: {exc}")
-    await db.projects.update_one({"id": project_id}, {"$set": {"repo_url": repo["url"], "updated_at": _now()}})
+    await db.projects.update_one({"id": project_id}, {"$set": {
+        "repo_url": repo["url"], "manifest_status": "pushed", "updated_at": _now(),
+    }})
     await hub.broadcast(project_id, {"type": "finalized", "data": repo})
     return repo
 

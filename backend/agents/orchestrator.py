@@ -1,8 +1,13 @@
 """
-Multi-agent orchestrator: Scout → Architect → Coder → Reviewer.
+Multi-agent orchestrator: Scout → Architect → Coder → Reviewer (mode-aware).
 
 The orchestrator reads/writes everything through MongoDB and emits real-time events to a
 WebSocket hub so the dashboard can render the timeline live.
+
+Modes supported:
+  research, landing_page, website, media_page, web_app, pwa, full_stack,
+  dashboard, admin_panel, api_service, automation_bot, trading_bot_scaffold,
+  repo_fix
 """
 from __future__ import annotations
 
@@ -19,6 +24,8 @@ from .prompts import (
     ARCHITECT_PROMPT,
     CODER_PROMPT,
     ITERATION_PROMPT,
+    REPO_FIX_PROMPT,
+    RESEARCH_PROMPT,
     REVIEWER_PROMPT,
     SCOUT_PROMPT,
 )
@@ -27,15 +34,27 @@ from .prompts import (
 AGENT_TIMEOUTS = {
     "scout": 180,
     "architect": 240,
-    "coder": 420,
+    "coder": 480,
     "reviewer": 240,
     "iteration": 300,
+    "research": 240,
+    "repo_fix": 480,
 }
 
 # App files that indicate the project has a previewable entry point
 _PREVIEW_ENTRY_FILES = {"index.html", "index.htm"}
 # Files that are metadata, not app output
 _META_FILES = {"requirements.md", "tech_stack.json"}
+
+# Modes that do not require index.html to be "ready"
+_NO_PREVIEW_MODES = {
+    "research", "full_stack", "dashboard", "admin_panel",
+    "api_service", "automation_bot", "trading_bot_scaffold", "repo_fix",
+}
+# Modes that must have app files to be considered ready
+_REQUIRES_APP_FILES_MODES = {
+    "landing_page", "website", "media_page", "web_app", "pwa",
+}
 
 # JSON repair prompt
 _JSON_REPAIR_PROMPT = (
@@ -240,100 +259,28 @@ class Orchestrator:
 
     # ---------- full build pipeline ----------
 
-    async def run_full_build(self, user_prompt: str) -> None:
+    async def run_full_build(self, user_prompt: str, mode: str = "web_app",
+                              stack_decision: dict | None = None) -> None:
+        """Mode-aware full build pipeline.
+
+        Dispatches to the appropriate sub-pipeline based on mode.
+        """
         await self._set_status("running")
         await self._record_message("user", None, user_prompt)
+
+        # Store mode on project for downstream use
+        if mode:
+            await self.db.projects.update_one(
+                {"id": self.project_id}, {"$set": {"mode": mode}}
+            )
+
         try:
-            # 1) Scout
-            await self._check_cancel()
-            scout = await self._run_agent("scout", SCOUT_PROMPT, user_prompt)
-            await self._check_cancel()
-            scout_data = scout["data"]
-            await self.fs.write("requirements.md", scout_data.get("requirements_md", ""), "markdown")
-            await self.emit({"type": "file_written", "data": {"path": "requirements.md"}})
-            await self._record_message(
-                "agent", "scout",
-                f"**Brief:** {scout_data.get('summary', '')}\n\n"
-                f"**Audience:** {scout_data.get('audience', '')}\n\n"
-                f"**Core features:**\n" + "\n".join(f"- {f}" for f in scout_data.get("core_features", [])),
-                meta={"model": scout["model_label"]},
-            )
-
-            # 2) Architect
-            await self._check_cancel()
-            arch_input = json.dumps(scout_data, indent=2)
-            arch = await self._run_agent("architect", ARCHITECT_PROMPT, arch_input)
-            await self._check_cancel()
-            arch_data = arch["data"]
-            await self.fs.write("tech_stack.json", json.dumps(arch_data, indent=2), "json")
-            await self.emit({"type": "file_written", "data": {"path": "tech_stack.json"}})
-            await self._record_message(
-                "agent", "architect",
-                f"**Stack:** {arch_data.get('tech_stack', {}).get('frontend', '?')}"
-                f" + {arch_data.get('tech_stack', {}).get('styling', '?')}\n\n"
-                f"**Files planned:** {len(arch_data.get('file_plan', []))}",
-                meta={"model": arch["model_label"]},
-            )
-
-            # 3) Coder
-            await self._check_cancel()
-            coder_input = json.dumps({"requirements": scout_data, "plan": arch_data}, indent=2)
-            coder = await self._run_agent("coder", CODER_PROMPT, coder_input)
-            await self._check_cancel()
-            coder_data = coder["data"]
-            generated_files = coder_data.get("files", [])
-
-            # Verify coder produced actual app files
-            if not generated_files:
-                err = "Coder produced zero app files. Build cannot be marked ready."
-                await self._record_event("coder", "failed", err)
-                await self._record_event("reviewer", "skipped",
-                                         "Reviewer skipped because Coder produced no files.")
-                await self._fail_project("coder", err)
-                await self._record_message("system", None, err, meta={"error": err})
-                return
-
-            for f in generated_files:
-                await self.fs.write(f["path"], f["content"], f.get("language", "text"))
-                await self.emit({"type": "file_written", "data": {"path": f["path"]}})
-            await self._record_message(
-                "agent", "coder",
-                coder_data.get("summary", "Files generated."),
-                meta={"model": coder["model_label"], "files": [f["path"] for f in generated_files]},
-            )
-
-            # 4) Reviewer
-            await self._check_cancel()
-            current_files = await self.fs.list_full()
-            review_input = json.dumps(
-                {"files": [{"path": f["path"], "content": f["content"]} for f in current_files
-                           if f["path"] not in _META_FILES]},
-                indent=2,
-            )
-            rev = await self._run_agent("reviewer", REVIEWER_PROMPT, review_input)
-            await self._check_cancel()
-            rev_data = rev["data"]
-            for f in rev_data.get("patched_files", []):
-                await self.fs.write(f["path"], f["content"], f.get("language", "text"))
-                await self.emit({"type": "file_written", "data": {"path": f["path"]}})
-            await self._record_message(
-                "agent", "reviewer",
-                f"**Verdict:** {rev_data.get('verdict', 'pass')}\n\n"
-                + (("**Issues:**\n" + "\n".join(f"- {i}" for i in rev_data.get("issues", [])))
-                   if rev_data.get("issues") else "_No issues found._"),
-                meta={"model": rev["model_label"], "patched": [f["path"] for f in rev_data.get("patched_files", [])]},
-            )
-
-            # Only mark ready if app files actually exist
-            final_files = await self.fs.list_full()
-            if not _has_app_files(final_files):
-                err = "Build completed but no app files were generated."
-                await self._fail_project("coder", err)
-                await self._record_message("system", None, err, meta={"error": err})
-                return
-
-            await self._set_status("ready", {"completed_at": _now()})
-            await self.emit({"type": "build_complete", "data": {}})
+            if mode == "research":
+                await self._run_research(user_prompt, stack_decision)
+            elif mode == "repo_fix":
+                await self._run_repo_fix(user_prompt, stack_decision)
+            else:
+                await self._run_build_pipeline(user_prompt, mode, stack_decision)
 
         except BuildCancelled as e:
             msg = str(e)
@@ -349,6 +296,192 @@ class Orchestrator:
             await self._fail_project("pipeline", err)
             await self._record_message("system", None, f"Build failed: {err}", meta={"error": err})
             raise
+
+    async def _run_build_pipeline(self, user_prompt: str, mode: str,
+                                   stack_decision: dict | None) -> None:
+        """Standard Scout → Architect → Coder → Reviewer pipeline."""
+        sd = stack_decision or {}
+
+        # 1) Scout
+        await self._check_cancel()
+        scout_user = json.dumps({"prompt": user_prompt, "mode": mode, "stack": sd.get("stack", {})})
+        scout = await self._run_agent("scout", SCOUT_PROMPT, scout_user)
+        await self._check_cancel()
+        scout_data = scout["data"]
+        await self.fs.write("requirements.md", scout_data.get("requirements_md", ""), "markdown")
+        await self.emit({"type": "file_written", "data": {"path": "requirements.md"}})
+        await self._record_message(
+            "agent", "scout",
+            f"**Brief:** {scout_data.get('summary', '')}\n\n"
+            f"**Audience:** {scout_data.get('audience', '')}\n\n"
+            f"**Core features:**\n" + "\n".join(f"- {f}" for f in scout_data.get("core_features", [])),
+            meta={"model": scout["model_label"]},
+        )
+
+        # 2) Architect
+        await self._check_cancel()
+        arch_input = json.dumps({
+            "requirements": scout_data,
+            "mode": mode,
+            "stack_decision": sd,
+            "required_files": sd.get("required_files", []),
+        }, indent=2)
+        arch = await self._run_agent("architect", ARCHITECT_PROMPT, arch_input)
+        await self._check_cancel()
+        arch_data = arch["data"]
+        await self.fs.write("tech_stack.json", json.dumps(arch_data, indent=2), "json")
+        await self.emit({"type": "file_written", "data": {"path": "tech_stack.json"}})
+        await self._record_message(
+            "agent", "architect",
+            f"**Stack:** {arch_data.get('tech_stack', {}).get('frontend', '?')}"
+            f" + {arch_data.get('tech_stack', {}).get('styling', '?')}\n\n"
+            f"**Files planned:** {len(arch_data.get('file_plan', []))}",
+            meta={"model": arch["model_label"]},
+        )
+
+        # 3) Coder
+        await self._check_cancel()
+        coder_input = json.dumps({
+            "requirements": scout_data,
+            "plan": arch_data,
+            "mode": mode,
+            "stack_decision": sd,
+            "required_files": sd.get("required_files", []),
+            "safety_notes": sd.get("safety_notes", []),
+        }, indent=2)
+        coder = await self._run_agent("coder", CODER_PROMPT, coder_input)
+        await self._check_cancel()
+        coder_data = coder["data"]
+        generated_files = coder_data.get("files", [])
+
+        # Verify coder produced actual app files
+        if not generated_files:
+            err = "Coder produced zero app files. Build cannot be marked ready."
+            await self._record_event("coder", "failed", err)
+            await self._record_event("reviewer", "skipped",
+                                     "Reviewer skipped because Coder produced no files.")
+            await self._fail_project("coder", err)
+            await self._record_message("system", None, err, meta={"error": err})
+            return
+
+        for f in generated_files:
+            await self.fs.write(f["path"], f["content"], f.get("language", "text"))
+            await self.emit({"type": "file_written", "data": {"path": f["path"]}})
+        await self._record_message(
+            "agent", "coder",
+            coder_data.get("summary", "Files generated."),
+            meta={"model": coder["model_label"], "files": [f["path"] for f in generated_files]},
+        )
+
+        # 4) Reviewer
+        await self._check_cancel()
+        current_files = await self.fs.list_full()
+        review_input = json.dumps({
+            "mode": mode,
+            "required_files": sd.get("required_files", []),
+            "files": [{"path": f["path"], "content": f["content"]} for f in current_files
+                      if f["path"] not in _META_FILES],
+        }, indent=2)
+        rev = await self._run_agent("reviewer", REVIEWER_PROMPT, review_input)
+        await self._check_cancel()
+        rev_data = rev["data"]
+        for f in rev_data.get("patched_files", []):
+            await self.fs.write(f["path"], f["content"], f.get("language", "text"))
+            await self.emit({"type": "file_written", "data": {"path": f["path"]}})
+        await self._record_message(
+            "agent", "reviewer",
+            f"**Verdict:** {rev_data.get('verdict', 'pass')}\n\n"
+            + (("**Issues:**\n" + "\n".join(f"- {i}" for i in rev_data.get("issues", [])))
+               if rev_data.get("issues") else "_No issues found._"),
+            meta={"model": rev["model_label"], "patched": [f["path"] for f in rev_data.get("patched_files", [])]},
+        )
+
+        # Readiness check: modes that output HTML need app files
+        final_files = await self.fs.list_full()
+        if mode in _REQUIRES_APP_FILES_MODES and not _has_app_files(final_files):
+            err = "Build completed but no app files were generated."
+            await self._fail_project("coder", err)
+            await self._record_message("system", None, err, meta={"error": err})
+            return
+
+        # For no-preview modes, require at least README.md
+        if mode in _NO_PREVIEW_MODES:
+            has_readme = any(f["path"] == "README.md" for f in final_files)
+            if not has_readme:
+                err = "Build completed but required README.md was not generated."
+                await self._fail_project("coder", err)
+                await self._record_message("system", None, err, meta={"error": err})
+                return
+
+        preview_strategy = sd.get("preview_strategy", "iframe")
+        await self._set_status("ready", {
+            "completed_at": _now(),
+            "preview_strategy": preview_strategy,
+        })
+        await self.emit({"type": "build_complete", "data": {"preview_strategy": preview_strategy}})
+
+    async def _run_research(self, user_prompt: str, stack_decision: dict | None) -> None:
+        """Research mode: produce a research brief and build prompt, no code files."""
+        await self._check_cancel()
+        await self._record_event("scout", "started", "Scout engaged in research mode.")
+        research = await self._run_agent("research", RESEARCH_PROMPT, user_prompt)
+        await self._check_cancel()
+        rd = research["data"]
+        # Store research brief as requirements.md
+        brief = rd.get("research_brief", "No research brief returned.")
+        build_prompt = rd.get("build_prompt", "")
+        await self.fs.write("requirements.md", brief, "markdown")
+        await self.emit({"type": "file_written", "data": {"path": "requirements.md"}})
+        # Store build prompt as a message
+        await self._record_message(
+            "agent", "scout",
+            f"**Research Complete**\n\n{rd.get('summary', '')}\n\n"
+            f"**Recommended mode:** {rd.get('recommended_mode', 'web_app')}\n\n"
+            f"**Build prompt ready:**\n```\n{build_prompt}\n```",
+            meta={"model": research["model_label"],
+                  "recommended_mode": rd.get("recommended_mode"),
+                  "build_prompt": build_prompt},
+        )
+        await self._set_status("ready", {
+            "completed_at": _now(),
+            "preview_strategy": "brief_only",
+        })
+        await self.emit({"type": "build_complete", "data": {"preview_strategy": "brief_only"}})
+
+    async def _run_repo_fix(self, user_prompt: str, stack_decision: dict | None) -> None:
+        """Repo fix mode: targeted edits to an imported repo."""
+        await self._check_cancel()
+        current_files = await self.fs.list_full()
+        app_files = [f for f in current_files if f["path"] not in _META_FILES]
+        if not app_files:
+            err = "No imported repo files found. Import a GitHub repo before requesting fixes."
+            await self._fail_project("scout", err)
+            await self._record_message("system", None, err, meta={"error": err})
+            return
+        await self._record_event("coder", "started", "Coder engaged in repo-fix mode.")
+        fix_input = json.dumps({
+            "request": user_prompt,
+            "files": [{"path": f["path"], "content": f["content"]} for f in app_files],
+        }, indent=2)
+        fix = await self._run_agent("repo_fix", REPO_FIX_PROMPT, fix_input)
+        await self._check_cancel()
+        fix_data = fix["data"]
+        for f in fix_data.get("files", []):
+            await self.fs.write(f["path"], f["content"], f.get("language", "text"))
+            await self.emit({"type": "file_written", "data": {"path": f["path"]}})
+        await self._record_message(
+            "agent", "coder",
+            fix_data.get("summary", "Repo updated."),
+            meta={"model": fix["model_label"],
+                  "changes": fix_data.get("changes_made", []),
+                  "files": [f["path"] for f in fix_data.get("files", [])]},
+        )
+        await self._set_status("ready", {
+            "completed_at": _now(),
+            "preview_strategy": "repo_structure",
+        })
+        await self.emit({"type": "build_complete", "data": {"preview_strategy": "repo_structure"}})
+
 
     # ---------- iteration ----------
 
@@ -402,7 +535,9 @@ class Orchestrator:
         await self._set_status("running")
         try:
             if target == "pipeline":
-                proj = await self.db.projects.find_one({"id": self.project_id}, {"_id": 0, "prompt": 1})
+                proj = await self.db.projects.find_one(
+                    {"id": self.project_id}, {"_id": 0, "prompt": 1, "mode": 1}
+                )
                 if not proj or not proj.get("prompt"):
                     raise ValueError("Cannot retry: original project prompt is missing.")
                 # Clear cancel flag for retry
@@ -410,7 +545,7 @@ class Orchestrator:
                     {"id": self.project_id},
                     {"$set": {"cancel_requested": False, "failed_agent": None, "error": None}},
                 )
-                await self.run_full_build(proj["prompt"])
+                await self.run_full_build(proj["prompt"], mode=proj.get("mode", "web_app"))
                 return
 
             if target == "coder":

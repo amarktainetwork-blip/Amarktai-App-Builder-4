@@ -66,7 +66,7 @@ function Hero() {
           </h1>
           <p className="text-base md:text-lg text-amk-fg2 max-w-xl leading-relaxed mb-8">
             Amarktai App Builder is your production coding workspace. Scout,
-            Architect, Coder, and Reviewer collaborate over a single GenX key to ship working web
+            Architect, Coder, and Reviewer collaborate over a single Amarktai AI key to ship working web
             apps, websites, and pull requests against your GitHub repos. In real-time.
           </p>
           <div className="flex flex-wrap items-center gap-3" data-testid="hero-ctas">
@@ -231,7 +231,7 @@ function CTA() {
         </h2>
         <p className="text-base md:text-lg text-amk-fg2 leading-relaxed mb-10 max-w-xl mx-auto">
           Sign in, paste an idea, and let Amarktai App Builder build it for you, running entirely on
-          your GenX key, deployed on your VPS.
+          your AI key, deployed on your VPS.
         </p>
         <Link to="/login" data-testid="cta-primary" className="inline-flex items-center gap-2 h-12 px-7 bg-amk-accent text-black hover:bg-emerald-300 font-mono text-xs uppercase tracking-wider">
           Open the dashboard <ArrowRight className="w-4 h-4" strokeWidth={2} />
