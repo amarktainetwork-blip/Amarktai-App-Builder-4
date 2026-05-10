@@ -1,147 +1,97 @@
-# AmarktAI Network
+# Amarktai App Builder
 
-> Autonomous coding studio. Four agents (Scout · Architect · Coder · Reviewer)
-> collaborate over a single **GenX Router** key to ship working web apps and
-> open pull requests against your GitHub repos — in real-time.
+Amarktai App Builder is a self-hosted real-time app builder with Amarktai Assistant built in. Amarktai Coding Agents run Scout, Architect, Coder, Reviewer, and Iteration through GenX Router using one required AI key: `GENX_API_KEY`.
 
-![status](https://img.shields.io/badge/status-MVP-00E676?style=flat-square)
-![stack](https://img.shields.io/badge/stack-FastAPI%20%2B%20React%20%2B%20MongoDB-2962FF?style=flat-square)
-![models](https://img.shields.io/badge/models-40%2B%20via%20GenX-FF5722?style=flat-square)
+## Features
 
----
+- Prompt-to-app builds through GenX Router.
+- GitHub repository import for public repos, and private repos when `GITHUB_PAT` is configured.
+- Real-time workspace updates over WebSocket.
+- Persisted agent events, messages, generated files, usage estimates, and failure reasons.
+- Authenticated live preview.
+- Amarktai Assistant chat for project iteration.
+- Pull request creation for imported repositories when `GITHUB_PAT` is configured.
+- New GitHub repository creation during finalize when `GITHUB_PAT` is configured.
+- Encrypted settings storage in MongoDB for `GENX_API_KEY`, `GITHUB_PAT`, and `BRAVE_SEARCH_API_KEY`.
+- Admin user management.
+- Truthful `/api/health` and `/api/readiness` endpoints.
 
-## Why
-
-One key. Forty-plus models. Four agents. Real pull requests.
-
-- **GenX Router** (https://genx.sh) gives you Claude, GPT-5, Gemini, Grok, etc.
-  through a single OpenAI-compatible endpoint. No provider accounts to juggle.
-- **Cost-aware routing** — cheap models for research and edits, premium models
-  for architecture and code. Token & cost meter is always on screen.
-- **GitHub integration** — paste a public repo URL, let agents iterate, open a PR
-  back against the original. No manual `git push`.
-- **Self-hosted** — your VPS, your data, your credits.
-
-## Quick start (Docker)
+## Docker Quick Start
 
 ```bash
-# 1. Clone
-git clone https://github.com/<you>/amarktai-network.git
-cd amarktai-network
-
-# 2. Configure
 cp .env.example .env
-# edit .env — at minimum set GENX_API_KEY, REACT_APP_BACKEND_URL,
-# JWT_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD.
+openssl rand -hex 48
+python - <<'PY'
+from cryptography.fernet import Fernet
+print(Fernet.generate_key().decode())
+PY
+```
 
-# 3. Launch
+Put the generated values into `.env`:
+
+```bash
+JWT_SECRET=<openssl-output>
+SETTINGS_ENCRYPTION_KEY=<fernet-output>
+GENX_API_KEY=<your-genx-key>
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=<strong-12-plus-character-password>
+CORS_ORIGINS=https://builder.amarktai.com
+REACT_APP_BACKEND_URL=https://builder.amarktai.com
+```
+
+Start the stack:
+
+```bash
 docker compose up -d --build
-
-# 4. Open
-open http://your-vps:8080      # frontend
-# backend lives at http://your-vps:8001/api/
 ```
 
-That's it. The backend will seed your admin user on first boot. Sign in,
-describe an app or paste a GitHub repo URL, and the agents take over.
+Deployment target:
 
-### Putting it behind a reverse proxy
+- Frontend and API origin: `https://builder.amarktai.com`
+- Backend health: `https://builder.amarktai.com/api/health`
+- Backend readiness: `https://builder.amarktai.com/api/readiness`
 
-For a production VPS deploy, terminate TLS with Caddy / Nginx / Traefik and
-point both routes at the right service:
+## Required Environment
 
-```caddy
-amarktai.example.com {
-    @api path /api/*
-    reverse_proxy @api  backend:8001
-    reverse_proxy frontend:80
-}
-```
+- `APP_ENV=production`
+- `GENX_API_KEY`
+- `JWT_SECRET`
+- `ADMIN_EMAIL`
+- `ADMIN_PASSWORD`
+- `SETTINGS_ENCRYPTION_KEY`
+- `MONGO_URL`
+- `DB_NAME`
+- `REACT_APP_BACKEND_URL`
+- `CORS_ORIGINS`
 
-Set `REACT_APP_BACKEND_URL=https://amarktai.example.com` in `.env` so the
-browser bundle calls back through your TLS endpoint, then `docker compose up
---build` to bake the URL into the frontend bundle.
+Production startup fails if critical secrets are missing or weak. `JWT_SECRET` must be at least 32 characters, `ADMIN_PASSWORD` at least 12 characters, `SETTINGS_ENCRYPTION_KEY` must be a Fernet-compatible key, and `CORS_ORIGINS` cannot be `*`.
 
-## Configuration
+## Optional Environment
 
-All runtime config lives in `.env`. The most important keys:
+- `GITHUB_PAT`: enables private repo import, pull requests, and finalize-to-repo.
+- `BRAVE_SEARCH_API_KEY`: enables web research for Scout.
+- `GENX_BASE_URL`: defaults to `https://query.genx.sh/v1`.
+- `GENX_MODEL_REASONING`, `GENX_MODEL_RESEARCH`, `GENX_MODEL_EDITS`.
+- `JWT_TTL_HOURS`, `BACKEND_PORT`, `FRONTEND_PORT`.
 
-| Variable | Required | What it does |
-|---|---|---|
-| `GENX_API_KEY` | ✅ | Your `gnxk_...` key from genx.sh — drives every agent. |
-| `REACT_APP_BACKEND_URL` | ✅ | Public URL the browser uses for `/api` calls. Baked into the bundle at build time. |
-| `JWT_SECRET` | ✅ | Long random string. Use `openssl rand -hex 48`. |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | ✅ | Seeded on first boot. Change them before going live. |
-| `GITHUB_PAT` | ⚪ | Personal access token with `repo` + `pull_request` scopes. Needed to open PRs. |
-| `GENX_MODEL_*` | ⚪ | Override the cheap-vs-expensive routing. Use any ID from `GET /api/models`. |
-| `WEBCONTAINER_API_KEY` | ⚪ | StackBlitz key for full Node sandboxes. Static iframe renderer is used otherwise. |
+When GitHub PAT is missing, GitHub write actions are disabled and readiness warns. When Brave Search is missing, web research is disabled and readiness warns. When GenX is missing or invalid, readiness fails and AI actions are disabled.
 
-## Architecture
+## Readiness
 
-```
-┌──────────────┐    JWT/REST     ┌────────────────────┐    OpenAI-compat
-│  React SPA   │ ──────────────▶ │  FastAPI backend   │ ───────────────────▶  GenX Router
-│  (Tailwind)  │ ◀── WebSocket ─ │  Orchestrator      │ ◀── streamed text ── (40+ models)
-└──────────────┘                 │  ↓ MCP tool layer  │
-                                 │  • filesystem (Mongo)
-                                 │  • github API
-                                 │  • web search (Brave)
-                                 └────────────────────┘
-```
+`GET https://builder.amarktai.com/api/readiness` returns `PASS` only when required production configuration is strong, Mongo responds, an active admin exists, GenX is configured and live, and source checks pass. Optional GitHub and Brave Search keys produce warnings when absent.
 
-- `backend/agents/genx_provider.py` — single class; swap providers in one place.
-- `backend/agents/orchestrator.py` — Scout → Architect → Coder → Reviewer + iteration agent.
-- `backend/agents/mcp_tools.py` — MCP-style tool surface (filesystem, GitHub, web search).
-- `backend/agents/preview.py` — inlined-iframe live preview renderer.
-- `backend/github_integration.py` — GitHub REST client (import repo, open PR).
-- `backend/auth.py` — JWT + bcrypt + seeded admin.
+## Verification
 
-## API
-
-All `/api/projects/*` endpoints require `Authorization: Bearer <token>`.
-
-```
-POST   /api/auth/login                  { email, password } → { token, expires_at, user }
-GET    /api/auth/me                     → user
-GET    /api/models                      → tiers + agents + GenX /v1/models
-POST   /api/projects                    { name, prompt }
-POST   /api/projects/from-repo          { repo_url, branch?, github_pat? }
-GET    /api/projects                    → user's projects
-GET    /api/projects/{id}               → project
-DELETE /api/projects/{id}
-POST   /api/projects/{id}/messages      { content }    (iteration)
-GET    /api/projects/{id}/messages      → list
-GET    /api/projects/{id}/events        → agent timeline
-GET    /api/projects/{id}/files         → file list
-GET    /api/projects/{id}/files/content?path=foo.html
-GET    /api/projects/{id}/preview       → self-contained HTML (public)
-POST   /api/projects/{id}/finalize      → mocked GitHub repo creation
-POST   /api/projects/{id}/pr            { github_pat, branch_name?, title?, body? }
-WS     /api/ws/{id}?token=<jwt>         → live agent events
-GET/POST /api/settings                  → masked / update API keys
-POST   /api/contact                     → public contact form
-```
-
-## Development (without Docker)
-
-Backend:
+Development check:
 
 ```bash
-cd backend
-pip install -r requirements.txt
-cp ../.env.example .env  && edit .env
-uvicorn server:app --reload --host 0.0.0.0 --port 8001
+bash scripts/go_live_check.sh
 ```
 
-Frontend:
+Production check:
 
 ```bash
-cd frontend
-yarn install
-echo "REACT_APP_BACKEND_URL=http://localhost:8001" > .env
-yarn start
+CHECK_MODE=production bash scripts/go_live_check.sh
 ```
 
-## License
-
-MIT — do whatever you want, just don't blame us when the AI ships a typo.
+The production check builds the frontend and backend, validates Docker Compose, starts the stack, calls `/api/health`, calls `/api/readiness`, and exits non-zero unless readiness is `PASS`.

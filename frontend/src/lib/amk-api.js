@@ -59,16 +59,30 @@ export const Projects = {
   send: (id, content) => api.post(`/projects/${id}/messages`, { content }).then((r) => r.data),
   finalize: (id) => api.post(`/projects/${id}/finalize`).then((r) => r.data),
   openPR: (id, body) => api.post(`/projects/${id}/pr`, body).then((r) => r.data),
-  previewUrl: (id) => `${API}/projects/${id}/preview`,
+  previewUrl: (id) => `${API}/projects/${id}/preview?token=${encodeURIComponent(getToken() || "")}`,
 };
 
 export const Settings = {
   get: () => api.get("/settings").then((r) => r.data),
   update: (body) => api.post("/settings", body).then((r) => r.data),
+  clear: (key) => api.delete(`/settings/${key}`).then((r) => r.data),
 };
 
 export const Models = {
   list: () => api.get("/models").then((r) => r.data),
+};
+
+export const System = {
+  health: () => api.get("/health").then((r) => r.data),
+  readiness: () => api.get("/readiness").then((r) => r.data),
+  githubStatus: () => api.get("/integrations/github/status").then((r) => r.data),
+};
+
+export const Admin = {
+  users: () => api.get("/admin/users").then((r) => r.data),
+  createUser: (body) => api.post("/admin/users", body).then((r) => r.data),
+  resetPassword: (id, password) => api.post(`/admin/users/${id}/reset-password`, { password }).then((r) => r.data),
+  setStatus: (id, status) => api.patch(`/admin/users/${id}/status`, { status }).then((r) => r.data),
 };
 
 export const Contact = {

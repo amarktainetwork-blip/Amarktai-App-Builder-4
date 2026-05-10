@@ -11,13 +11,13 @@ export default function Header({ projectName, status, onOpenSettings, onFinalize
       <div className="flex items-center gap-3">
         <Link to="/" data-testid="header-logo" className="flex items-center gap-2 group">
           <div className="w-7 h-7 grid place-items-center border border-amk-line bg-amk-panel">
-            <span className="font-mono text-[13px] font-bold tracking-tight">E</span>
+            <span className="font-mono text-[13px] font-bold tracking-tight">A</span>
           </div>
           <span className="font-display font-semibold text-sm tracking-tight text-amk-fg group-hover:text-white">
-            AmarktAI <span className="text-amk-accent">Network</span>
+            Amarktai <span className="text-amk-accent">App Builder</span>
           </span>
           <span className="font-mono text-[10px] text-amk-fg3 uppercase tracking-[0.18em] hidden sm:inline">
-            // genx-routed
+            // GenX Router
           </span>
         </Link>
         {projectName && (

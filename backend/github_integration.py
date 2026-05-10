@@ -60,6 +60,14 @@ async def _gh(cx: httpx.AsyncClient, method: str, path: str, pat: str | None = N
     return r.json()
 
 
+async def validate_pat(pat: str | None) -> dict:
+    if not pat:
+        return {"configured": False, "valid": False, "login": None}
+    async with httpx.AsyncClient(timeout=20.0) as cx:
+        user = await _gh(cx, "GET", "/user", pat)
+    return {"configured": True, "valid": True, "login": user.get("login"), "html_url": user.get("html_url")}
+
+
 async def import_repo(owner: str, repo: str, branch: str | None = None,
                       pat: str | None = None) -> dict:
     """Pull tree + text-file contents from a public (or PAT-accessible) repo."""
@@ -112,11 +120,59 @@ async def import_repo(owner: str, repo: str, branch: str | None = None,
     }
 
 
+async def create_repo_with_files(*, name: str, description: str, private: bool,
+                                 files: list[dict], pat: str) -> dict:
+    if not pat:
+        raise ValueError("GitHub PAT is required. Connect GitHub PAT in Settings.")
+    if not files:
+        raise ValueError("No files are available to commit.")
+
+    async with httpx.AsyncClient(timeout=60.0) as cx:
+        me = await _gh(cx, "GET", "/user", pat)
+        repo = await _gh(cx, "POST", "/user/repos", pat, json={
+            "name": name,
+            "description": description or "Created with Amarktai App Builder",
+            "private": private,
+            "auto_init": True,
+        })
+        owner = repo["owner"]["login"]
+        default_branch = repo.get("default_branch") or "main"
+        ref = await _gh(cx, "GET", f"/repos/{owner}/{name}/git/ref/heads/{default_branch}", pat)
+        base_sha = ref["object"]["sha"]
+        base_commit = await _gh(cx, "GET", f"/repos/{owner}/{name}/git/commits/{base_sha}", pat)
+        base_tree_sha = base_commit["tree"]["sha"]
+
+        tree_items = []
+        for f in files:
+            blob = await _gh(cx, "POST", f"/repos/{owner}/{name}/git/blobs", pat,
+                             json={"content": f["content"], "encoding": "utf-8"})
+            tree_items.append({"path": f["path"], "mode": "100644", "type": "blob", "sha": blob["sha"]})
+
+        new_tree = await _gh(cx, "POST", f"/repos/{owner}/{name}/git/trees", pat,
+                             json={"base_tree": base_tree_sha, "tree": tree_items})
+        new_commit = await _gh(cx, "POST", f"/repos/{owner}/{name}/git/commits", pat,
+                               json={"message": "Initial commit from Amarktai App Builder",
+                                     "tree": new_tree["sha"], "parents": [base_sha]})
+        await _gh(cx, "PATCH", f"/repos/{owner}/{name}/git/refs/heads/{default_branch}", pat,
+                  json={"sha": new_commit["sha"], "force": False})
+
+    return {
+        "repo": f"{owner}/{name}",
+        "url": repo["html_url"],
+        "owner": owner,
+        "created_by": me.get("login"),
+        "branch": default_branch,
+        "commit_sha": new_commit["sha"],
+    }
+
+
 async def open_pr(*, owner: str, repo: str, base_branch: str, new_branch: str,
                   files: list[dict], title: str, body: str, pat: str) -> dict:
     """Create branch from base, commit all files, open a PR. PAT must be able to push."""
     if not pat:
-        raise ValueError("GitHub PAT required to open a PR")
+        raise ValueError("GitHub PAT is required. Connect GitHub PAT in Settings.")
+    if not files:
+        raise ValueError("No files are available to commit.")
 
     async with httpx.AsyncClient(timeout=60.0) as cx:
         # 1) Get base ref SHA

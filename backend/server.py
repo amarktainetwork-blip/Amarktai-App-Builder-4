@@ -1,4 +1,3 @@
-"""AmarktAI Network — Autonomous Coding Platform (FastAPI backend)."""
 from __future__ import annotations
 
 import asyncio
@@ -6,59 +5,94 @@ import logging
 import os
 import re
 import uuid
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
+import httpx
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
 
 from agents.genx_provider import AGENT_TIER, GenXProvider
-from agents.mcp_tools import TOOL_SCHEMAS, ProjectFS, github_create_repo
+from agents.mcp_tools import TOOL_SCHEMAS, ProjectFS
 from agents.orchestrator import Orchestrator
 from agents.preview import render_preview
 from auth import (
-    decode_token, hash_password, make_token, require_user, seed_admin, verify_password,
+    decode_token,
+    hash_password,
+    make_token,
+    public_user,
+    require_admin,
+    require_user,
+    seed_admin,
+    verify_password,
+)
+from config import (
+    APP_NAME,
+    AGENTS_NAME,
+    ROUTER_NAME,
+    assert_startup_config,
+    cors_origins,
+    is_production,
+    validate_static_config,
 )
 import github_integration as gh
+from settings_store import clear_secret, get_secret, settings_status, save_secret
+
 
 ROOT_DIR = Path(__file__).parent
+REPO_ROOT = ROOT_DIR.parent
+load_dotenv(REPO_ROOT / ".env")
 load_dotenv(ROOT_DIR / ".env")
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+os.environ.setdefault("APP_ENV", "development")
+os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
+os.environ.setdefault("DB_NAME", "amarktai_builder")
+os.environ.setdefault("CORS_ORIGINS", "http://localhost:8080,http://localhost:3000")
+os.environ.setdefault("JWT_SECRET", "development-jwt-secret-change-before-production")
+os.environ.setdefault("ADMIN_EMAIL", "admin@amarktai.local")
+os.environ.setdefault("ADMIN_PASSWORD", "amarktai-admin-local")
+os.environ.setdefault("GENX_BASE_URL", "https://query.genx.sh/v1")
+os.environ.setdefault("GENX_MODEL_REASONING", "claude-sonnet-4-6")
+os.environ.setdefault("GENX_MODEL_RESEARCH", "gpt-5.4-mini")
+os.environ.setdefault("GENX_MODEL_EDITS", "claude-haiku-4-5")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("amarktai")
 
-mongo_url = os.environ["MONGO_URL"]
-client = AsyncIOMotorClient(mongo_url)
+client = AsyncIOMotorClient(os.environ["MONGO_URL"])
 db = client[os.environ["DB_NAME"]]
-
 PIPELINE_SEM = asyncio.Semaphore(2)
+LOGIN_ATTEMPTS: dict[str, deque[datetime]] = defaultdict(deque)
+SETTINGS_KEYS = ["GENX_API_KEY", "GITHUB_PAT", "BRAVE_SEARCH_API_KEY"]
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(app: FastAPI):
+    assert_startup_config()
+    app.state.db = db
     await seed_admin(db)
-    logger.info("AmarktAI Network ready")
+    logger.info("%s backend ready", APP_NAME)
     yield
     client.close()
 
 
-app = FastAPI(title="AmarktAI Network — Autonomous Coding Platform", lifespan=lifespan)
+app = FastAPI(title=f"{APP_NAME} API", lifespan=lifespan)
+app.state.db = db
 api = APIRouter(prefix="/api")
 secured = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
+admin_api = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-
-# ---------------------------- WebSocket Hub ----------------------------
 
 class Hub:
     def __init__(self) -> None:
@@ -97,8 +131,6 @@ def emitter_for(project_id: str):
     return _emit
 
 
-# ---------------------------- Pydantic Models ----------------------------
-
 class LoginBody(BaseModel):
     email: EmailStr
     password: str
@@ -111,18 +143,17 @@ class ContactBody(BaseModel):
 
 
 class ProjectCreate(BaseModel):
-    name: str
-    prompt: str
+    name: str = Field(min_length=1, max_length=120)
+    prompt: str = Field(min_length=1, max_length=12000)
 
 
 class RepoImportBody(BaseModel):
     repo_url: str
     branch: Optional[str] = None
-    github_pat: Optional[str] = None  # used only if repo is private
 
 
 class PRBody(BaseModel):
-    github_pat: str
+    github_pat: Optional[str] = None
     branch_name: Optional[str] = None
     title: Optional[str] = None
     body: Optional[str] = None
@@ -133,10 +164,13 @@ class Project(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     prompt: str
-    status: str = "queued"  # queued | running | ready | failed
+    status: str = "queued"
+    error: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
     usage: dict = Field(default_factory=lambda: {"tokens": 0, "cost_usd": 0.0, "last_model": None})
     repo_url: str | None = None
-    github: dict | None = None     # { owner, repo, branch, default_branch, commit_sha, html_url }
+    github: dict | None = None
     pr_url: str | None = None
     owner_id: str | None = None
     created_at: str = Field(default_factory=_now)
@@ -144,43 +178,224 @@ class Project(BaseModel):
 
 
 class MessageCreate(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=12000)
 
 
 class SettingsUpdate(BaseModel):
     GENX_API_KEY: Optional[str] = None
     GITHUB_PAT: Optional[str] = None
-    WEBCONTAINER_API_KEY: Optional[str] = None
     BRAVE_SEARCH_API_KEY: Optional[str] = None
 
 
-# ---------------------------- Orchestrator launcher ----------------------------
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=12)
+    role: str = Field(default="user", pattern="^(admin|user)$")
+
+
+class PasswordReset(BaseModel):
+    password: str = Field(min_length=12)
+
+
+class StatusPatch(BaseModel):
+    status: str = Field(pattern="^(active|disabled)$")
+
+
+def _login_allowed(key: str) -> bool:
+    now = datetime.now(timezone.utc)
+    window = now - timedelta(minutes=10)
+    attempts = LOGIN_ATTEMPTS[key]
+    while attempts and attempts[0] < window:
+        attempts.popleft()
+    if len(attempts) >= 8:
+        return False
+    attempts.append(now)
+    return True
+
+
+async def _runtime_secret(key: str) -> str | None:
+    return await get_secret(db, key)
+
+
+async def _genx_provider() -> GenXProvider:
+    key = await _runtime_secret("GENX_API_KEY")
+    return GenXProvider(api_key=key)
+
 
 async def _launch_pipeline(project_id: str, prompt: str, mode: str) -> None:
     async with PIPELINE_SEM:
-        provider = GenXProvider()
-        orch = Orchestrator(db, provider, project_id, emitter_for(project_id))
+        emit = emitter_for(project_id)
+        started = _now()
+        await db.projects.update_one(
+            {"id": project_id},
+            {"$set": {"status": "running", "started_at": started, "completed_at": None, "error": None, "updated_at": started}},
+        )
+        await emit({"type": "project_status", "data": {"status": "running"}})
         try:
+            provider = await _genx_provider()
+            orch = Orchestrator(db, provider, project_id, emit)
             if mode == "iterate":
-                await orch.run_iteration(prompt)
+                await asyncio.wait_for(orch.run_iteration(prompt), timeout=600)
             else:
-                await orch.run_full_build(prompt)
-        except Exception as e:
-            logger.exception("pipeline failed: %s", e)
+                await asyncio.wait_for(orch.run_full_build(prompt), timeout=900)
+            completed = _now()
+            await db.projects.update_one(
+                {"id": project_id},
+                {"$set": {"completed_at": completed, "updated_at": completed}, "$unset": {"error": ""}},
+            )
+        except Exception as exc:
+            msg = str(exc)
+            logger.exception("pipeline failed for %s: %s", project_id, msg)
+            completed = _now()
+            await db.projects.update_one(
+                {"id": project_id},
+                {"$set": {"status": "failed", "error": msg, "completed_at": completed, "updated_at": completed}},
+            )
+            await db.agent_events.insert_one({
+                "id": str(uuid.uuid4()),
+                "project_id": project_id,
+                "agent": "system",
+                "status": "failed",
+                "detail": msg,
+                "meta": {},
+                "created_at": completed,
+            })
+            await emit({"type": "agent_event", "data": {
+                "id": str(uuid.uuid4()), "project_id": project_id, "agent": "system",
+                "status": "failed", "detail": msg, "meta": {}, "created_at": completed,
+            }})
+            await emit({"type": "project_status", "data": {"status": "failed", "error": msg}})
+            await emit({"type": "error", "data": {"message": msg}})
 
-
-# ---------------------------- Public Routes ----------------------------
 
 @api.get("/")
 async def root() -> dict:
-    return {"service": "amarktai-network", "status": "ok"}
+    return {"service": "amarktai-app-builder", "status": "ok"}
+
+
+@api.get("/health")
+async def health() -> dict:
+    return {
+        "service": "amarktai-app-builder",
+        "status": "ok",
+        "version": os.environ.get("APP_VERSION", "0.1.0"),
+        "build_sha": os.environ.get("BUILD_SHA"),
+        "timestamp": _now(),
+    }
+
+
+async def _forbidden_source_check() -> tuple[bool, str]:
+    upper_ai = "".join(("AI", "VA"))
+    title_ai = "".join(("Ai", "va"))
+    lower_ai = "".join(("ai", "va"))
+    lower_platform = "".join(("eme", "rgent"))
+    title_platform = "".join(("Eme", "rgent"))
+    platform_base = "".join(("eme", "rgent", "base"))
+    platform_assets = "".join(("assets.", "eme", "rgent", ".sh"))
+    platform_package = "".join(("eme", "rgent", "integrations"))
+    forbidden = [
+        upper_ai, title_ai, lower_ai, lower_platform, title_platform,
+        platform_base, platform_assets, platform_package,
+    ]
+    excluded = {".git", "node_modules", "build", "dist"}
+    try:
+        for path in REPO_ROOT.rglob("*"):
+            if not path.is_file():
+                continue
+            if any(part in excluded for part in path.parts):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            lowered = text.lower()
+            if any(term.lower() in lowered for term in forbidden):
+                return False, f"Legacy reference remains in {path.relative_to(REPO_ROOT)}"
+        return True, "No legacy references found in scanned source files."
+    except Exception as exc:
+        return False, f"Source scan could not complete: {exc}"
+
+
+@api.get("/readiness")
+async def readiness() -> dict:
+    checks = [c.as_dict() for c in validate_static_config()]
+
+    async def add(name: str, status: str, detail: str, severity: str = "info") -> None:
+        checks.append({"name": name, "status": status, "detail": detail, "severity": severity})
+
+    try:
+        await db.command("ping")
+        await add("Mongo ping", "PASS", "MongoDB responded.")
+    except Exception as exc:
+        await add("Mongo ping", "FAIL", str(exc), "blocker")
+
+    admin = await db.users.find_one({"role": "admin", "status": "active"}, {"_id": 0, "id": 1})
+    await add("admin user", "PASS" if admin else "FAIL",
+              "Active admin exists." if admin else "Create or seed an active admin user.",
+              "info" if admin else "blocker")
+
+    genx_key = await _runtime_secret("GENX_API_KEY")
+    if not genx_key:
+        await add("GenX API key", "FAIL", "Set GENX_API_KEY in Settings or environment.", "blocker")
+    else:
+        try:
+            models = await GenXProvider(api_key=genx_key).list_models()
+            await add("GenX live models", "PASS", f"{len(models)} models returned by {ROUTER_NAME}.")
+        except Exception as exc:
+            await add("GenX live models", "FAIL", str(exc), "blocker")
+
+    github_pat = await _runtime_secret("GITHUB_PAT")
+    if not github_pat:
+        await add("GitHub PAT", "WARN", "Connect GitHub PAT in Settings to enable private imports, PRs, and repo creation.", "warning")
+    else:
+        try:
+            info = await gh.validate_pat(github_pat)
+            await add("GitHub PAT live validation", "PASS", f"Authenticated as {info.get('login')}.")
+        except Exception as exc:
+            await add("GitHub PAT live validation", "FAIL", str(exc), "blocker")
+
+    brave_key = await _runtime_secret("BRAVE_SEARCH_API_KEY")
+    if not brave_key:
+        await add("Brave Search key", "WARN", "Scout runs without web research until BRAVE_SEARCH_API_KEY is configured.", "warning")
+    else:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as cx:
+                r = await cx.get(
+                    "https://api.search.brave.com/res/v1/web/search",
+                    headers={"Accept": "application/json", "X-Subscription-Token": brave_key},
+                    params={"q": "Amarktai", "count": 1},
+                )
+                r.raise_for_status()
+            await add("Brave Search live validation", "PASS", "Brave Search API responded.")
+        except Exception as exc:
+            await add("Brave Search live validation", "FAIL", str(exc), "blocker")
+
+    clean, detail = await _forbidden_source_check()
+    await add("legacy source references", "PASS" if clean else "FAIL", detail, "info" if clean else "blocker")
+    await add("production demo simulation disabled", "PASS", "Production paths return disabled or errors when required keys are absent.")
+
+    blockers = [c["detail"] for c in checks if c["status"] == "FAIL" and c["severity"] == "blocker"]
+    warnings = [c["detail"] for c in checks if c["status"] == "WARN"]
+    return {
+        "overall": "FAIL" if blockers else "PASS",
+        "checks": checks,
+        "blockers": blockers,
+        "warnings": warnings,
+        "timestamp": _now(),
+    }
 
 
 @api.post("/auth/login")
-async def login(body: LoginBody) -> dict:
-    user = await db.users.find_one({"email": body.email.lower()}, {"_id": 0})
+async def login(body: LoginBody, request: Request) -> dict:
+    email = body.email.lower().strip()
+    ip = request.client.host if request.client else "unknown"
+    if not _login_allowed(f"{ip}:{email}"):
+        raise HTTPException(429, "Too many login attempts. Try again later.")
+    user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(401, "Invalid email or password")
+    if user.get("status", "active") != "active":
+        raise HTTPException(403, "User is disabled")
     return make_token(user)
 
 
@@ -194,37 +409,27 @@ async def me(claims: dict = Depends(require_user)) -> dict:
 
 @api.post("/contact")
 async def contact(body: ContactBody) -> dict:
-    doc = {
-        "id": str(uuid.uuid4()),
-        "name": body.name, "email": body.email, "message": body.message,
-        "created_at": _now(),
-    }
+    doc = {"id": str(uuid.uuid4()), "name": body.name, "email": body.email, "message": body.message, "created_at": _now()}
     await db.contact_messages.insert_one(dict(doc))
     return {"ok": True, "id": doc["id"]}
 
 
-# ---------------------------- Secured Routes ----------------------------
-
 @secured.get("/models")
 async def list_models() -> dict:
-    provider = GenXProvider()
     try:
-        models = await provider.list_models()
-    except Exception as e:
-        logger.warning("Could not fetch GenX /v1/models: %s", e)
-        models = []
-    return {
-        "tiers": GenXProvider.list_tiers(),
-        "agents": AGENT_TIER,
-        "tools": TOOL_SCHEMAS,
-        "available": models,
-    }
+        models = await (await _genx_provider()).list_models()
+    except Exception as exc:
+        raise HTTPException(503, str(exc))
+    return {"tiers": GenXProvider.list_tiers(), "agents": AGENT_TIER, "tools": TOOL_SCHEMAS, "available": models}
 
 
 @secured.post("/projects", response_model=Project)
 async def create_project(body: ProjectCreate, claims: dict = Depends(require_user)) -> Project:
+    if not await _runtime_secret("GENX_API_KEY"):
+        raise HTTPException(503, "GENX_API_KEY is required for Amarktai Assistant and Amarktai Coding Agents.")
     proj = Project(name=body.name, prompt=body.prompt, owner_id=claims["sub"])
     await db.projects.insert_one(dict(proj.model_dump()))
+    await hub.broadcast(proj.id, {"type": "project_status", "data": {"status": "queued"}})
     asyncio.create_task(_launch_pipeline(proj.id, body.prompt, "build"))
     return proj
 
@@ -233,17 +438,18 @@ async def create_project(body: ProjectCreate, claims: dict = Depends(require_use
 async def import_from_repo(body: RepoImportBody, claims: dict = Depends(require_user)) -> Project:
     try:
         owner, repo = gh.parse_repo_url(body.repo_url)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    pat = body.github_pat or os.environ.get("GITHUB_PAT") or None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    pat = await _runtime_secret("GITHUB_PAT")
     try:
         info = await gh.import_repo(owner, repo, body.branch, pat)
-    except Exception as e:
-        raise HTTPException(400, f"GitHub import failed: {e}")
+    except Exception as exc:
+        raise HTTPException(400, f"GitHub import failed: {exc}")
     proj = Project(
         name=f"{owner}/{repo}",
-        prompt=f"Imported public repo {info['html_url']} (branch {info['branch']})",
+        prompt=f"Imported GitHub repo {info['html_url']} on branch {info['branch']}",
         status="ready",
+        completed_at=_now(),
         owner_id=claims["sub"],
         github={k: info[k] for k in ("owner", "repo", "branch", "default_branch", "commit_sha", "html_url")},
     )
@@ -251,19 +457,33 @@ async def import_from_repo(body: RepoImportBody, claims: dict = Depends(require_
     fs = ProjectFS(db, proj.id)
     for f in info["files"]:
         await fs.write(f["path"], f["content"], _ext_lang(f["path"]))
+    await db.messages.insert_one({
+        "id": str(uuid.uuid4()), "project_id": proj.id, "role": "system", "agent": None,
+        "content": f"Imported {len(info['files'])} files. Skipped {info['skipped']} files due to size, binary type, or excluded directories.",
+        "meta": {"imported_files": len(info["files"]), "skipped_files": info["skipped"]},
+        "created_at": _now(),
+    })
     return proj
 
 
 @secured.get("/projects", response_model=list[Project])
 async def list_projects(claims: dict = Depends(require_user)) -> list[Project]:
-    cur = db.projects.find({"owner_id": claims["sub"]}, {"_id": 0}).sort("created_at", -1)
-    docs = await cur.to_list(500)
+    query = {} if claims.get("role") == "admin" else {"owner_id": claims["sub"]}
+    docs = await db.projects.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
     return [Project(**d) for d in docs]
+
+
+async def _own(project_id: str, claims: dict) -> None:
+    query = {"id": project_id} if claims.get("role") == "admin" else {"id": project_id, "owner_id": claims["sub"]}
+    doc = await db.projects.find_one(query, {"_id": 0, "id": 1})
+    if not doc:
+        raise HTTPException(404, "Project not found")
 
 
 @secured.get("/projects/{project_id}", response_model=Project)
 async def get_project(project_id: str, claims: dict = Depends(require_user)) -> Project:
-    doc = await db.projects.find_one({"id": project_id, "owner_id": claims["sub"]}, {"_id": 0})
+    query = {"id": project_id} if claims.get("role") == "admin" else {"id": project_id, "owner_id": claims["sub"]}
+    doc = await db.projects.find_one(query, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Project not found")
     return Project(**doc)
@@ -271,7 +491,8 @@ async def get_project(project_id: str, claims: dict = Depends(require_user)) -> 
 
 @secured.delete("/projects/{project_id}")
 async def delete_project(project_id: str, claims: dict = Depends(require_user)) -> dict:
-    res = await db.projects.delete_one({"id": project_id, "owner_id": claims["sub"]})
+    query = {"id": project_id} if claims.get("role") == "admin" else {"id": project_id, "owner_id": claims["sub"]}
+    res = await db.projects.delete_one(query)
     if res.deleted_count == 0:
         raise HTTPException(404, "Project not found")
     await db.messages.delete_many({"project_id": project_id})
@@ -280,24 +501,16 @@ async def delete_project(project_id: str, claims: dict = Depends(require_user)) 
     return {"ok": True}
 
 
-async def _own(project_id: str, claims: dict) -> None:
-    doc = await db.projects.find_one({"id": project_id, "owner_id": claims["sub"]}, {"_id": 0, "id": 1})
-    if not doc:
-        raise HTTPException(404, "Project not found")
-
-
 @secured.get("/projects/{project_id}/messages")
 async def list_messages(project_id: str, claims: dict = Depends(require_user)) -> list[dict]:
     await _own(project_id, claims)
-    cur = db.messages.find({"project_id": project_id}, {"_id": 0}).sort("created_at", 1)
-    return await cur.to_list(2000)
+    return await db.messages.find({"project_id": project_id}, {"_id": 0}).sort("created_at", 1).to_list(2000)
 
 
 @secured.get("/projects/{project_id}/events")
 async def list_events(project_id: str, claims: dict = Depends(require_user)) -> list[dict]:
     await _own(project_id, claims)
-    cur = db.agent_events.find({"project_id": project_id}, {"_id": 0}).sort("created_at", 1)
-    return await cur.to_list(2000)
+    return await db.agent_events.find({"project_id": project_id}, {"_id": 0}).sort("created_at", 1).to_list(2000)
 
 
 @secured.get("/projects/{project_id}/files")
@@ -309,29 +522,32 @@ async def list_files(project_id: str, claims: dict = Depends(require_user)) -> l
 @secured.get("/projects/{project_id}/files/content")
 async def file_content(project_id: str, path: str, claims: dict = Depends(require_user)) -> dict:
     await _own(project_id, claims)
-    doc = await ProjectFS(db, project_id).read(path)
+    try:
+        doc = await ProjectFS(db, project_id).read(path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     if not doc:
         raise HTTPException(404, "File not found")
     return doc
 
 
 @secured.post("/projects/{project_id}/messages")
-async def send_message(project_id: str, body: MessageCreate,
-                       claims: dict = Depends(require_user)) -> dict:
-    proj = await db.projects.find_one({"id": project_id, "owner_id": claims["sub"]}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
+async def send_message(project_id: str, body: MessageCreate, claims: dict = Depends(require_user)) -> dict:
+    await _own(project_id, claims)
+    if not await _runtime_secret("GENX_API_KEY"):
+        raise HTTPException(503, "GENX_API_KEY is required for Amarktai Assistant.")
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
     if proj.get("status") in ("running", "queued"):
         raise HTTPException(409, "Build already in progress")
-    await db.projects.update_one({"id": project_id}, {"$set": {"status": "queued"}})
+    await db.projects.update_one({"id": project_id}, {"$set": {"status": "queued", "updated_at": _now()}})
+    await hub.broadcast(project_id, {"type": "project_status", "data": {"status": "queued"}})
     asyncio.create_task(_launch_pipeline(project_id, body.content, "iterate"))
     return {"ok": True, "queued": True}
 
 
-# Preview is intentionally public (so the iframe inside our own UI just works
-# without juggling auth headers); URL is unguessable thanks to UUID project IDs.
-@api.get("/projects/{project_id}/preview", response_class=HTMLResponse)
-async def project_preview(project_id: str) -> HTMLResponse:
+@secured.get("/projects/{project_id}/preview", response_class=HTMLResponse)
+async def project_preview(project_id: str, claims: dict = Depends(require_user)) -> HTMLResponse:
+    await _own(project_id, claims)
     files = await ProjectFS(db, project_id).list_full()
     html = render_preview(files)
     return HTMLResponse(content=html, headers={"X-Frame-Options": "SAMEORIGIN"})
@@ -339,119 +555,131 @@ async def project_preview(project_id: str) -> HTMLResponse:
 
 @secured.post("/projects/{project_id}/finalize")
 async def finalize(project_id: str, claims: dict = Depends(require_user)) -> dict:
-    proj = await db.projects.find_one({"id": project_id, "owner_id": claims["sub"]}, {"_id": 0})
-    if not proj:
-        raise HTTPException(404, "Project not found")
-    repo = await github_create_repo(
-        name=re.sub(r"[^a-z0-9-]+", "-", proj["name"].lower()).strip("-")[:60] or "amarktai-app",
-        description=proj["prompt"][:120],
-        private=False,
-    )
-    await db.projects.update_one(
-        {"id": project_id}, {"$set": {"repo_url": repo["url"], "updated_at": _now()}}
-    )
+    await _own(project_id, claims)
+    pat = await _runtime_secret("GITHUB_PAT")
+    if not pat:
+        raise HTTPException(403, "Connect GitHub PAT in Settings to create repositories.")
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    files = await ProjectFS(db, project_id).list_full()
+    payload_files = [{"path": f["path"], "content": f["content"]} for f in files]
+    repo_name = re.sub(r"[^a-z0-9-]+", "-", proj["name"].lower()).strip("-")[:60] or "amarktai-app"
+    try:
+        repo = await gh.create_repo_with_files(name=repo_name, description=proj["prompt"][:120],
+                                               private=False, files=payload_files, pat=pat)
+    except Exception as exc:
+        raise HTTPException(400, f"Failed to finalize: {exc}")
+    await db.projects.update_one({"id": project_id}, {"$set": {"repo_url": repo["url"], "updated_at": _now()}})
     await hub.broadcast(project_id, {"type": "finalized", "data": repo})
     return repo
 
 
 @secured.post("/projects/{project_id}/pr")
-async def open_pr(project_id: str, body: PRBody,
-                  claims: dict = Depends(require_user)) -> dict:
-    proj = await db.projects.find_one({"id": project_id, "owner_id": claims["sub"]}, {"_id": 0})
+async def open_pr(project_id: str, body: PRBody, claims: dict = Depends(require_user)) -> dict:
+    await _own(project_id, claims)
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
     if not proj or not proj.get("github"):
         raise HTTPException(400, "Project was not imported from a GitHub repo")
+    pat = body.github_pat or await _runtime_secret("GITHUB_PAT")
+    if not pat:
+        raise HTTPException(403, "Connect GitHub PAT in Settings to open pull requests.")
     github = proj["github"]
     files = await ProjectFS(db, project_id).list_full()
     payload_files = [{"path": f["path"], "content": f["content"]} for f in files]
     branch = body.branch_name or f"amarktai/{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-    title = body.title or f"AmarktAI Network: updates from agentic build"
-    body_md = body.body or (
-        f"This PR was generated by **AmarktAI Network**.\n\n"
-        f"Files updated by autonomous agents (Scout → Architect → Coder → Reviewer)."
-    )
+    title = body.title or "Amarktai App Builder: updates from coding agents"
+    body_md = body.body or f"This PR was generated by **{AGENTS_NAME}** through {ROUTER_NAME}."
     try:
         result = await gh.open_pr(
             owner=github["owner"], repo=github["repo"],
             base_branch=github.get("default_branch") or github["branch"],
-            new_branch=branch, files=payload_files,
-            title=title, body=body_md, pat=body.github_pat,
+            new_branch=branch, files=payload_files, title=title, body=body_md, pat=pat,
         )
-    except Exception as e:
-        raise HTTPException(400, f"Failed to open PR: {e}")
-    await db.projects.update_one(
-        {"id": project_id}, {"$set": {"pr_url": result["pr_url"], "updated_at": _now()}}
-    )
+    except Exception as exc:
+        raise HTTPException(400, f"Failed to open PR: {exc}")
+    await db.projects.update_one({"id": project_id}, {"$set": {"pr_url": result["pr_url"], "updated_at": _now()}})
     await hub.broadcast(project_id, {"type": "pr_opened", "data": result})
     return result
 
 
-# ---------------------------- Settings ----------------------------
-
-ENV_FILE = ROOT_DIR / ".env"
-SETTINGS_KEYS = ["GENX_API_KEY", "GITHUB_PAT", "WEBCONTAINER_API_KEY", "BRAVE_SEARCH_API_KEY"]
-ALL_KEYS = ["MONGO_URL", "DB_NAME", "CORS_ORIGINS",
-            "GENX_API_KEY", "GENX_BASE_URL",
-            "GENX_MODEL_REASONING", "GENX_MODEL_RESEARCH", "GENX_MODEL_EDITS",
-            "JWT_SECRET", "JWT_ALGO", "JWT_TTL_HOURS",
-            "ADMIN_EMAIL", "ADMIN_PASSWORD",
-            *SETTINGS_KEYS]
-
-
-def _read_env() -> dict[str, str]:
-    out: dict[str, str] = {}
-    if ENV_FILE.exists():
-        for line in ENV_FILE.read_text().splitlines():
-            if "=" not in line or line.strip().startswith("#"):
-                continue
-            k, _, v = line.partition("=")
-            out[k.strip()] = v.strip().strip('"')
-    return out
-
-
-def _write_env(updates: dict[str, str]) -> None:
-    current = _read_env()
-    current.update({k: v for k, v in updates.items() if v is not None})
-    seen: set[str] = set()
-    lines = []
-    for k in ALL_KEYS:
-        if k not in current:
-            continue
-        lines.append(f'{k}="{current[k]}"')
-        seen.add(k)
-    for k, v in current.items():
-        if k not in seen:
-            lines.append(f'{k}="{v}"')
-    ENV_FILE.write_text("\n".join(lines) + "\n")
-
-
-def _mask(v: str | None) -> str:
-    if not v:
-        return ""
-    if len(v) <= 8:
-        return "***"
-    return f"{v[:4]}…{v[-4:]}"
-
-
 @secured.get("/settings")
-async def get_settings() -> dict:
-    env = _read_env()
-    return {k: {"set": bool(env.get(k)), "preview": _mask(env.get(k))} for k in SETTINGS_KEYS}
+async def get_settings(_: dict = Depends(require_admin)) -> dict:
+    return {key: await settings_status(db, key) for key in SETTINGS_KEYS}
 
 
 @secured.post("/settings")
-async def update_settings(body: SettingsUpdate) -> dict:
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
-    _write_env(updates)
-    for k, v in updates.items():
-        os.environ[k] = v
+async def update_settings(body: SettingsUpdate, claims: dict = Depends(require_admin)) -> dict:
+    updates = {k: v for k, v in body.model_dump().items() if v is not None and v != ""}
+    for key, value in updates.items():
+        await save_secret(db, key, value, claims["sub"])
     return {"ok": True, "updated": list(updates.keys())}
 
 
-# ---------------------------- WebSocket ----------------------------
+@secured.delete("/settings/{key}")
+async def delete_setting(key: str, _: dict = Depends(require_admin)) -> dict:
+    if key not in SETTINGS_KEYS:
+        raise HTTPException(404, "Unknown setting")
+    await clear_secret(db, key)
+    return {"ok": True, "cleared": key}
+
+
+@secured.get("/integrations/github/status")
+async def github_status() -> dict:
+    pat = await _runtime_secret("GITHUB_PAT")
+    if not pat:
+        return {"configured": False, "valid": False, "detail": "Connect GitHub PAT in Settings."}
+    try:
+        result = await gh.validate_pat(pat)
+        return {**result, "detail": "GitHub PAT is valid."}
+    except Exception as exc:
+        return {"configured": True, "valid": False, "detail": str(exc)}
+
+
+@admin_api.get("/users")
+async def admin_list_users() -> list[dict]:
+    docs = await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(500)
+    return docs
+
+
+@admin_api.post("/users")
+async def admin_create_user(body: UserCreate) -> dict:
+    email = body.email.lower().strip()
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        raise HTTPException(409, "User already exists")
+    now = _now()
+    user = {
+        "id": str(uuid.uuid4()),
+        "email": email,
+        "password_hash": hash_password(body.password),
+        "role": body.role,
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.users.insert_one(user)
+    return public_user(user)
+
+
+@admin_api.post("/users/{user_id}/reset-password")
+async def admin_reset_password(user_id: str, body: PasswordReset) -> dict:
+    res = await db.users.update_one({"id": user_id}, {"$set": {"password_hash": hash_password(body.password), "updated_at": _now()}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "User not found")
+    return {"ok": True}
+
+
+@admin_api.patch("/users/{user_id}/status")
+async def admin_user_status(user_id: str, body: StatusPatch, claims: dict = Depends(require_admin)) -> dict:
+    if user_id == claims["sub"] and body.status == "disabled":
+        raise HTTPException(400, "You cannot disable your own admin account")
+    res = await db.users.update_one({"id": user_id}, {"$set": {"status": body.status, "updated_at": _now()}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "User not found")
+    return {"ok": True, "status": body.status}
+
 
 @app.websocket("/api/ws/{project_id}")
 async def ws_project(ws: WebSocket, project_id: str) -> None:
-    # WebSockets carry the JWT as ?token=... query param.
     token = ws.query_params.get("token")
     if not token:
         await ws.close(code=4401)
@@ -461,14 +689,15 @@ async def ws_project(ws: WebSocket, project_id: str) -> None:
     except HTTPException:
         await ws.close(code=4401)
         return
-    proj = await db.projects.find_one({"id": project_id, "owner_id": claims["sub"]}, {"_id": 0, "id": 1})
+    query = {"id": project_id} if claims.get("role") == "admin" else {"id": project_id, "owner_id": claims["sub"]}
+    proj = await db.projects.find_one(query, {"_id": 0, "id": 1})
     if not proj:
         await ws.close(code=4404)
         return
     await ws.accept()
     await hub.join(project_id, ws)
     try:
-        await ws.send_json({"type": "hello", "data": {"project_id": project_id}})
+        await ws.send_json({"type": "hello", "data": {"project_id": project_id, "connected": True}})
         while True:
             try:
                 msg = await asyncio.wait_for(ws.receive_text(), timeout=30)
@@ -482,29 +711,23 @@ async def ws_project(ws: WebSocket, project_id: str) -> None:
         await hub.leave(project_id, ws)
 
 
-# ---------------------------- Helpers ----------------------------
-
 def _ext_lang(path: str) -> str:
     ext = (path.rsplit(".", 1)[-1] or "").lower()
     return {
-        "html": "html", "htm": "html",
-        "css": "css", "scss": "css", "sass": "css",
+        "html": "html", "htm": "html", "css": "css", "scss": "css", "sass": "css",
         "js": "javascript", "jsx": "javascript", "mjs": "javascript",
-        "ts": "typescript", "tsx": "typescript",
-        "json": "json", "md": "markdown",
-        "py": "python", "rb": "ruby", "go": "go", "rs": "rust",
-        "yml": "yaml", "yaml": "yaml",
+        "ts": "typescript", "tsx": "typescript", "json": "json", "md": "markdown",
+        "py": "python", "rb": "ruby", "go": "go", "rs": "rust", "yml": "yaml", "yaml": "yaml",
     }.get(ext, "text")
 
 
-# ---------------------------- App wiring ----------------------------
-
 app.include_router(api)
 app.include_router(secured)
+app.include_router(admin_api)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )

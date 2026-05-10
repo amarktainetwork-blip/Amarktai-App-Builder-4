@@ -39,7 +39,7 @@ export default function LoginPage() {
             <span className="font-mono text-[13px] font-bold">A</span>
           </div>
           <span className="font-display font-semibold tracking-tight">
-            AmarktAI <span className="text-amk-accent">Network</span>
+            Amarktai <span className="text-amk-accent">App Builder</span>
           </span>
         </Link>
         <div className="relative z-10 max-w-md">
@@ -67,7 +67,7 @@ export default function LoginPage() {
               <span className="font-mono text-[13px] font-bold">A</span>
             </div>
             <span className="font-display font-semibold tracking-tight">
-              AmarktAI <span className="text-amk-accent">Network</span>
+              Amarktai <span className="text-amk-accent">App Builder</span>
             </span>
           </Link>
           <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3 mb-3">[ sign in ]</div>
@@ -124,9 +124,8 @@ export default function LoginPage() {
             </button>
           </form>
           <p className="font-mono text-[10px] text-amk-fg3 mt-8 leading-relaxed">
-            Single-admin deploy. Default credentials live in <code className="text-amk-fg2">backend/.env</code>{" "}
-            (<code className="text-amk-fg2">ADMIN_EMAIL</code> / <code className="text-amk-fg2">ADMIN_PASSWORD</code>).
-            Change them before going live.
+            Use the admin account configured with <code className="text-amk-fg2">ADMIN_EMAIL</code> and{" "}
+            <code className="text-amk-fg2">ADMIN_PASSWORD</code>.
           </p>
         </div>
       </div>

@@ -35,7 +35,7 @@ export default function ContactPage() {
               <span className="font-mono text-[13px] font-bold">A</span>
             </div>
             <span className="font-display font-semibold tracking-tight">
-              AmarktAI <span className="text-amk-accent">Network</span>
+              Amarktai <span className="text-amk-accent">App Builder</span>
             </span>
           </Link>
           <div />

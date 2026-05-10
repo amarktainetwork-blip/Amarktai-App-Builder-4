@@ -20,7 +20,7 @@ def render_preview(files: list[dict]) -> str:
         f = by_path.get(href)
         if not f:
             return match.group(0)
-        return f"<style data-emergent-inline=\"{_html.escape(href)}\">\n{f['content']}\n</style>"
+        return f"<style data-amarktai-inline=\"{_html.escape(href)}\">\n{f['content']}\n</style>"
 
     src = re.sub(
         r'<link[^>]*rel=["\']stylesheet["\'][^>]*href=["\'](?P<href>[^"\']+)["\'][^>]*/?>',
@@ -37,7 +37,7 @@ def render_preview(files: list[dict]) -> str:
             return match.group(0)
         type_attr = match.group("typeattr") or ""
         return (
-            f'<script data-emergent-inline="{_html.escape(s)}"{type_attr}>\n'
+            f'<script data-amarktai-inline="{_html.escape(s)}"{type_attr}>\n'
             f'{f["content"]}\n</script>'
         )
 

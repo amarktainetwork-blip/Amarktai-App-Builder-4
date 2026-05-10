@@ -1,20 +1,12 @@
-"""
-MCP-style tool layer for the Emergent orchestrator.
-
-These helpers expose a Model-Context-Protocol-compatible surface (filesystem, github, web search)
-backed by either real services (when API keys are present) or sensible mock implementations.
-
-The JSON tool schemas exposed to the LLM are kept here so the orchestrator can advertise them
-to GenXProvider when tool-calling is enabled.
-"""
+"""Tool layer for Amarktai Coding Agents."""
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Any
 
+import httpx
 
-# ----- Tool JSON Schemas (advertised to LLMs) -----------------------------------------------
 
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
@@ -46,30 +38,27 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "web_search",
-        "description": "Search the web (Brave Search) for research / inspiration.",
+        "description": "Search the web with Brave Search when the optional key is configured.",
         "parameters": {
             "type": "object",
             "properties": {"query": {"type": "string"}},
             "required": ["query"],
         },
     },
-    {
-        "name": "github_create_repo",
-        "description": "Create a new GitHub repository and push the project to it.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "description": {"type": "string"},
-                "private": {"type": "boolean"},
-            },
-            "required": ["name"],
-        },
-    },
 ]
 
 
-# ----- MongoDB-backed filesystem -------------------------------------------------------------
+def safe_project_path(path: str) -> str:
+    if not path or "\x00" in path:
+        raise ValueError("Invalid file path")
+    candidate = PurePosixPath(path.replace("\\", "/"))
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError("Path traversal is not allowed")
+    cleaned = str(candidate)
+    if cleaned in ("", "."):
+        raise ValueError("Invalid file path")
+    return cleaned
+
 
 class ProjectFS:
     """Per-project filesystem stored in MongoDB."""
@@ -79,68 +68,57 @@ class ProjectFS:
         self.project_id = project_id
 
     async def write(self, path: str, content: str, language: str = "text") -> dict:
+        cleaned = safe_project_path(path)
         now = datetime.now(timezone.utc).isoformat()
         doc = {
             "project_id": self.project_id,
-            "path": path,
+            "path": cleaned,
             "content": content,
             "language": language,
             "updated_at": now,
         }
         await self.db.files.update_one(
-            {"project_id": self.project_id, "path": path},
+            {"project_id": self.project_id, "path": cleaned},
             {"$set": doc, "$setOnInsert": {"created_at": now}},
             upsert=True,
         )
-        return {"path": path, "language": language, "size": len(content), "updated_at": now}
+        return {"path": cleaned, "language": language, "size": len(content), "updated_at": now}
 
     async def read(self, path: str) -> dict | None:
-        doc = await self.db.files.find_one(
-            {"project_id": self.project_id, "path": path}, {"_id": 0}
+        cleaned = safe_project_path(path)
+        return await self.db.files.find_one(
+            {"project_id": self.project_id, "path": cleaned}, {"_id": 0}
         )
-        return doc
 
     async def list(self) -> list[dict]:
         cur = self.db.files.find(
             {"project_id": self.project_id},
             {"_id": 0, "path": 1, "language": 1, "updated_at": 1},
-        )
+        ).sort("path", 1)
         return await cur.to_list(2000)
 
     async def list_full(self) -> list[dict]:
-        cur = self.db.files.find({"project_id": self.project_id}, {"_id": 0})
+        cur = self.db.files.find({"project_id": self.project_id}, {"_id": 0}).sort("path", 1)
         return await cur.to_list(2000)
 
 
-# ----- External tools (mocked when no key is provided) ---------------------------------------
-
-async def web_search(query: str) -> dict:
-    api_key = os.environ.get("BRAVE_SEARCH_API_KEY")
+async def web_search(query: str, api_key: str | None) -> dict:
     if not api_key:
-        return {
-            "mocked": True,
-            "query": query,
-            "results": [
-                {
-                    "title": f"Mock result for '{query}'",
-                    "snippet": "Brave Search API key not configured. "
-                    "Add BRAVE_SEARCH_API_KEY to backend/.env to enable real web search.",
-                    "url": "https://brave.com/search/api/",
-                }
-            ],
-        }
-    # Real Brave Search call would go here.
-    return {"mocked": False, "query": query, "results": []}
-
-
-async def github_create_repo(name: str, description: str = "", private: bool = False) -> dict:
-    pat = os.environ.get("GITHUB_PAT")
-    if not pat:
-        return {
-            "mocked": True,
-            "repo": f"placeholder-org/{name}",
-            "url": f"https://github.com/placeholder-org/{name}",
-            "message": "GITHUB_PAT not configured. Add it to backend/.env to enable real pushes.",
-        }
-    # Real GitHub API calls would go here.
-    return {"mocked": False, "repo": f"you/{name}", "url": f"https://github.com/you/{name}"}
+        return {"enabled": False, "query": query, "results": []}
+    headers = {
+        "Accept": "application/json",
+        "X-Subscription-Token": api_key,
+    }
+    params = {"q": query, "count": 5, "text_decorations": "false"}
+    async with httpx.AsyncClient(timeout=15.0) as cx:
+        response = await cx.get("https://api.search.brave.com/res/v1/web/search", headers=headers, params=params)
+        response.raise_for_status()
+        data = response.json()
+    results = []
+    for item in data.get("web", {}).get("results", [])[:5]:
+        results.append({
+            "title": item.get("title"),
+            "snippet": item.get("description"),
+            "url": item.get("url"),
+        })
+    return {"enabled": True, "query": query, "results": results}

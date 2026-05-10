@@ -18,21 +18,22 @@ services:
       context: ./backend
     restart: unless-stopped
     environment:
+      APP_ENV: ${APP_ENV:-development}
       MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017}
-      DB_NAME: ${DB_NAME:-amarktai_network}
-      CORS_ORIGINS: ${CORS_ORIGINS:-*}
-      GENX_API_KEY: ${GENX_API_KEY}
+      DB_NAME: ${DB_NAME:-amarktai_builder}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://builder.amarktai.com}
+      GENX_API_KEY: ${GENX_API_KEY:-}
       GENX_BASE_URL: ${GENX_BASE_URL:-https://query.genx.sh/v1}
       GENX_MODEL_REASONING: ${GENX_MODEL_REASONING:-claude-sonnet-4-6}
       GENX_MODEL_RESEARCH:  ${GENX_MODEL_RESEARCH:-gpt-5.4-mini}
       GENX_MODEL_EDITS:     ${GENX_MODEL_EDITS:-claude-haiku-4-5}
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:-development-jwt-secret-change-before-production}
       JWT_ALGO: ${JWT_ALGO:-HS256}
       JWT_TTL_HOURS: ${JWT_TTL_HOURS:-168}
-      ADMIN_EMAIL: ${ADMIN_EMAIL}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@amarktai.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-amarktai-admin-local}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
       GITHUB_PAT: ${GITHUB_PAT:-}
-      WEBCONTAINER_API_KEY: ${WEBCONTAINER_API_KEY:-}
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
     depends_on:
       mongo:
@@ -45,7 +46,7 @@ services:
     build:
       context: ./frontend
       args:
-        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL}
+        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-https://builder.amarktai.com}
     restart: unless-stopped
     depends_on: [backend]
     networks: [amk-net]

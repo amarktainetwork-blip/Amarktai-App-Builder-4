@@ -24,7 +24,7 @@ from openai import OpenAI
 logger = logging.getLogger("amarktai.genx")
 
 # GenX's WAF blocks the OpenAI SDK's default User-Agent. Set our own.
-USER_AGENT = "AmarktAI-Network/1.0"
+USER_AGENT = "Amarktai-App-Builder/1.0"
 
 
 # Per-agent default tier
@@ -59,7 +59,7 @@ class GenXProvider:
         self.api_key = api_key or os.environ.get("GENX_API_KEY")
         self.base_url = (base_url or os.environ.get("GENX_BASE_URL", "https://query.genx.sh/v1")).rstrip("/")
         if not self.api_key:
-            raise RuntimeError("GENX_API_KEY not configured")
+            raise RuntimeError("GENX_API_KEY is not configured. Add it in Settings or as an environment variable.")
 
     def route_for_agent(self, agent: str) -> tuple[str, str]:
         tier = AGENT_TIER.get(agent, "reasoning")
@@ -76,8 +76,13 @@ class GenXProvider:
                                      headers={"User-Agent": USER_AGENT}) as cx:
             r = await cx.get(f"{self.base_url}/models",
                              headers={"Authorization": f"Bearer {self.api_key}"})
+            if r.status_code in (401, 403):
+                raise RuntimeError("GenX rejected the configured API key.")
             r.raise_for_status()
-            data = r.json()
+            try:
+                data = r.json()
+            except Exception as exc:
+                raise RuntimeError("GenX /models returned invalid JSON.") from exc
         return data.get("data", data) if isinstance(data, dict) else data
 
     async def complete(
@@ -137,6 +142,8 @@ class GenXProvider:
             except Exception as e:  # noqa: BLE001
                 last_err = e
                 msg = str(e)
+                if any(s in msg for s in ("401", "403", "Unauthorized", "Forbidden")):
+                    raise RuntimeError("GenX rejected the configured API key.") from e
                 transient = any(s in msg for s in
                                 ("502", "503", "504", "BadGateway", "Timeout", "timed out"))
                 if attempt >= retries or not transient:
@@ -145,4 +152,4 @@ class GenXProvider:
                 logger.warning("GenX transient error (%d/%d): %s — retry in %.1fs",
                                attempt + 1, retries + 1, msg[:160], delay)
                 await asyncio.sleep(delay)
-        raise RuntimeError(f"GenX provider failed after {retries + 1} attempts: {last_err}")
+        raise RuntimeError(f"GenX request failed after {retries + 1} attempts: {last_err}")
