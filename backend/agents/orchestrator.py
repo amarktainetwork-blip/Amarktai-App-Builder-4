@@ -113,7 +113,8 @@ class Orchestrator:
         self.project_id = project_id
         self.fs = ProjectFS(db, project_id)
         self.emit = emit
-        # Tracks repair attempts within a single build run (reset between retries)
+        # Tracks repair attempts within a single build run.
+        # A new Orchestrator is created for each build/retry, so this resets naturally.
         self._repair_attempts: int = 0
 
     # ---------- shared helpers ----------

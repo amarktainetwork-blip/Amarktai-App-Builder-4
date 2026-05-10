@@ -730,7 +730,7 @@ async def models_router(tier: str = "balanced") -> dict:
 def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str | None) -> dict:
     """Determine media_strategy for a new project based on mode, tier, and media_requirements."""
     wants_media = media_requirements and any(
-        kw in (media_requirements or "").lower()
+        kw in media_requirements.lower()
         for kw in ("generat", "image", "video", "audio", "music", "photo", "ai image")
     )
     if wants_media and quality_tier in ("balanced", "premium"):
