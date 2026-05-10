@@ -57,6 +57,9 @@ export const Projects = {
   fileContent: (id, path) =>
     api.get(`/projects/${id}/files/content`, { params: { path } }).then((r) => r.data),
   send: (id, content) => api.post(`/projects/${id}/messages`, { content }).then((r) => r.data),
+  cancel: (id) => api.post(`/projects/${id}/cancel`).then((r) => r.data),
+  retry: (id, agent, quality_tier) =>
+    api.post(`/projects/${id}/retry`, { agent, quality_tier }).then((r) => r.data),
   finalize: (id) => api.post(`/projects/${id}/finalize`).then((r) => r.data),
   openPR: (id, body) => api.post(`/projects/${id}/pr`, body).then((r) => r.data),
   previewUrl: (id) => `${API}/projects/${id}/preview?token=${encodeURIComponent(getToken() || "")}`,

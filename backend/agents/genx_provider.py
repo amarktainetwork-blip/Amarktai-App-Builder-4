@@ -94,13 +94,20 @@ class GenXProvider:
         session_id: Optional[str] = None,
         max_tokens: int = 8192,
         retries: int = 2,
+        preferred_model: Optional[str] = None,
     ) -> dict:
         """Run a single completion via GenX Router (OpenAI Chat Completions format).
 
         Runs the blocking SDK call in a worker thread so the FastAPI event loop is
         never blocked. Retries transient 5xx errors with exponential backoff.
+
+        preferred_model: override the agent tier routing (used for cheap repair calls).
         """
-        model, label = self.route_for_agent(agent)
+        if preferred_model:
+            model = preferred_model
+            label = preferred_model
+        else:
+            model, label = self.route_for_agent(agent)
         sid = session_id or f"{agent}-{uuid.uuid4().hex[:8]}"  # for telemetry only
 
         api_key = self.api_key

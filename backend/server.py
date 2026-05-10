@@ -166,6 +166,8 @@ class Project(BaseModel):
     prompt: str
     status: str = "queued"
     error: str | None = None
+    failed_agent: str | None = None
+    cancel_requested: bool = False
     started_at: str | None = None
     completed_at: str | None = None
     usage: dict = Field(default_factory=lambda: {"tokens": 0, "cost_usd": 0.0, "last_model": None})
@@ -187,7 +189,13 @@ class SettingsUpdate(BaseModel):
     BRAVE_SEARCH_API_KEY: Optional[str] = None
 
 
-class UserCreate(BaseModel):
+class RetryBody(BaseModel):
+    agent: str = Field(pattern="^(coder|reviewer|pipeline)$")
+    quality_tier: Optional[str] = None
+    repair_only: Optional[bool] = False
+
+
+
     email: EmailStr
     password: str = Field(min_length=12)
     role: str = Field(default="user", pattern="^(admin|user)$")
@@ -228,44 +236,94 @@ async def _launch_pipeline(project_id: str, prompt: str, mode: str) -> None:
         started = _now()
         await db.projects.update_one(
             {"id": project_id},
-            {"$set": {"status": "running", "started_at": started, "completed_at": None, "error": None, "updated_at": started}},
+            {"$set": {
+                "status": "running", "started_at": started, "completed_at": None,
+                "error": None, "cancel_requested": False, "updated_at": started,
+            }},
         )
         await emit({"type": "project_status", "data": {"status": "running"}})
         try:
             provider = await _genx_provider()
             orch = Orchestrator(db, provider, project_id, emit)
+            # Global timeouts: build 25 min, iterate 10 min
+            global_timeout = 1500 if mode == "build" else 600
             if mode == "iterate":
-                await asyncio.wait_for(orch.run_iteration(prompt), timeout=600)
+                await asyncio.wait_for(orch.run_iteration(prompt), timeout=global_timeout)
             else:
-                await asyncio.wait_for(orch.run_full_build(prompt), timeout=900)
-            completed = _now()
-            await db.projects.update_one(
-                {"id": project_id},
-                {"$set": {"completed_at": completed, "updated_at": completed}, "$unset": {"error": ""}},
-            )
-        except Exception as exc:
-            msg = str(exc)
-            logger.exception("pipeline failed for %s: %s", project_id, msg)
+                await asyncio.wait_for(orch.run_full_build(prompt), timeout=global_timeout)
+            # Only update completed_at if project was not already failed by orchestrator
+            proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1})
+            if proj and proj.get("status") not in ("failed", "cancelled"):
+                completed = _now()
+                await db.projects.update_one(
+                    {"id": project_id},
+                    {"$set": {"completed_at": completed, "updated_at": completed}},
+                )
+        except asyncio.TimeoutError:
+            msg = f"Build timed out (global {global_timeout}s limit exceeded)."
+            logger.warning("pipeline timeout for %s", project_id)
             completed = _now()
             await db.projects.update_one(
                 {"id": project_id},
                 {"$set": {"status": "failed", "error": msg, "completed_at": completed, "updated_at": completed}},
             )
-            await db.agent_events.insert_one({
-                "id": str(uuid.uuid4()),
-                "project_id": project_id,
-                "agent": "system",
-                "status": "failed",
-                "detail": msg,
-                "meta": {},
-                "created_at": completed,
-            })
-            await emit({"type": "agent_event", "data": {
-                "id": str(uuid.uuid4()), "project_id": project_id, "agent": "system",
-                "status": "failed", "detail": msg, "meta": {}, "created_at": completed,
-            }})
             await emit({"type": "project_status", "data": {"status": "failed", "error": msg}})
             await emit({"type": "error", "data": {"message": msg}})
+        except Exception as exc:
+            msg = str(exc)
+            logger.exception("pipeline failed for %s: %s", project_id, msg)
+            completed = _now()
+            proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1})
+            if proj and proj.get("status") not in ("failed", "cancelled"):
+                await db.projects.update_one(
+                    {"id": project_id},
+                    {"$set": {"status": "failed", "error": msg, "completed_at": completed, "updated_at": completed}},
+                )
+                await db.agent_events.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "project_id": project_id,
+                    "agent": "system",
+                    "status": "failed",
+                    "detail": msg,
+                    "meta": {},
+                    "created_at": completed,
+                })
+                await emit({"type": "agent_event", "data": {
+                    "id": str(uuid.uuid4()), "project_id": project_id, "agent": "system",
+                    "status": "failed", "detail": msg, "meta": {}, "created_at": completed,
+                }})
+                await emit({"type": "project_status", "data": {"status": "failed", "error": msg}})
+                await emit({"type": "error", "data": {"message": msg}})
+
+
+async def _launch_retry(project_id: str, agent: str, quality_tier: str | None) -> None:
+    async with PIPELINE_SEM:
+        emit = emitter_for(project_id)
+        started = _now()
+        await db.projects.update_one(
+            {"id": project_id},
+            {"$set": {
+                "status": "running", "started_at": started, "completed_at": None,
+                "error": None, "cancel_requested": False, "failed_agent": None, "updated_at": started,
+            }},
+        )
+        await emit({"type": "project_status", "data": {"status": "running"}})
+        try:
+            provider = await _genx_provider()
+            orch = Orchestrator(db, provider, project_id, emit)
+            await asyncio.wait_for(orch.run_retry(agent, quality_tier), timeout=1500)
+        except Exception as exc:
+            msg = str(exc)
+            logger.exception("retry failed for %s: %s", project_id, msg)
+            completed = _now()
+            proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1})
+            if proj and proj.get("status") not in ("failed", "cancelled", "ready"):
+                await db.projects.update_one(
+                    {"id": project_id},
+                    {"$set": {"status": "failed", "error": msg, "completed_at": completed, "updated_at": completed}},
+                )
+                await emit({"type": "project_status", "data": {"status": "failed", "error": msg}})
+                await emit({"type": "error", "data": {"message": msg}})
 
 
 @api.get("/")
@@ -297,12 +355,28 @@ async def _forbidden_source_check() -> tuple[bool, str]:
         upper_ai, title_ai, lower_ai, lower_platform, title_platform,
         platform_base, platform_assets, platform_package,
     ]
-    excluded = {".git", "node_modules", "build", "dist"}
+    # Only scan app source — never scan system/dependency/build paths
+    excluded_dirs = {
+        ".git", "node_modules", "build", "dist",
+        "__pycache__", ".pytest_cache", ".mypy_cache", ".venv", "venv",
+    }
+    # Absolute system paths to never enter
+    excluded_absolute_prefixes = (
+        "/usr", "/lib", "/bin", "/etc", "/proc", "/sys",
+        "/dev", "/run", "/tmp", "/var", "/root", "/home",
+    )
     try:
         for path in REPO_ROOT.rglob("*"):
             if not path.is_file():
                 continue
-            if any(part in excluded for part in path.parts):
+            # Skip system paths
+            try:
+                resolved = path.resolve()
+                if str(resolved).startswith(excluded_absolute_prefixes):
+                    continue
+            except Exception:
+                continue
+            if any(part in excluded_dirs for part in path.parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="ignore")
@@ -423,6 +497,38 @@ async def list_models() -> dict:
     return {"tiers": GenXProvider.list_tiers(), "agents": AGENT_TIER, "tools": TOOL_SCHEMAS, "available": models}
 
 
+@secured.get("/models/router")
+async def models_router(tier: str = "balanced") -> dict:
+    """Return the model routed for a given tier (cheap|balanced|premium).
+
+    cheap     → edits/lightweight model
+    balanced  → research/fast model (default)
+    premium   → reasoning/coding model
+    """
+    tier_map = {
+        "cheap": "edits",
+        "balanced": "research",
+        "premium": "reasoning",
+    }
+    internal_tier = tier_map.get(tier.lower())
+    if not internal_tier:
+        raise HTTPException(400, f"Unknown tier '{tier}'. Use cheap, balanced, or premium.")
+    tiers = GenXProvider.list_tiers()
+    info = tiers.get(internal_tier)
+    if not info:
+        raise HTTPException(503, "Router tier configuration error.")
+    return {
+        "tier": tier,
+        "internal_tier": internal_tier,
+        "model": info["model"],
+        "label": info["label"],
+        "warning": (
+            "Premium tier uses the most capable model and incurs higher GenX credit usage."
+            if tier.lower() == "premium" else None
+        ),
+    }
+
+
 @secured.post("/projects", response_model=Project)
 async def create_project(body: ProjectCreate, claims: dict = Depends(require_user)) -> Project:
     if not await _runtime_secret("GENX_API_KEY"):
@@ -501,6 +607,70 @@ async def delete_project(project_id: str, claims: dict = Depends(require_user)) 
     return {"ok": True}
 
 
+@secured.post("/projects/{project_id}/cancel")
+async def cancel_project(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    await _own(project_id, claims)
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    current_status = proj.get("status", "")
+    if current_status not in ("queued", "running"):
+        return {"ok": True, "status": current_status, "detail": "Build is not active."}
+    now = _now()
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$set": {
+            "cancel_requested": True,
+            "status": "cancelled",
+            "error": "Build cancelled by user.",
+            "completed_at": now,
+            "updated_at": now,
+        }},
+    )
+    evt = {
+        "id": str(uuid.uuid4()),
+        "project_id": project_id,
+        "agent": "system",
+        "status": "cancelled",
+        "detail": "Build cancelled by user.",
+        "meta": {},
+        "created_at": now,
+    }
+    await db.agent_events.insert_one(dict(evt))
+    evt.pop("_id", None)
+    await hub.broadcast(project_id, {"type": "agent_event", "data": evt})
+    await hub.broadcast(project_id, {"type": "project_status", "data": {
+        "status": "cancelled", "error": "Build cancelled by user.",
+    }})
+    return {"ok": True, "status": "cancelled"}
+
+
+@secured.post("/projects/{project_id}/retry")
+async def retry_project(project_id: str, body: RetryBody, claims: dict = Depends(require_user)) -> dict:
+    await _own(project_id, claims)
+    if not await _runtime_secret("GENX_API_KEY"):
+        raise HTTPException(503, "GENX_API_KEY is required for Amarktai Coding Agents.")
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    if proj.get("status") in ("running", "queued"):
+        raise HTTPException(409, "Build already in progress")
+    # Record retry event
+    now = _now()
+    await db.agent_events.insert_one({
+        "id": str(uuid.uuid4()),
+        "project_id": project_id,
+        "agent": "system",
+        "status": "retry",
+        "detail": f"Retry requested: agent={body.agent}, tier={body.quality_tier or 'default'}",
+        "meta": {"agent": body.agent, "quality_tier": body.quality_tier},
+        "created_at": now,
+    })
+    await hub.broadcast(project_id, {"type": "project_status", "data": {"status": "queued"}})
+    asyncio.create_task(_launch_retry(project_id, body.agent, body.quality_tier))
+    return {"ok": True, "queued": True, "agent": body.agent}
+
+
 @secured.get("/projects/{project_id}/messages")
 async def list_messages(project_id: str, claims: dict = Depends(require_user)) -> list[dict]:
     await _own(project_id, claims)
@@ -539,6 +709,16 @@ async def send_message(project_id: str, body: MessageCreate, claims: dict = Depe
     proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
     if proj.get("status") in ("running", "queued"):
         raise HTTPException(409, "Build already in progress")
+    # Iteration guard: block iteration when no app files exist
+    _meta = {"requirements.md", "tech_stack.json"}
+    existing_files = await ProjectFS(db, project_id).list()
+    app_file_count = sum(1 for f in existing_files if f["path"] not in _meta)
+    if app_file_count == 0:
+        raise HTTPException(
+            409,
+            "The build failed before app files were generated. "
+            "Retry Coder or restart the build before sending messages.",
+        )
     await db.projects.update_one({"id": project_id}, {"$set": {"status": "queued", "updated_at": _now()}})
     await hub.broadcast(project_id, {"type": "project_status", "data": {"status": "queued"}})
     asyncio.create_task(_launch_pipeline(project_id, body.content, "iterate"))
@@ -548,8 +728,18 @@ async def send_message(project_id: str, body: MessageCreate, claims: dict = Depe
 @secured.get("/projects/{project_id}/preview", response_class=HTMLResponse)
 async def project_preview(project_id: str, claims: dict = Depends(require_user)) -> HTMLResponse:
     await _own(project_id, claims)
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1, "error": 1, "failed_agent": 1})
     files = await ProjectFS(db, project_id).list_full()
-    html = render_preview(files)
+    _meta = {"requirements.md", "tech_stack.json"}
+    app_files = [f for f in files if f["path"] not in _meta]
+
+    if proj and proj.get("status") == "running":
+        html = render_preview([])  # Shows "agents are writing your app" placeholder
+    elif not app_files:
+        msg = proj.get("error") or "No preview files were generated because the build failed."
+        html = render_preview([])  # render_preview returns empty state when no index.html
+    else:
+        html = render_preview(files)
     return HTMLResponse(content=html, headers={"X-Frame-Options": "SAMEORIGIN"})
 
 
