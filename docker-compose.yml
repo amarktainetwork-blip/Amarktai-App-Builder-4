@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    networks: [amk-net]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017}
+      DB_NAME: ${DB_NAME:-amarktai_network}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      GENX_API_KEY: ${GENX_API_KEY}
+      GENX_BASE_URL: ${GENX_BASE_URL:-https://query.genx.sh/v1}
+      GENX_MODEL_REASONING: ${GENX_MODEL_REASONING:-claude-sonnet-4-6}
+      GENX_MODEL_RESEARCH:  ${GENX_MODEL_RESEARCH:-gpt-5.4-mini}
+      GENX_MODEL_EDITS:     ${GENX_MODEL_EDITS:-claude-haiku-4-5}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGO: ${JWT_ALGO:-HS256}
+      JWT_TTL_HOURS: ${JWT_TTL_HOURS:-168}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      GITHUB_PAT: ${GITHUB_PAT:-}
+      WEBCONTAINER_API_KEY: ${WEBCONTAINER_API_KEY:-}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks: [amk-net]
+    ports:
+      - "${BACKEND_PORT:-8001}:8001"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL}
+    restart: unless-stopped
+    depends_on: [backend]
+    networks: [amk-net]
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+
+networks:
+  amk-net:
+
+volumes:
+  mongo_data:

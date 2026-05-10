@@ -16,12 +16,12 @@ export default function AgentTimeline({ events }) {
   }
 
   return (
-    <div data-testid="agent-timeline" className="border-b border-emergent-line">
+    <div data-testid="agent-timeline" className="border-b border-amk-line">
       <div className="px-4 pt-3 pb-2 flex items-center justify-between">
-        <span className="font-mono text-[10px] tracking-[0.18em] uppercase text-emergent-fg3">
+        <span className="font-mono text-[10px] tracking-[0.18em] uppercase text-amk-fg3">
           Agent Pipeline
         </span>
-        <span className="font-mono text-[10px] text-emergent-fg3">
+        <span className="font-mono text-[10px] text-amk-fg3">
           {AGENT_ORDER.filter((a) => stateByAgent[a]?.completed).length}/{AGENT_ORDER.length}
         </span>
       </div>
@@ -36,7 +36,7 @@ export default function AgentTimeline({ events }) {
               key={id}
               data-testid={`agent-row-${id}`}
               className={`flex items-center gap-3 px-3 py-2 border-l-2 ${
-                isActive ? "bg-emergent-panel" : ""
+                isActive ? "bg-amk-panel" : ""
               }`}
               style={{ borderLeftColor: isActive || isDone ? meta.color : "transparent" }}
             >
@@ -47,7 +47,7 @@ export default function AgentTimeline({ events }) {
                   <Check className="w-3.5 h-3.5" strokeWidth={2} style={{ color: meta.color }} />
                 ) : (
                   <span
-                    className="w-1.5 h-1.5 rounded-full bg-emergent-line"
+                    className="w-1.5 h-1.5 rounded-full bg-amk-line"
                     aria-hidden
                   />
                 )}
@@ -60,11 +60,11 @@ export default function AgentTimeline({ events }) {
                   >
                     {meta.label.toUpperCase()}
                   </span>
-                  <span className="font-mono text-[10px] text-emergent-fg3 uppercase tracking-wider">
+                  <span className="font-mono text-[10px] text-amk-fg3 uppercase tracking-wider">
                     {meta.role}
                   </span>
                 </div>
-                <div className="font-mono text-[10px] text-emergent-fg3 mt-0.5">
+                <div className="font-mono text-[10px] text-amk-fg3 mt-0.5">
                   {isActive ? <span className="ascii-loader"><span className="ascii-dots" /></span>
                     : isDone ? "complete"
                     : "idle"}

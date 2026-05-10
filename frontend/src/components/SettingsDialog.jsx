@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Settings as SettingsApi } from "@/lib/emergent-api";
+import { Settings as SettingsApi } from "@/lib/amk-api";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,10 +8,10 @@ import { Check, X } from "lucide-react";
 import { toast } from "sonner";
 
 const FIELDS = [
-  { key: "EMERGENT_LLM_KEY",      label: "Emergent LLM Key",  hint: "Universal key for OpenAI / Anthropic / Gemini." },
-  { key: "WEBCONTAINER_API_KEY",  label: "WebContainer Key",  hint: "StackBlitz WebContainer (placeholder for now)." },
-  { key: "GITHUB_PAT",            label: "GitHub PAT",        hint: "Personal Access Token with repo scope." },
-  { key: "BRAVE_SEARCH_API_KEY",  label: "Brave Search Key",  hint: "For the Scout agent's web research." },
+  { key: "GENX_API_KEY",          label: "GenX API Key",      hint: "From genx.sh — single key, 40+ models. Starts with gnxk_..." },
+  { key: "GITHUB_PAT",            label: "GitHub PAT",        hint: "Personal Access Token with repo scope (for opening PRs)." },
+  { key: "WEBCONTAINER_API_KEY",  label: "WebContainer Key",  hint: "StackBlitz WebContainer (optional — fallback iframe used if blank)." },
+  { key: "BRAVE_SEARCH_API_KEY",  label: "Brave Search Key",  hint: "Optional — for the Scout agent's web research." },
 ];
 
 export default function SettingsDialog({ open, onOpenChange }) {
@@ -47,13 +47,13 @@ export default function SettingsDialog({ open, onOpenChange }) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="settings-dialog"
-        className="bg-emergent-panel border border-emergent-line text-emergent-fg max-w-lg p-0 rounded-md"
+        className="bg-amk-panel border border-amk-line text-amk-fg max-w-lg p-0 rounded-md"
       >
-        <DialogHeader className="px-5 pt-5 pb-3 border-b border-emergent-line">
+        <DialogHeader className="px-5 pt-5 pb-3 border-b border-amk-line">
           <DialogTitle className="font-mono text-sm tracking-tight uppercase">
             // API Keys
           </DialogTitle>
-          <DialogDescription className="font-mono text-[11px] text-emergent-fg3">
+          <DialogDescription className="font-mono text-[11px] text-amk-fg3">
             Configure provider keys. Empty fields fall back to mocks.
           </DialogDescription>
         </DialogHeader>
@@ -79,19 +79,19 @@ export default function SettingsDialog({ open, onOpenChange }) {
                   placeholder={isSet ? "Replace value..." : "Paste key..."}
                   value={values[f.key] || ""}
                   onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
-                  className="bg-emergent-base border-emergent-line text-emergent-fg font-mono text-xs h-9 focus-visible:ring-0 focus-visible:border-white"
+                  className="bg-amk-base border-amk-line text-amk-fg font-mono text-xs h-9 focus-visible:ring-0 focus-visible:border-white"
                 />
-                <p className="font-mono text-[10px] text-emergent-fg3">{f.hint}</p>
+                <p className="font-mono text-[10px] text-amk-fg3">{f.hint}</p>
               </div>
             );
           })}
         </div>
-        <DialogFooter className="px-5 pb-5 pt-2 border-t border-emergent-line">
+        <DialogFooter className="px-5 pb-5 pt-2 border-t border-amk-line">
           <Button
             data-testid="settings-cancel-btn"
             variant="ghost"
             onClick={() => onOpenChange(false)}
-            className="font-mono text-xs h-9 hover:bg-emergent-surface"
+            className="font-mono text-xs h-9 hover:bg-amk-surface"
           >
             Cancel
           </Button>
