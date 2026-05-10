@@ -7,6 +7,8 @@ import { AuthProvider, useAuth } from "@/lib/auth-context";
 import LandingPage from "@/pages/Landing";
 import LoginPage from "@/pages/Login";
 import ContactPage from "@/pages/Contact";
+import PrivacyPage from "@/pages/Privacy";
+import TermsPage from "@/pages/Terms";
 import ProjectListPage from "@/pages/ProjectList";
 import WorkspacePage from "@/pages/Workspace";
 import SystemHealthPage from "@/pages/SystemHealth";
@@ -36,6 +38,8 @@ function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/contact" element={<ContactPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
             <Route path="/app" element={<Protected><ProjectListPage /></Protected>} />
             <Route path="/system" element={<Protected><SystemHealthPage /></Protected>} />
             <Route path="/admin/users" element={<Protected><AdminUsersPage /></Protected>} />

@@ -6,7 +6,7 @@ ENV CI=true \
     GENERATE_SOURCEMAP=false
 
 COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile
+RUN yarn config set network-timeout 600000 && yarn install --frozen-lockfile
 
 COPY . .
 

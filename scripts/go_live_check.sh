@@ -23,10 +23,27 @@ say() {
   echo "==> $*"
 }
 
+# Scan only app-owned source directories — never scan system paths, never scan '.'
 scan_for() {
   local label="$1"
   local pattern="$2"
-  if grep -RniE "$pattern" . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=build --exclude-dir=dist; then
+  # Explicit allowlist of app source roots to scan
+  local scan_dirs=()
+  for d in backend "frontend/src" "frontend/public" scripts; do
+    [ -d "$ROOT/$d" ] && scan_dirs+=("$ROOT/$d")
+  done
+  for f in README.md .env.example docker-compose.yml; do
+    [ -f "$ROOT/$f" ] && scan_dirs+=("$ROOT/$f")
+  done
+  if [ "${#scan_dirs[@]}" -eq 0 ]; then
+    return 0
+  fi
+  if grep -RniE "$pattern" "${scan_dirs[@]}" \
+      --exclude-dir=.git \
+      --exclude-dir=node_modules \
+      --exclude-dir=build \
+      --exclude-dir=dist \
+      --exclude-dir=__pycache__; then
     fail "$label references remain"
   fi
 }
@@ -44,6 +61,9 @@ scan_for "legacy platform" "${legacy_e1}${legacy_e2}|Eme${legacy_e2}|${legacy_e1
 
 say "checking .env.example"
 test -f .env.example || fail ".env.example is missing"
+
+say "checking favicon exists"
+test -f frontend/public/favicon.ico || test -f frontend/public/favicon.svg || fail "favicon is missing from frontend/public"
 
 say "backend compile"
 python -m compileall backend
@@ -85,6 +105,13 @@ say "checking readiness"
 READINESS="$(curl -fsS "http://localhost:${BACKEND_PORT:-8001}/api/readiness")"
 echo "$READINESS" | tee /tmp/amarktai-readiness.json
 echo
+
+# Verify readiness output does not mention forbidden system paths
+for forbidden_path in /proc /usr /lib map_files; do
+  if echo "$READINESS" | grep -q "$forbidden_path"; then
+    fail "readiness response mentions forbidden system path: $forbidden_path"
+  fi
+done
 
 OVERALL="$(python - <<'PY'
 import json

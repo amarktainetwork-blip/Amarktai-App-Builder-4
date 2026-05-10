@@ -57,7 +57,7 @@ function Hero() {
       <div className="max-w-6xl mx-auto px-5 pt-20 pb-24 md:pt-28 md:pb-36 grid lg:grid-cols-12 gap-10 items-center relative z-10">
         <div className="lg:col-span-7 animate-fade-up">
           <div className="inline-flex items-center gap-2 mb-6 px-3 h-7 border border-amk-line bg-amk-panel/60 font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg2">
-            <span className="pulse-dot bg-amk-accent" /> powered by genx router · 40+ models
+            <span className="pulse-dot bg-amk-accent" /> Amarktai AI Infrastructure · 40+ models
           </div>
           <h1 className="font-display font-semibold text-5xl md:text-7xl leading-[0.95] tracking-tight mb-6">
             Describe an app.<br />
@@ -137,7 +137,7 @@ function HeroPreviewCard() {
 }
 
 function Marquee() {
-  const items = ["scout", "architect", "coder", "reviewer", "github pr", "GenX Router", "Amarktai Assistant", "Amarktai Coding Agents"];
+  const items = ["scout", "architect", "coder", "reviewer", "github pr", "Amarktai Network", "Amarktai Assistant", "Amarktai Coding Agents"];
   return (
     <div data-testid="logo-marquee" className="border-y border-amk-line py-5 overflow-hidden">
       <div className="flex gap-12 whitespace-nowrap animate-[marquee_25s_linear_infinite]" style={{ animation: "scroll 30s linear infinite" }}>
@@ -153,7 +153,7 @@ function Marquee() {
 }
 
 const FEATURES = [
-  { icon: Network,        title: "One key. GenX routed.", body: "GenX Router is the only required AI key. Amarktai routes research, reasoning, code, and edits through that single provider." },
+  { icon: Network,        title: "One key. Amarktai routed.", body: "GENX_API_KEY is the only required AI key. Amarktai AI Infrastructure routes research, reasoning, code, and edits through that single provider." },
   { icon: Boxes,          title: "Modular agentic build", body: "Scout briefs → Architect plans → Coder writes → Reviewer audits. Every step is logged, colour-coded, and replayable." },
   { icon: GitPullRequest, title: "Pull from GitHub. Push a PR.", body: "Paste a public repo URL. Agents iterate. Click Open PR — we fork, commit, and open a pull request against the original." },
   { icon: Sparkles,       title: "Authenticated live preview", body: "A static iframe renderer refreshes generated files instantly while keeping preview access tied to your signed-in session." },
@@ -247,14 +247,16 @@ function Footer() {
       <div className="max-w-6xl mx-auto px-5 flex flex-col md:flex-row items-center justify-between gap-4 text-amk-fg3 font-mono text-[11px]">
         <div className="flex items-center gap-2">
           <span className="font-display font-semibold text-amk-fg">Amarktai App Builder</span>
-          <span>· built on GenX Router</span>
+          <span>· Part of Amarktai Network</span>
         </div>
         <div className="flex items-center gap-5">
+          <a href="https://amarktai.com" target="_blank" rel="noreferrer" className="hover:text-white">amarktai.com</a>
+          <Link to="/privacy" className="hover:text-white">Privacy</Link>
+          <Link to="/terms" className="hover:text-white">Terms</Link>
           <Link to="/contact" className="hover:text-white inline-flex items-center gap-1.5">
             <Mail className="w-3 h-3" strokeWidth={1.5} /> Contact
           </Link>
-          <a href="https://genx.sh" target="_blank" rel="noreferrer" className="hover:text-white">genx.sh</a>
-          <a href="https://github.com" target="_blank" rel="noreferrer" className="hover:text-white inline-flex items-center gap-1.5">
+          <a href="https://github.com/amarktainetwork-blip" target="_blank" rel="noreferrer" className="hover:text-white inline-flex items-center gap-1.5">
             <Github className="w-3 h-3" strokeWidth={1.5} /> GitHub
           </a>
         </div>

@@ -17,7 +17,7 @@ export default function Header({ projectName, status, onOpenSettings, onFinalize
             Amarktai <span className="text-amk-accent">App Builder</span>
           </span>
           <span className="font-mono text-[10px] text-amk-fg3 uppercase tracking-[0.18em] hidden sm:inline">
-            // GenX Router
+            // Amarktai Network
           </span>
         </Link>
         {projectName && (

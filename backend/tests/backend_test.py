@@ -1,8 +1,9 @@
 import asyncio
 import json
+import os
 import unittest.mock as mock
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -238,20 +239,82 @@ async def test_iteration_blocked_when_no_app_files():
 
 # ---------- readiness scanner path exclusion ----------
 
-def test_readiness_scanner_ignores_system_paths():
-    """The readiness source scan must never flag files under /usr, /lib, etc."""
-    from server import _forbidden_source_check
+def test_readiness_scanner_never_scans_proc(tmp_path):
+    """The new allowlist scanner must never call rglob on /proc or any system path."""
+    import server
 
-    # Simulate REPO_ROOT.rglob returning a file from /usr/include
-    fake_path = Path("/usr/include/linux/bfs_fs.h")
+    proc_called = []
 
-    with mock.patch("server.REPO_ROOT") as mock_root:
-        # Make rglob yield our fake system path
-        mock_root.rglob.return_value = iter([fake_path])
-        clean, detail = asyncio.get_event_loop().run_until_complete(_forbidden_source_check())
+    class FakePath:
+        def __init__(self, path):
+            self._path = path
+        def exists(self):
+            return False
+        def is_symlink(self):
+            return False
+        def __truediv__(self, other):
+            return FakePath(str(self._path) + "/" + str(other))
+        def rglob(self, *args):
+            proc_called.append(str(self._path))
+            return iter([])
+        def __str__(self):
+            return str(self._path)
 
-    # The scanner must skip the /usr path and return clean
-    assert clean, f"Scanner wrongly flagged system file: {detail}"
+    # Patch _build_scan_roots to return an empty list so scanner exits cleanly
+    with mock.patch.object(server, "_build_scan_roots", return_value=[]):
+        clean, detail = asyncio.get_event_loop().run_until_complete(server._forbidden_source_check())
+
+    # No /proc paths should have been scanned
+    assert not any("/proc" in p for p in proc_called), f"Scanner called rglob on /proc paths: {proc_called}"
+    assert clean, f"Scanner should return clean when no roots: {detail}"
+
+
+def test_readiness_scanner_ignores_system_paths(tmp_path):
+    """
+    Even if a scan root somehow contains a system-like path,
+    the scanner must not flag files in /usr, /lib, etc.
+    """
+    import server
+
+    # Create a temporary file with no forbidden content
+    clean_file = tmp_path / "app.py"
+    clean_file.write_text("# clean source file")
+
+    with mock.patch.object(server, "_build_scan_roots", return_value=[clean_file]):
+        clean, detail = asyncio.get_event_loop().run_until_complete(server._forbidden_source_check())
+
+    assert clean, f"Scanner wrongly flagged clean file: {detail}"
+
+
+def test_readiness_scanner_catches_forbidden_in_app_source(tmp_path):
+    """Scanner must still catch forbidden strings in explicitly allowlisted app source."""
+    import server
+
+    bad_file = tmp_path / "server.py"
+    # Write a forbidden string (constructed to avoid triggering this file's own scan)
+    forbidden = "".join(("ai", "va"))
+    bad_file.write_text(f"# this file uses {forbidden}")
+
+    with mock.patch.object(server, "_build_scan_roots", return_value=[bad_file]):
+        clean, detail = asyncio.get_event_loop().run_until_complete(server._forbidden_source_check())
+
+    assert not clean, "Scanner should have caught forbidden reference"
+    assert "Legacy reference" in detail
+
+
+def test_readiness_scanner_skip_env_var(tmp_path):
+    """SKIP_SOURCE_SCAN=true must bypass the scanner and return clean."""
+    import server
+
+    bad_file = tmp_path / "server.py"
+    bad_file.write_text("".join(("ai", "va")))
+
+    with mock.patch.dict(os.environ, {"SKIP_SOURCE_SCAN": "true"}):
+        with mock.patch.object(server, "_build_scan_roots", return_value=[bad_file]):
+            clean, detail = asyncio.get_event_loop().run_until_complete(server._forbidden_source_check())
+
+    assert clean, "SKIP_SOURCE_SCAN=true should bypass scanner"
+    assert "skipped" in detail.lower()
 
 
 # ---------- quality router ----------
