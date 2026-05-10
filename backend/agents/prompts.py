@@ -85,7 +85,21 @@ Respond with a single JSON object (no fences, no preamble):
 
 MANDATORY: Every generated project MUST include:
 - README.md with: project name, description, setup instructions, run commands, deploy instructions
-- amarktai.project.json with: {"name":"...","mode":"...","stack":{"frontend":"...","backend":"..."},"generated_by":"Amarktai App Builder","version":"1.0.0"}
+- amarktai.project.json with:
+  {
+    "name": "...",
+    "mode": "...",
+    "stack": {"frontend": "...", "backend": "..."},
+    "generated_by": "Amarktai App Builder",
+    "version": "1.0.0",
+    "media_strategy": {
+      "mode": "placeholder|free_assets|genx_generated",
+      "confirmed": false,
+      "models_used": [],
+      "notes": "..."
+    }
+  }
+  Use the media_strategy from the shared_context if provided, otherwise default to placeholder.
 
 Additional mandatory files by mode:
 - pwa: manifest.json (name, short_name, start_url, display, icons placeholder), service-worker.js

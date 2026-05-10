@@ -113,8 +113,33 @@ class Orchestrator:
         self.project_id = project_id
         self.fs = ProjectFS(db, project_id)
         self.emit = emit
+        # Tracks repair attempts within a single build run.
+        # A new Orchestrator is created for each build/retry, so this resets naturally.
+        self._repair_attempts: int = 0
 
     # ---------- shared helpers ----------
+
+    async def _load_project(self) -> dict:
+        """Load the current project document (shared context source)."""
+        doc = await self.db.projects.find_one({"id": self.project_id}, {"_id": 0})
+        return doc or {}
+
+    async def _shared_context(self) -> dict:
+        """Build the shared context object passed to agents (Phase 2 spec)."""
+        proj = await self._load_project()
+        return {
+            "project_id": self.project_id,
+            "prompt": proj.get("prompt", ""),
+            "mode": proj.get("mode", "web_app"),
+            "quality_tier": proj.get("quality_tier", "balanced"),
+            "recommended_tier": proj.get("recommended_tier"),
+            "stack_decision": proj.get("selected_stack", {}),
+            "preview_strategy": proj.get("preview_strategy", "iframe"),
+            "media_strategy": proj.get("media_strategy", {}),
+            "github_context": proj.get("github", {}),
+            "validation_state": proj.get("validation_state", {}),
+            "repair_attempts": self._repair_attempts,
+        }
 
     async def _is_cancelled(self) -> bool:
         doc = await self.db.projects.find_one(
@@ -304,7 +329,13 @@ class Orchestrator:
 
         # 1) Scout
         await self._check_cancel()
-        scout_user = json.dumps({"prompt": user_prompt, "mode": mode, "stack": sd.get("stack", {})})
+        shared_ctx = await self._shared_context()
+        scout_user = json.dumps({
+            "prompt": user_prompt,
+            "mode": mode,
+            "stack": sd.get("stack", {}),
+            "shared_context": shared_ctx,
+        })
         scout = await self._run_agent("scout", SCOUT_PROMPT, scout_user)
         await self._check_cancel()
         scout_data = scout["data"]
@@ -325,6 +356,7 @@ class Orchestrator:
             "mode": mode,
             "stack_decision": sd,
             "required_files": sd.get("required_files", []),
+            "shared_context": shared_ctx,
         }, indent=2)
         arch = await self._run_agent("architect", ARCHITECT_PROMPT, arch_input)
         await self._check_cancel()
@@ -348,6 +380,8 @@ class Orchestrator:
             "stack_decision": sd,
             "required_files": sd.get("required_files", []),
             "safety_notes": sd.get("safety_notes", []),
+            "media_strategy": shared_ctx.get("media_strategy", {}),
+            "shared_context": shared_ctx,
         }, indent=2)
         coder = await self._run_agent("coder", CODER_PROMPT, coder_input)
         await self._check_cancel()
@@ -381,6 +415,7 @@ class Orchestrator:
             "required_files": sd.get("required_files", []),
             "files": [{"path": f["path"], "content": f["content"]} for f in current_files
                       if f["path"] not in _META_FILES],
+            "shared_context": shared_ctx,
         }, indent=2)
         rev = await self._run_agent("reviewer", REVIEWER_PROMPT, review_input)
         await self._check_cancel()
@@ -396,8 +431,26 @@ class Orchestrator:
             meta={"model": rev["model_label"], "patched": [f["path"] for f in rev_data.get("patched_files", [])]},
         )
 
-        # Readiness check: modes that output HTML need app files
+        # 5) Validate required files
         final_files = await self.fs.list_full()
+        final_paths = {f["path"] for f in final_files}
+        required = sd.get("required_files", [])
+        missing = [r for r in required if r not in final_paths]
+        present = [r for r in required if r in final_paths]
+        validation_state = {
+            "status": "passed" if not missing else "failed",
+            "required_files_present": present,
+            "required_files_missing": missing,
+            "warnings": rev_data.get("issues", []),
+            "errors": [f"Missing required file: {m}" for m in missing] if missing else [],
+        }
+        await self.db.projects.update_one(
+            {"id": self.project_id},
+            {"$set": {"validation_state": validation_state, "repair_attempts": self._repair_attempts}},
+        )
+        await self.emit({"type": "validation_state", "data": validation_state})
+
+        # Readiness check: modes that output HTML need app files
         if mode in _REQUIRES_APP_FILES_MODES and not _has_app_files(final_files):
             err = "Build completed but no app files were generated."
             await self._fail_project("coder", err)
