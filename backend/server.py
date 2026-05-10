@@ -203,6 +203,21 @@ class Project(BaseModel):
     deployment_target: str | None = None
     repo_visibility: str = "public"
     manifest_status: str | None = None
+    # Shared context fields (Phase 2 spec)
+    media_strategy: dict = Field(default_factory=lambda: {
+        "mode": "placeholder",
+        "confirmed": False,
+        "models_used": [],
+        "notes": "Safe placeholder images or SVG gradients used by default. Upgrade to balanced/premium and confirm to enable GenX media generation.",
+    })
+    validation_state: dict = Field(default_factory=lambda: {
+        "status": "pending",
+        "required_files_present": [],
+        "required_files_missing": [],
+        "warnings": [],
+        "errors": [],
+    })
+    repair_attempts: int = 0
 
 
 class AssistantMessage(BaseModel):
@@ -623,6 +638,10 @@ async def models_router(tier: str = "balanced") -> dict:
     cheap     → edits/lightweight model
     balanced  → research/fast model (default)
     premium   → reasoning/coding model
+
+    Returns the full agent-role model map as specified in the product spec:
+      research, planning, architecture, frontend_coding, backend_coding,
+      database_design, media_generation, validation, repair, review, assistant
     """
     tier_map = {
         "cheap": "edits",
@@ -638,20 +657,58 @@ async def models_router(tier: str = "balanced") -> dict:
     if not info:
         raise HTTPException(503, "Router tier configuration error.")
 
+    coding_model = _coder_tier(tier_lower, tiers)
+    fast_model = tiers.get("research", {}).get("model")
+    premium_model = tiers.get("reasoning", {}).get("model")
+    cheap_model = tiers.get("edits", {}).get("model")
+
+    # Media generation: placeholder-only unless premium confirmed at generation time
+    if tier_lower == "premium":
+        media_model = premium_model
+        media_note = "GenX image/video models available — user confirmation required before generating."
+    elif tier_lower == "balanced":
+        media_model = fast_model
+        media_note = "Lightweight GenX image model if confirmed. Placeholders used by default."
+    else:
+        media_model = None
+        media_note = "Placeholders/free assets only. Upgrade to balanced/premium for GenX image generation."
+
     selected_models = {
-        "scout":     tiers.get("research", {}).get("model"),
-        "architect": tiers.get("reasoning", {}).get("model"),
-        "coder":     _coder_tier(tier_lower, tiers),
-        "reviewer":  tiers.get("reasoning", {}).get("model"),
-        "iteration": tiers.get("edits", {}).get("model"),
-        "assistant": tiers.get("research", {}).get("model"),
+        "research":        fast_model if tier_lower != "premium" else premium_model,
+        "planning":        fast_model if tier_lower == "cheap" else premium_model,
+        "architecture":    premium_model,
+        "frontend_coding": coding_model,
+        "backend_coding":  coding_model,
+        "database_design": coding_model,
+        "media_generation": media_model,
+        "validation":      fast_model if tier_lower != "premium" else premium_model,
+        "repair":          cheap_model if tier_lower == "cheap" else (fast_model if tier_lower == "balanced" else premium_model),
+        "review":          premium_model,
+        "assistant":       fast_model if tier_lower != "premium" else premium_model,
     }
+
+    repair_limit = {"cheap": 1, "balanced": 2, "premium": 3}.get(tier_lower, 2)
 
     warnings: list[str] = []
     if tier_lower == "premium":
         warnings.append("Premium tier uses the most capable model and incurs higher GenX credit usage.")
     elif tier_lower == "cheap":
         warnings.append("Cheap tier may struggle with complex apps. Balanced is recommended for most builds.")
+        warnings.append("Media generation is disabled at cheap tier. Placeholders will be used.")
+
+    reasons = {
+        "research":        "Scout research and Wingman assistant routing.",
+        "planning":        "Product Planner: defines MVP scope and feature list.",
+        "architecture":    "Stack Architect always uses a strong reasoning model for design decisions.",
+        "frontend_coding": f"Frontend Builder routed to {'premium' if tier_lower == 'premium' else tier_lower} coding model.",
+        "backend_coding":  f"Backend Builder routed to {'premium' if tier_lower == 'premium' else tier_lower} coding model.",
+        "database_design": "Database Architect uses the same tier as coding agents.",
+        "media_generation": media_note,
+        "validation":      "Validator checks required files, linked assets, and structure.",
+        "repair":          f"Repair Coder: up to {repair_limit} attempt(s) at this tier.",
+        "review":          "QA Reviewer always uses a premium reasoning model for accuracy.",
+        "assistant":       "Amarktai Wingman responds to user questions and build guidance.",
+    }
 
     return {
         "tier": tier_lower,
@@ -659,12 +716,55 @@ async def models_router(tier: str = "balanced") -> dict:
         "model": info["model"],
         "label": info["label"],
         "selected_models": selected_models,
-        "reasons": {
+        "repair_limit": repair_limit,
+        "reasons": reasons,
+        "warnings": warnings,
+        "tier_description": {
             "cheap": "Fast and affordable. Good for simple landing pages and minor edits.",
             "balanced": "Recommended for most builds. Balances quality and cost.",
-            "premium": "Best for complex apps, full-stack, and trading bots.",
+            "premium": "Best for complex apps, full-stack, SaaS, and trading bots.",
         }.get(tier_lower, ""),
-        "warnings": warnings,
+    }
+
+
+def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str | None) -> dict:
+    """Determine media_strategy for a new project based on mode, tier, and media_requirements."""
+    wants_media = media_requirements and any(
+        kw in (media_requirements or "").lower()
+        for kw in ("generat", "image", "video", "audio", "music", "photo", "ai image")
+    )
+    if wants_media and quality_tier in ("balanced", "premium"):
+        return {
+            "mode": "genx_generated",
+            "confirmed": False,  # always requires explicit user confirmation
+            "models_used": [],
+            "notes": (
+                "Custom AI image/video generation is available at this tier. "
+                "User must confirm before generation to authorise additional GenX credit usage."
+            ),
+        }
+    if wants_media and quality_tier == "cheap":
+        return {
+            "mode": "placeholder",
+            "confirmed": False,
+            "models_used": [],
+            "notes": (
+                "Media generation is not included at cheap tier. "
+                "Upgrade to balanced or premium to enable GenX image/video generation."
+            ),
+        }
+    if mode in ("media_page", "landing_page", "website"):
+        return {
+            "mode": "free_assets",
+            "confirmed": False,
+            "models_used": [],
+            "notes": "Safe remote images (e.g. Unsplash) or SVG/CSS gradients used as placeholders.",
+        }
+    return {
+        "mode": "placeholder",
+        "confirmed": False,
+        "models_used": [],
+        "notes": "SVG/gradient placeholders used. No external media dependencies.",
     }
 
 
@@ -714,6 +814,7 @@ async def create_project(body: ProjectCreate, claims: dict = Depends(require_use
         deployment_target=body.deployment_target,
         repo_visibility=body.repo_visibility or "public",
         owner_id=claims["sub"],
+        media_strategy=_build_media_strategy(build_mode, quality_tier, body.media_requirements),
     )
     await db.projects.insert_one(dict(proj.model_dump()))
     await hub.broadcast(proj.id, {"type": "project_status", "data": {"status": "queued"}})

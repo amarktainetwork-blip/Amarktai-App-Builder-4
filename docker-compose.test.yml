@@ -1,0 +1,50 @@
+# docker-compose.test.yml
+# Staging / test deployment override for test.amarktai.com
+#
+# Usage:
+#   cp .env .env.test          # copy and customise for test deployment
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml --env-file .env.test up -d --build
+#
+# This override:
+# - Uses a separate MongoDB volume (mongo_data_test) so test data is isolated from production.
+# - Exposes backend on port 8011 and frontend on port 8090 by default (configurable).
+# - Connects to the test database (amarktai_builder_test by default).
+# - Allows a separate CORS_ORIGINS / REACT_APP_BACKEND_URL for test.amarktai.com.
+
+services:
+  mongo:
+    volumes:
+      - mongo_data_test:/data/db
+
+  backend:
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017}
+      DB_NAME: ${DB_NAME:-amarktai_builder_test}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://test.amarktai.com}
+      GENX_API_KEY: ${GENX_API_KEY:-}
+      GENX_BASE_URL: ${GENX_BASE_URL:-https://query.genx.sh/v1}
+      GENX_MODEL_REASONING: ${GENX_MODEL_REASONING:-claude-sonnet-4-6}
+      GENX_MODEL_RESEARCH:  ${GENX_MODEL_RESEARCH:-gemini-2.5-flash}
+      GENX_MODEL_EDITS:     ${GENX_MODEL_EDITS:-claude-haiku-4-5}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_ALGO: ${JWT_ALGO:-HS256}
+      JWT_TTL_HOURS: ${JWT_TTL_HOURS:-168}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
+      GITHUB_PAT: ${GITHUB_PAT:-}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      BUILD_SHA: ${BUILD_SHA:-}
+    ports:
+      - "${BACKEND_PORT:-8011}:8001"
+
+  frontend:
+    build:
+      args:
+        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-https://test.amarktai.com}
+    ports:
+      - "${FRONTEND_PORT:-8090}:80"
+
+volumes:
+  mongo_data_test:

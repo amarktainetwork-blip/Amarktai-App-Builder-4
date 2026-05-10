@@ -520,3 +520,141 @@ async def test_full_stack_mode_readme_required():
     # full_stack mode requires README.md — should fail
     assert proj.get("status") == "failed", f"Expected failed for full_stack without README.md, got {proj.get('status')}"
 
+
+# ---------- media strategy ----------
+
+def test_media_strategy_default_placeholder():
+    """Default media strategy is placeholder mode."""
+    import server
+    ms = server._build_media_strategy("web_app", "balanced", None)
+    assert ms["mode"] == "placeholder"
+    assert ms["confirmed"] is False
+    assert "models_used" in ms
+
+
+def test_media_strategy_landing_page_free_assets():
+    """Landing page/website modes use free_assets by default."""
+    import server
+    ms = server._build_media_strategy("landing_page", "balanced", None)
+    assert ms["mode"] == "free_assets"
+    assert ms["confirmed"] is False
+
+
+def test_media_strategy_genx_generated_premium():
+    """When media is requested with premium, mode is genx_generated (unconfirmed)."""
+    import server
+    ms = server._build_media_strategy("media_page", "premium", "I need AI-generated images")
+    assert ms["mode"] == "genx_generated"
+    assert ms["confirmed"] is False  # still needs user confirmation
+
+
+def test_media_strategy_cheap_tier_blocks_genx():
+    """Cheap tier cannot use genx_generated even if media requested."""
+    import server
+    ms = server._build_media_strategy("landing_page", "cheap", "generate images please")
+    assert ms["mode"] == "placeholder"
+    assert "Upgrade" in ms["notes"] or "upgrade" in ms["notes"]
+
+
+# ---------- model router spec format ----------
+
+def test_model_router_returns_spec_format():
+    """GenXProvider.list_tiers must cover cheap/balanced/premium mapping."""
+    from agents.genx_provider import GenXProvider
+    tiers = GenXProvider.list_tiers()
+    assert "reasoning" in tiers
+    assert "research" in tiers
+    assert "edits" in tiers
+    for tier_key in ("reasoning", "research", "edits"):
+        assert "model" in tiers[tier_key]
+
+
+# ---------- shared context structure ----------
+
+@pytest.mark.asyncio
+async def test_orchestrator_shared_context_structure():
+    """Orchestrator._shared_context must return all required Phase 2 fields."""
+    db, proj, files, events, messages = _make_db()
+    provider = MagicMock()
+    events_received = []
+
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    ctx = await orch._shared_context()
+
+    required_keys = {
+        "project_id", "prompt", "mode", "quality_tier", "recommended_tier",
+        "stack_decision", "preview_strategy", "media_strategy",
+        "github_context", "validation_state", "repair_attempts",
+    }
+    missing = required_keys - set(ctx.keys())
+    assert not missing, f"Shared context missing keys: {missing}"
+    assert ctx["project_id"] == "proj1"
+
+
+# ---------- validation_state written to project ----------
+
+@pytest.mark.asyncio
+async def test_validation_state_written_after_build():
+    """After a successful build, validation_state must be written to the project document."""
+    db, proj, files, events, messages = _make_db()
+    call_count = [0]
+    responses = [
+        # scout
+        {"summary": "App", "audience": "users", "core_features": ["home"], "requirements_md": "# Reqs"},
+        # architect
+        {"tech_stack": {"frontend": "HTML", "styling": "CSS"}, "file_plan": [
+            {"path": "index.html", "purpose": "entry"},
+            {"path": "styles.css", "purpose": "styles"},
+            {"path": "README.md", "purpose": "docs"},
+            {"path": "amarktai.project.json", "purpose": "manifest"},
+        ]},
+        # coder
+        {"files": [
+            {"path": "index.html", "language": "html", "content": "<!DOCTYPE html><html><body>Hello</body></html>"},
+            {"path": "styles.css", "language": "css", "content": "body{}"},
+            {"path": "README.md", "language": "markdown", "content": "# App"},
+            {"path": "amarktai.project.json", "language": "json", "content": '{"name":"App","mode":"landing_page"}'},
+        ], "summary": "Done"},
+        # reviewer
+        {"verdict": "pass", "issues": [], "patched_files": [], "summary": "OK"},
+    ]
+
+    async def complete_se(**kwargs):
+        idx = call_count[0] % len(responses)
+        call_count[0] += 1
+        return {"text": json.dumps(responses[idx]), "model_label": "test", "model": "test", "session_id": "s", "usage": {}}
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(side_effect=complete_se)
+    events_received = []
+
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    written_files = []
+
+    async def fake_write(path, content, lang="text"):
+        written_files.append({"path": path, "content": content, "language": lang})
+
+    orch.fs.write = fake_write
+    orch.fs.list_full = AsyncMock(side_effect=lambda: list(written_files))
+    orch.fs.list = AsyncMock(return_value=[])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    from agents.stack_engine import decide_stack
+    sd = decide_stack(mode="landing_page")
+
+    await orch.run_full_build("Build a landing page", mode="landing_page", stack_decision=sd)
+
+    # validation_state must have been updated
+    validation_events = [e for e in events_received if e.get("type") == "validation_state"]
+    assert validation_events, "validation_state event must be emitted"
+    vs = validation_events[-1]["data"]
+    assert "status" in vs
+    assert "required_files_present" in vs
+    assert "required_files_missing" in vs
+

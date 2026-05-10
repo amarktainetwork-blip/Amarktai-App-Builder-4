@@ -95,3 +95,90 @@ CHECK_MODE=production bash scripts/go_live_check.sh
 ```
 
 The production check builds the frontend and backend, validates Docker Compose, starts the stack, calls `/api/health`, calls `/api/readiness`, and exits non-zero unless readiness is `PASS`.
+
+## Staging Deployment: test.amarktai.com
+
+A staging deployment runs at `https://test.amarktai.com` for pre-production testing. It uses the same Docker images but with a separate database volume and different ports so it does not interfere with production (`builder.amarktai.com`).
+
+### Staging environment variables (`.env.test`)
+
+```bash
+REACT_APP_BACKEND_URL=https://test.amarktai.com
+CORS_ORIGINS=https://test.amarktai.com
+BACKEND_PORT=8011
+FRONTEND_PORT=8090
+DB_NAME=amarktai_builder_test
+```
+
+Copy `.env.example` to `.env.test`, fill in secrets, then start the test stack:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.test.yml --env-file .env.test up -d --build
+```
+
+### Nginx example for test.amarktai.com
+
+See `nginx/test.amarktai.com.conf` for the full Nginx reverse-proxy config including WebSocket support and certbot integration.
+
+Obtain the TLS certificate:
+
+```bash
+sudo certbot --nginx -d test.amarktai.com
+```
+
+Copy and enable the config:
+
+```bash
+sudo cp nginx/test.amarktai.com.conf /etc/nginx/sites-available/test.amarktai.com
+sudo ln -s /etc/nginx/sites-available/test.amarktai.com /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Verify staging readiness:
+
+```bash
+curl https://test.amarktai.com/api/readiness
+```
+
+### Nginx example for builder.amarktai.com
+
+See `nginx/builder.amarktai.com.conf` for the production Nginx config.
+
+```bash
+sudo certbot --nginx -d builder.amarktai.com
+sudo cp nginx/builder.amarktai.com.conf /etc/nginx/sites-available/builder.amarktai.com
+sudo ln -s /etc/nginx/sites-available/builder.amarktai.com /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+## VPS Deployment (builder.amarktai.com)
+
+1. SSH into your VPS.
+2. Clone the repository:
+   ```bash
+   git clone https://github.com/amarktainetwork-blip/Amarktai-App-Builder.git
+   cd Amarktai-App-Builder
+   ```
+3. Generate secrets and fill in `.env`:
+   ```bash
+   cp .env.example .env
+   openssl rand -hex 48   # → JWT_SECRET
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"  # → SETTINGS_ENCRYPTION_KEY
+   ```
+4. Start the stack:
+   ```bash
+   docker compose up -d --build
+   ```
+5. Install Nginx and obtain a certificate:
+   ```bash
+   sudo apt-get install -y nginx certbot python3-certbot-nginx
+   sudo certbot --nginx -d builder.amarktai.com
+   sudo cp nginx/builder.amarktai.com.conf /etc/nginx/sites-available/builder.amarktai.com
+   sudo ln -s /etc/nginx/sites-available/builder.amarktai.com /etc/nginx/sites-enabled/
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+6. Verify:
+   ```bash
+   curl https://builder.amarktai.com/api/health
+   curl https://builder.amarktai.com/api/readiness
+   ```
