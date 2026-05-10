@@ -570,7 +570,7 @@ class Orchestrator:
                 review_issues = repair_data.get("issues", review_issues)
             except Exception as repair_err:
                 await self._emit_validation_event(
-                    "repair_started",
+                    "repair_failed",
                     f"Repair attempt {repair_pass + 1} failed: {repair_err}",
                     {"error": str(repair_err)},
                 )
