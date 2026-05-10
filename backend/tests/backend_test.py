@@ -326,3 +326,197 @@ def test_router_tiers_exist():
     assert "research" in tiers or "fast" in tiers, "balanced tier missing"
     assert "reasoning" in tiers or "coding" in tiers, "premium tier missing"
 
+
+# ---------- stack decision engine ----------
+
+from agents.stack_engine import decide_stack, REQUIRED_FILES, ALL_MODES
+
+
+def test_stack_landing_page():
+    """Landing page mode: simple complexity, iframe preview, required files include index.html."""
+    sd = decide_stack(prompt="Make a landing page for my startup", mode="landing_page")
+    assert sd["recommended_mode"] == "landing_page"
+    assert sd["complexity"] == "simple"
+    assert sd["preview_strategy"] == "iframe"
+    assert "index.html" in sd["required_files"]
+    assert "README.md" in sd["required_files"]
+    assert "amarktai.project.json" in sd["required_files"]
+    assert sd["stack"]["backend"] == "none"
+
+
+def test_stack_full_stack():
+    """Full stack mode: standard complexity, repo_structure preview."""
+    sd = decide_stack(prompt="Build a task manager with login", mode="full_stack")
+    assert sd["recommended_mode"] == "full_stack"
+    assert sd["complexity"] in ("standard", "advanced")
+    assert sd["preview_strategy"] == "repo_structure"
+    assert "README.md" in sd["required_files"]
+    assert ".env.example" in sd["required_files"]
+    assert "docker-compose.yml" in sd["required_files"]
+    # default stack has react/fastapi
+    assert "React" in sd["stack"]["frontend"] or "FastAPI" in sd["stack"]["backend"]
+
+
+def test_stack_trading_bot_scaffold():
+    """Trading bot: high_risk complexity, safety notes, premium recommended."""
+    sd = decide_stack(prompt="Build a crypto trading bot", mode="trading_bot_scaffold")
+    assert sd["recommended_mode"] == "trading_bot_scaffold"
+    assert sd["complexity"] == "high_risk"
+    assert sd["recommended_tier"] == "premium"
+    assert sd["safety_notes"], "Safety notes must be present for trading bots"
+    any_paper = any("paper" in n.lower() for n in sd["safety_notes"])
+    assert any_paper, "Paper mode note must be in safety notes"
+    assert sd["requires_upgrade_confirmation"] is True
+
+
+def test_stack_pwa_required_files():
+    """PWA mode must require manifest.json and service-worker.js."""
+    sd = decide_stack(prompt="Build a PWA timer", mode="pwa")
+    assert "manifest.json" in sd["required_files"]
+    assert "service-worker.js" in sd["required_files"]
+    assert sd["preview_strategy"] == "iframe"
+
+
+def test_stack_research_mode():
+    """Research mode: simple, brief_only preview, no required files."""
+    sd = decide_stack(prompt="Research the best stack for ecommerce", mode="research")
+    assert sd["recommended_mode"] == "research"
+    assert sd["preview_strategy"] == "brief_only"
+    assert sd["complexity"] == "simple"
+    assert sd["required_files"] == []
+
+
+def test_stack_cheap_tier_complex_warns():
+    """Cheap tier on a complex project must require upgrade confirmation."""
+    sd = decide_stack(prompt="Build a full-stack app with login", mode="full_stack", quality_tier="cheap")
+    assert sd["requires_upgrade_confirmation"] is True
+    assert sd["upgrade_reason"] is not None
+
+
+def test_stack_unknown_mode_defaults_web_app():
+    """Unknown mode must fall back to web_app without raising."""
+    sd = decide_stack(prompt="Build something", mode="not_a_real_mode")
+    assert sd["recommended_mode"] == "web_app"
+
+
+def test_required_files_by_mode():
+    """REQUIRED_FILES must cover all non-research modes with at least README.md."""
+    for mode in ALL_MODES:
+        if mode == "research":
+            continue
+        files = REQUIRED_FILES.get(mode, [])
+        assert "README.md" in files or mode in ("repo_fix",), \
+            f"Mode {mode} is missing README.md in required files"
+
+
+# ---------- project manifest generation ----------
+
+def test_project_manifest_json_structure():
+    """amarktai.project.json content matches expected schema."""
+    import json
+    manifest = {
+        "name": "My App",
+        "mode": "web_app",
+        "stack": {"frontend": "HTML + CSS + Vanilla JS", "backend": "none"},
+        "generated_by": "Amarktai App Builder",
+        "version": "1.0.0",
+    }
+    text = json.dumps(manifest)
+    parsed = json.loads(text)
+    assert parsed["generated_by"] == "Amarktai App Builder"
+    assert "mode" in parsed
+    assert "stack" in parsed
+
+
+# ---------- mode-aware orchestrator ----------
+
+@pytest.mark.asyncio
+async def test_research_mode_produces_requirements_md():
+    """Research mode must write requirements.md and mark project ready without app files."""
+    db, proj, files, events, messages = _make_db()
+    research_response = {
+        "research_brief": "# Research\nThis is a brief",
+        "recommended_mode": "web_app",
+        "recommended_tier": "balanced",
+        "build_prompt": "Build a task manager",
+        "summary": "Research complete",
+    }
+    provider = _make_provider_ok(research_response)
+    events_received = []
+
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    orch.fs.write = AsyncMock()
+    orch.fs.list_full = AsyncMock(return_value=[{"path": "requirements.md", "content": "# Research"}])
+    orch.fs.list = AsyncMock(return_value=[{"path": "requirements.md"}])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    await orch.run_full_build("Research ecommerce stacks", mode="research")
+
+    status_events = [e for e in events_received if e.get("type") == "project_status"]
+    statuses = [e["data"]["status"] for e in status_events]
+    assert "ready" in statuses, f"Research mode must reach ready. Got: {statuses}"
+
+
+@pytest.mark.asyncio
+async def test_full_stack_mode_readme_required():
+    """Full-stack mode must fail if README.md is not in generated files."""
+    db, proj, files, events, messages = _make_db()
+    call_count = [0]
+    responses = [
+        # scout
+        {"summary": "App", "audience": "devs", "core_features": ["api"], "requirements_md": "# Reqs"},
+        # architect
+        {"tech_stack": {"frontend": "React", "styling": "Tailwind"}, "file_plan": [{"path": "server.py", "purpose": "backend"}]},
+        # coder — no README.md
+        {"files": [{"path": "server.py", "language": "python", "content": "# backend"}], "summary": "Done"},
+    ]
+
+    async def complete_side_effect(**kwargs):
+        idx = call_count[0] % len(responses)
+        call_count[0] += 1
+        return {"text": json.dumps(responses[idx]), "model_label": "test", "model": "test", "session_id": "s", "usage": {}}
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(side_effect=complete_side_effect)
+    events_received = []
+
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    orch.fs.write = AsyncMock()
+
+    written_files = []
+
+    async def fake_write(path, content, lang="text"):
+        written_files.append({"path": path, "content": content, "language": lang})
+
+    orch.fs.write = fake_write
+
+    async def fake_list_full():
+        return list(written_files)
+
+    orch.fs.list_full = fake_list_full
+    orch.fs.list = AsyncMock(return_value=[])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    # Use full_stack mode with reviewer that returns pass
+    reviewer_resp = {"verdict": "pass", "issues": [], "patched_files": [], "summary": "OK"}
+    call_count_2 = [0]
+    all_responses = responses + [reviewer_resp]
+
+    async def complete_se2(**kwargs):
+        idx = call_count_2[0] % len(all_responses)
+        call_count_2[0] += 1
+        return {"text": json.dumps(all_responses[idx]), "model_label": "test", "model": "test", "session_id": "s", "usage": {}}
+
+    provider.complete = AsyncMock(side_effect=complete_se2)
+
+    await orch.run_full_build("Build a full-stack app", mode="full_stack")
+
+    # full_stack mode requires README.md — should fail
+    assert proj.get("status") == "failed", f"Expected failed for full_stack without README.md, got {proj.get('status')}"
+

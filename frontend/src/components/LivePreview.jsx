@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
 import { Projects } from "@/lib/amk-api";
-import { RefreshCw, ExternalLink, Cpu, AlertTriangle, Loader2 } from "lucide-react";
+import { RefreshCw, ExternalLink, Cpu, AlertTriangle, Loader2, BookOpen } from "lucide-react";
 
-export default function LivePreview({ projectId, refreshKey, projectStatus, projectError, failedAgent }) {
+// Modes that show repo structure instead of an iframe
+const REPO_STRUCTURE_MODES = new Set([
+  "full_stack", "dashboard", "admin_panel", "api_service",
+  "automation_bot", "trading_bot_scaffold", "repo_fix",
+]);
+
+export default function LivePreview({ projectId, refreshKey, projectStatus, projectError, failedAgent, projectMode, previewStrategy }) {
   const [bust, setBust] = useState(0);
   const url = `${Projects.previewUrl(projectId)}&v=${refreshKey || 0}-${bust}`;
 
@@ -10,13 +16,17 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
 
   const isFailed = projectStatus === "failed" || projectStatus === "cancelled";
   const isRunning = projectStatus === "running" || projectStatus === "queued";
+  const showRepoStructure = previewStrategy === "repo_structure"
+    || (projectMode && REPO_STRUCTURE_MODES.has(projectMode));
 
   if (isFailed) {
     return (
       <div data-testid="live-preview" className="h-full flex flex-col">
         <div className="h-9 border-b border-amk-line bg-amk-base flex items-center px-3 shrink-0">
           <Cpu className="w-3.5 h-3.5 text-amk-fg3 mr-2" strokeWidth={1.5} />
-          <span className="font-mono text-[11px] text-amk-fg">Live Preview</span>
+          <span className="font-mono text-[11px] text-amk-fg">
+            {showRepoStructure ? "Repo Structure" : "Live Preview"}
+          </span>
         </div>
         <div className="flex-1 bg-amk-panel flex items-center justify-center p-6">
           <div className="border border-amk-line rounded-md bg-amk-base p-6 max-w-md text-center space-y-3">
@@ -46,13 +56,42 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
       <div data-testid="live-preview" className="h-full flex flex-col">
         <div className="h-9 border-b border-amk-line bg-amk-base flex items-center px-3 shrink-0">
           <Cpu className="w-3.5 h-3.5 text-amk-fg3 mr-2" strokeWidth={1.5} />
-          <span className="font-mono text-[11px] text-amk-fg">Live Preview</span>
+          <span className="font-mono text-[11px] text-amk-fg">
+            {showRepoStructure ? "Repo Structure" : "Live Preview"}
+          </span>
         </div>
         <div className="flex-1 bg-amk-panel flex items-center justify-center">
           <div className="border border-amk-line rounded-md bg-amk-base p-6 max-w-md text-center space-y-3">
             <Loader2 className="w-7 h-7 text-amk-fg3 mx-auto animate-spin" />
             <p className="font-mono text-[12px] text-amk-fg2">
-              Preview will appear when files are generated.
+              {showRepoStructure
+                ? "Repo structure will appear when agents finish generating files."
+                : "Preview will appear when files are generated."}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (showRepoStructure) {
+    return (
+      <div data-testid="live-preview" className="h-full flex flex-col">
+        <div className="h-9 border-b border-amk-line bg-amk-base flex items-center px-3 shrink-0">
+          <BookOpen className="w-3.5 h-3.5 text-amk-fg3 mr-2" strokeWidth={1.5} />
+          <span className="font-mono text-[11px] text-amk-fg">Repo Structure</span>
+          <span className="font-mono text-[10px] text-amk-fg3 uppercase ml-2">
+            view README and files in the Code tab
+          </span>
+        </div>
+        <div className="flex-1 bg-amk-panel flex items-center justify-center p-6">
+          <div className="border border-amk-line bg-amk-base p-6 max-w-md text-center space-y-3">
+            <BookOpen className="w-7 h-7 text-amk-fg3 mx-auto" />
+            <p className="font-mono text-[12px] text-amk-fg">
+              {(projectMode || "").replace(/_/g, " ")} builds don't have a live browser preview.
+            </p>
+            <p className="font-mono text-[11px] text-amk-fg3 leading-relaxed">
+              Open the <strong className="text-white">Code</strong> tab to view the file tree, README.md, and deployment files.
             </p>
           </div>
         </div>

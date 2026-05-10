@@ -129,4 +129,14 @@ if [ "$MODE" != "production" ] && [ "$OVERALL" != "PASS" ]; then
   echo "WARN: development check completed, readiness is $OVERALL because production secrets or live provider validation may be absent."
 fi
 
+# Run smoke test if available and backend is reachable
+SMOKE_SCRIPT="$ROOT/scripts/smoke_test_builder.sh"
+if [ -f "$SMOKE_SCRIPT" ]; then
+  say "running smoke test"
+  BACKEND_URL="${BACKEND_URL:-http://localhost:${BACKEND_PORT:-8001}}" \
+  ADMIN_EMAIL="${ADMIN_EMAIL:-admin@amarktai.local}" \
+  ADMIN_PASSWORD="${ADMIN_PASSWORD:-amarktai-admin-local}" \
+    bash "$SMOKE_SCRIPT" || echo "WARN: smoke test had failures (see above)"
+fi
+
 echo "PASS: go-live verification command completed in $MODE mode"

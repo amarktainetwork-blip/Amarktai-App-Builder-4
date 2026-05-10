@@ -46,7 +46,8 @@ export const Auth = {
 
 export const Projects = {
   list: () => api.get("/projects").then((r) => r.data),
-  create: (name, prompt) => api.post("/projects", { name, prompt }).then((r) => r.data),
+  create: (name, prompt, opts = {}) =>
+    api.post("/projects", { name, prompt, ...opts }).then((r) => r.data),
   fromRepo: (repo_url, branch, github_pat) =>
     api.post("/projects/from-repo", { repo_url, branch, github_pat }).then((r) => r.data),
   get: (id) => api.get(`/projects/${id}`).then((r) => r.data),
@@ -86,6 +87,16 @@ export const Admin = {
   createUser: (body) => api.post("/admin/users", body).then((r) => r.data),
   resetPassword: (id, password) => api.post(`/admin/users/${id}/reset-password`, { password }).then((r) => r.data),
   setStatus: (id, status) => api.patch(`/admin/users/${id}/status`, { status }).then((r) => r.data),
+};
+
+export const Assistant = {
+  message: (content, project_id = null) =>
+    api.post("/assistant/message", { content, project_id }).then((r) => r.data),
+};
+
+export const Stack = {
+  decide: (prompt, mode, tier) =>
+    api.get("/stack/decide", { params: { prompt, mode, tier } }).then((r) => r.data),
 };
 
 export const Contact = {

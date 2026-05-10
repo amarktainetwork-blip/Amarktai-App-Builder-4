@@ -8,7 +8,7 @@ from cryptography.fernet import Fernet
 
 
 APP_NAME = "Amarktai App Builder"
-ASSISTANT_NAME = "Amarktai Assistant"
+ASSISTANT_NAME = "Amarktai Wingman"
 AGENTS_NAME = "Amarktai Coding Agents"
 ROUTER_NAME = "GenX Router"
 
