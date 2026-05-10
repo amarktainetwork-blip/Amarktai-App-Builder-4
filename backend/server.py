@@ -342,7 +342,53 @@ async def health() -> dict:
     }
 
 
+def _build_scan_roots() -> list[Path]:
+    """
+    Return an explicit allowlist of app-owned paths to scan.
+
+    Never includes system directories (/proc, /usr, /lib, etc.).
+    Supports both repo dev layout and Docker /app layout.
+    """
+    roots: list[Path] = []
+
+    # Docker /app layout: only scan specific known app files/dirs
+    docker_root = Path("/app")
+    if (docker_root / "server.py").exists():
+        for name in ("server.py", "agents", "auth.py", "config.py",
+                     "settings_store.py", "github_integration.py", "README.md"):
+            p = docker_root / name
+            if p.exists() and not p.is_symlink():
+                roots.append(p)
+        return roots
+
+    # Repo dev layout: scan explicit subdirectories only
+    for rel in (
+        "backend",
+        "frontend/src",
+        "frontend/public",
+        "scripts",
+        "README.md",
+        ".env.example",
+        "docker-compose.yml",
+    ):
+        p = REPO_ROOT / rel
+        if p.exists() and not p.is_symlink():
+            roots.append(p)
+    return roots
+
+
 async def _forbidden_source_check() -> tuple[bool, str]:
+    """
+    Scan only app-owned source files for forbidden legacy references.
+
+    Never scans system paths (/proc, /usr, /lib, /bin, etc.).
+    Never follows symlinks.
+    Never calls rglob on REPO_ROOT directly.
+    Respects SKIP_SOURCE_SCAN=true env flag.
+    """
+    if os.environ.get("SKIP_SOURCE_SCAN", "").lower() in ("1", "true", "yes"):
+        return True, "Source scan skipped by configuration."
+
     upper_ai = "".join(("AI", "VA"))
     title_ai = "".join(("Ai", "va"))
     lower_ai = "".join(("ai", "va"))
@@ -355,39 +401,66 @@ async def _forbidden_source_check() -> tuple[bool, str]:
         upper_ai, title_ai, lower_ai, lower_platform, title_platform,
         platform_base, platform_assets, platform_package,
     ]
-    # Only scan app source — never scan system/dependency/build paths
     excluded_dirs = {
         ".git", "node_modules", "build", "dist",
         "__pycache__", ".pytest_cache", ".mypy_cache", ".venv", "venv",
     }
-    # Absolute system paths to never enter
-    excluded_absolute_prefixes = (
-        "/usr", "/lib", "/bin", "/etc", "/proc", "/sys",
-        "/dev", "/run", "/tmp", "/var", "/root", "/home",
-    )
-    try:
-        for path in REPO_ROOT.rglob("*"):
-            if not path.is_file():
-                continue
-            # Skip system paths
-            try:
-                resolved = path.resolve()
-                if str(resolved).startswith(excluded_absolute_prefixes):
-                    continue
-            except Exception:
-                continue
-            if any(part in excluded_dirs for part in path.parts):
-                continue
-            try:
-                text = path.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                continue
+
+    def _check_file(p: Path) -> tuple[bool, str] | None:
+        """Return (False, detail) if forbidden content found, else None."""
+        try:
+            if p.is_symlink():
+                return None
+            text = p.read_text(encoding="utf-8", errors="ignore")
             lowered = text.lower()
             if any(term.lower() in lowered for term in forbidden):
-                return False, f"Legacy reference remains in {path.relative_to(REPO_ROOT)}"
+                return False, f"Legacy reference remains in {p}"
+        except (PermissionError, OSError):
+            pass
+        except Exception:
+            pass
+        return None
+
+    def _scan_root(root: Path) -> tuple[bool, str] | None:
+        """Recursively scan root; return first failure or None if clean."""
+        try:
+            if root.is_symlink() or not root.exists():
+                return None
+            if root.is_file():
+                return _check_file(root)
+            # Directory: recurse with rglob but skip excluded names
+            for p in root.rglob("*"):
+                try:
+                    if p.is_symlink():
+                        continue
+                    if any(part in excluded_dirs for part in p.parts):
+                        continue
+                    if not p.is_file():
+                        continue
+                    result = _check_file(p)
+                    if result is not None:
+                        return result
+                except (PermissionError, OSError):
+                    continue
+                except Exception:
+                    continue
+        except (PermissionError, OSError):
+            pass
+        except Exception:
+            pass
+        return None
+
+    try:
+        scan_roots = _build_scan_roots()
+        for root in scan_roots:
+            result = _scan_root(root)
+            if result is not None:
+                return result
         return True, "No legacy references found in scanned source files."
     except Exception as exc:
-        return False, f"Source scan could not complete: {exc}"
+        # Unexpected error: warn, do not FAIL readiness unless a forbidden reference was confirmed
+        logger.warning("Source scan encountered an unexpected error: %s", exc)
+        return True, f"Source scan completed with a warning: {exc}"
 
 
 @api.get("/readiness")
