@@ -658,3 +658,193 @@ async def test_validation_state_written_after_build():
     assert "required_files_present" in vs
     assert "required_files_missing" in vs
 
+
+# ---------- validation lifecycle events ----------
+
+@pytest.mark.asyncio
+async def test_validation_events_emitted():
+    """Validation lifecycle events must be emitted (validation_started, validation_passed)."""
+    db, proj, files, events, messages = _make_db()
+    call_count = [0]
+    responses = [
+        {"summary": "App", "audience": "users", "core_features": [], "requirements_md": "# Reqs"},
+        {"tech_stack": {"frontend": "HTML", "styling": "CSS"}, "file_plan": []},
+        {"files": [
+            {"path": "index.html", "language": "html", "content": "<!DOCTYPE html><html><body>Hello</body></html>"},
+            {"path": "styles.css", "language": "css", "content": "body{}"},
+            {"path": "README.md", "language": "markdown", "content": "# App"},
+            {"path": "amarktai.project.json", "language": "json", "content": '{"name":"App"}'},
+        ], "summary": "Done"},
+        {"verdict": "pass", "issues": [], "patched_files": [], "summary": "OK"},
+    ]
+
+    async def complete_se(**kwargs):
+        idx = call_count[0] % len(responses)
+        call_count[0] += 1
+        return {"text": json.dumps(responses[idx]), "model_label": "t", "model": "t", "session_id": "s", "usage": {}}
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(side_effect=complete_se)
+    events_received = []
+
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    written = []
+
+    async def fake_write(p, c, l="text"):
+        written.append({"path": p, "content": c, "language": l})
+
+    orch.fs.write = fake_write
+    orch.fs.list_full = AsyncMock(side_effect=lambda: list(written))
+    orch.fs.list = AsyncMock(return_value=[])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    from agents.stack_engine import decide_stack
+    sd = decide_stack(mode="landing_page")
+    await orch.run_full_build("Build landing page", mode="landing_page", stack_decision=sd)
+
+    event_types = [e.get("type") for e in events_received]
+    assert "validation_started" in event_types, f"validation_started not emitted. Got: {event_types}"
+    assert "validation_passed" in event_types, f"validation_passed not emitted. Got: {event_types}"
+    assert "validation_failed" not in event_types, "validation_failed should not be emitted on success"
+
+
+@pytest.mark.asyncio
+async def test_repair_loop_triggers_on_missing_file():
+    """When a required file is missing after first reviewer pass, repair loop must trigger."""
+    db, proj, files, events, messages = _make_db()
+    call_count = [0]
+    # Coder produces only index.html — missing styles.css, README.md, amarktai.project.json
+    # First reviewer pass: no patches
+    # Second reviewer pass (repair): adds missing files
+    all_responses = [
+        # scout
+        {"summary": "App", "audience": "users", "core_features": [], "requirements_md": "# Reqs"},
+        # architect
+        {"tech_stack": {"frontend": "HTML", "styling": "CSS"}, "file_plan": []},
+        # coder — only index.html, missing others
+        {"files": [{"path": "index.html", "language": "html", "content": "<html></html>"}], "summary": "Partial"},
+        # first reviewer pass — no patches
+        {"verdict": "warn", "issues": ["Missing styles.css"], "patched_files": [], "summary": "Partial"},
+        # repair pass — adds missing files
+        {"verdict": "pass", "issues": [], "patched_files": [
+            {"path": "styles.css", "language": "css", "content": "body{}"},
+            {"path": "README.md", "language": "markdown", "content": "# App"},
+            {"path": "amarktai.project.json", "language": "json", "content": '{"name":"App"}'},
+        ], "summary": "Fixed"},
+    ]
+
+    async def complete_se(**kwargs):
+        idx = call_count[0] % len(all_responses)
+        call_count[0] += 1
+        return {"text": json.dumps(all_responses[idx]), "model_label": "t", "model": "t", "session_id": "s", "usage": {}}
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(side_effect=complete_se)
+    events_received = []
+
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    written = []
+
+    async def fake_write(p, c, l="text"):
+        written.append({"path": p, "content": c, "language": l})
+
+    orch.fs.write = fake_write
+    orch.fs.list_full = AsyncMock(side_effect=lambda: list(written))
+    orch.fs.list = AsyncMock(return_value=[])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    from agents.stack_engine import decide_stack
+    sd = decide_stack(mode="landing_page")
+    await orch.run_full_build("Build landing page", mode="landing_page", stack_decision=sd)
+
+    event_types = [e.get("type") for e in events_received]
+    # Should have emitted validation_failed and repair_started before eventually passing
+    assert "validation_failed" in event_types, f"Expected validation_failed. Got: {event_types}"
+    assert "repair_started" in event_types, f"Expected repair_started. Got: {event_types}"
+    # End state: must be ready (repair succeeded)
+    status_events = [e for e in events_received if e.get("type") == "project_status"]
+    statuses = [e["data"]["status"] for e in status_events]
+    assert "ready" in statuses, f"Expected ready after repair. Got: {statuses}"
+
+
+@pytest.mark.asyncio
+async def test_repair_loop_fails_after_max_attempts():
+    """When repair cannot fix missing files within the tier limit, project must be failed."""
+    db, proj, files, events, messages = _make_db()
+    # Set quality_tier to cheap so max_repairs = 1
+    proj["quality_tier"] = "cheap"
+    call_count = [0]
+    # Coder: only index.html; reviewer always returns no patches; repair also no patches
+    reviewer_resp = {"verdict": "warn", "issues": ["Missing styles.css"], "patched_files": [], "summary": "Still missing"}
+    all_responses = [
+        {"summary": "App", "audience": "users", "core_features": [], "requirements_md": "# Reqs"},
+        {"tech_stack": {"frontend": "HTML", "styling": "CSS"}, "file_plan": []},
+        {"files": [{"path": "index.html", "language": "html", "content": "<html></html>"}], "summary": "Partial"},
+        reviewer_resp,  # first reviewer pass
+        reviewer_resp,  # repair pass (still no patched_files)
+    ]
+
+    async def complete_se(**kwargs):
+        idx = call_count[0] % len(all_responses)
+        call_count[0] += 1
+        return {"text": json.dumps(all_responses[idx]), "model_label": "t", "model": "t", "session_id": "s", "usage": {}}
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(side_effect=complete_se)
+    events_received = []
+
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    written = []
+
+    async def fake_write(p, c, l="text"):
+        written.append({"path": p, "content": c, "language": l})
+
+    orch.fs.write = fake_write
+    orch.fs.list_full = AsyncMock(side_effect=lambda: list(written))
+    orch.fs.list = AsyncMock(return_value=[])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    from agents.stack_engine import decide_stack
+    sd = decide_stack(mode="landing_page", quality_tier="cheap")
+    # Remove upgrade confirmation to allow the build
+    sd["requires_upgrade_confirmation"] = False
+    await orch.run_full_build("Build landing page", mode="landing_page", stack_decision=sd)
+
+    # Must be failed — could not repair within cheap tier limit
+    assert proj.get("status") == "failed", f"Expected failed, got {proj.get('status')}"
+    event_types = [e.get("type") for e in events_received]
+    assert "validation_exhausted" in event_types, f"Expected validation_exhausted. Got: {event_types}"
+    status_events = [e for e in events_received if e.get("type") == "project_status"]
+    statuses = [e["data"]["status"] for e in status_events]
+    assert "ready" not in statuses, f"Should not be ready after exhausted repair. Got: {statuses}"
+
+
+# ---------- stack decision: 20-page website ----------
+
+def test_stack_website_20_page():
+    """Website mode must use iframe preview and require index.html + README."""
+    sd = decide_stack(prompt="Build a 20-page content website", mode="website")
+    assert sd["recommended_mode"] == "website"
+    assert sd["preview_strategy"] == "iframe"
+    assert "index.html" in sd["required_files"]
+    assert "README.md" in sd["required_files"]
+    assert sd["stack"]["backend"] == "none"
+
+
+# ---------- retry repair agent target ----------
+
+def test_retry_repair_target_allowed():
+    """RetryBody must accept 'repair' as a valid agent target."""
+    import server
+    body = server.RetryBody(agent="repair")
+    assert body.agent == "repair"
+
