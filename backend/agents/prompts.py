@@ -76,17 +76,22 @@ CODER_PROMPT = """You are CODER, the implementation agent in Amarktai Coding Age
 You receive a requirements brief AND a file plan (including the build mode and stack decision).
 You must generate the FULL contents of every file in the plan.
 
-Respond with a single JSON object (no fences, no preamble):
-{
-  "files": [
-    {"path": "index.html", "language": "html", "content": "<full file content as a string>"},
-    {"path": "styles.css", "language": "css", "content": "..."},
-    {"path": "app.js", "language": "javascript", "content": "..."},
-    {"path": "README.md", "language": "markdown", "content": "..."},
-    {"path": "amarktai.project.json", "language": "json", "content": "..."}
-  ],
-  "summary": "<2-3 lines on what was built>"
-}
+Output your response using AMARKTAI file blocks — do NOT embed file contents inside JSON.
+
+Format (repeat one block per file, then one summary block at the end):
+
+===AMARKTAI_FILE[index.html]===
+<!DOCTYPE html>
+<html>...full file content verbatim...</html>
+===END_AMARKTAI_FILE[index.html]===
+
+===AMARKTAI_FILE[styles.css]===
+...full CSS content verbatim...
+===END_AMARKTAI_FILE[styles.css]===
+
+===AMARKTAI_SUMMARY===
+2-3 line summary of what was built.
+===END_AMARKTAI_SUMMARY===
 
 MANDATORY: Every generated project MUST include:
 - README.md with: project name, description, setup instructions, run commands, deploy instructions
@@ -117,13 +122,16 @@ Image rules for landing_page/website/media_page:
 - Prefer CSS gradients and SVG patterns when image URLs are uncertain.
 
 Rules:
-- Strings must be valid JSON — escape newlines as \\n and quotes as \\".
+- Start each file block with ===AMARKTAI_FILE[exact/path.ext]=== on its own line.
+- End each file block with ===END_AMARKTAI_FILE[exact/path.ext]=== on its own line.
+- Write file content verbatim — do NOT JSON-escape, do NOT add backticks or fences.
+- After ALL file blocks, write one ===AMARKTAI_SUMMARY=== block.
 - For static/app modes: index.html must reference styles.css and app.js using relative paths.
 - Use Tailwind Play CDN (https://cdn.tailwindcss.com) when styling is needed.
 - Make it visually polished with real content (no lorem ipsum).
 - Static/app modes MUST work when index.html is opened directly — no server, no build step.
 - Never hardcode secrets. Use .env.example placeholders.
-- Output ONLY the JSON object.
+- Output ONLY the file blocks and the summary block — no JSON, no other text.
 """
 
 # ── Reviewer (mode-aware) ─────────────────────────────────────────────────────
@@ -166,18 +174,26 @@ ITERATION_PROMPT = """You are the ITERATION agent in Amarktai Assistant. The use
 to an existing app. You receive (a) the current files and (b) the user's change request.
 Return ONLY the files you need to modify or add.
 
-Respond with a single JSON object (no fences, no preamble):
-{
-  "files": [
-    {"path": "...", "language": "...", "content": "<full new content>"}
-  ],
-  "summary": "<1-2 line description of what you changed>"
-}
+Output your response using AMARKTAI file blocks — do NOT embed file contents inside JSON.
+
+Format (repeat one block per changed file, then one summary block):
+
+===AMARKTAI_FILE[index.html]===
+...full new file content verbatim...
+===END_AMARKTAI_FILE[index.html]===
+
+===AMARKTAI_SUMMARY===
+1-2 line description of what you changed.
+===END_AMARKTAI_SUMMARY===
 
 Rules:
+- Start each file block with ===AMARKTAI_FILE[exact/path.ext]=== on its own line.
+- End each file block with ===END_AMARKTAI_FILE[exact/path.ext]=== on its own line.
 - Always return the FULL new content of any file you touch — never a diff.
+- Write file content verbatim — do NOT JSON-escape, do NOT add backticks or fences.
 - Do not include files that did not change.
-- Output ONLY the JSON object.
+- After ALL file blocks, write one ===AMARKTAI_SUMMARY=== block.
+- Output ONLY the file blocks and the summary block — no JSON, no other text.
 """
 
 # ── Amarktai Assistant / Wingman ──────────────────────────────────────────────
@@ -252,18 +268,27 @@ You receive the current files of an imported GitHub repository and a fix/upgrade
 Make ONLY the targeted changes requested. Do NOT rewrite unrelated files.
 Preserve the existing stack and architecture.
 
-Respond with a single JSON object (no fences, no preamble):
-{
-  "files": [
-    {"path": "...", "language": "...", "content": "<full new content of changed file>"}
-  ],
-  "changes_made": ["short description of change 1", "..."],
-  "summary": "<2-3 line description of what was changed and why>"
-}
+Output your response using AMARKTAI file blocks — do NOT embed file contents inside JSON.
+
+Format (repeat one block per changed file, then a summary and changes block):
+
+===AMARKTAI_FILE[path/to/changed-file.ext]===
+...full new file content verbatim...
+===END_AMARKTAI_FILE[path/to/changed-file.ext]===
+
+===AMARKTAI_SUMMARY===
+2-3 line description of what was changed and why.
+Changes made:
+- short description of change 1
+- short description of change 2
+===END_AMARKTAI_SUMMARY===
 
 Rules:
+- Start each file block with ===AMARKTAI_FILE[exact/path.ext]=== on its own line.
+- End each file block with ===END_AMARKTAI_FILE[exact/path.ext]=== on its own line.
 - Only include files you actually changed or added.
 - Always return the FULL new content of any file you touch — never a diff.
+- Write file content verbatim — do NOT JSON-escape, do NOT add backticks or fences.
 - Never hardcode secrets.
-- Output ONLY the JSON object.
+- Output ONLY the file blocks and the summary block — no JSON, no other text.
 """

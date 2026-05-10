@@ -89,6 +89,68 @@ def _parse_json(text: str) -> dict:
         raise
 
 
+# Extension → language mapping for AMARKTAI block parsing
+_EXT_LANG: dict[str, str] = {
+    "html": "html", "htm": "html",
+    "css": "css",
+    "js": "javascript", "jsx": "javascript", "mjs": "javascript",
+    "ts": "typescript", "tsx": "typescript",
+    "json": "json",
+    "md": "markdown", "markdown": "markdown",
+    "py": "python",
+    "sh": "bash", "bash": "bash",
+    "yaml": "yaml", "yml": "yaml",
+    "toml": "toml",
+    "env": "dotenv",
+    "txt": "text",
+    "dockerfile": "dockerfile",
+}
+
+# Pre-compiled patterns for AMARKTAI block parsing
+_AMARKTAI_FILE_PAT = re.compile(
+    r"===AMARKTAI_FILE\[(?P<path>[^\]]+)\]===\n(?P<content>.*?)===END_AMARKTAI_FILE\[(?P=path)\]===",
+    re.DOTALL,
+)
+_AMARKTAI_SUMMARY_PAT = re.compile(
+    r"===AMARKTAI_SUMMARY===\n(?P<s>.*?)(?:\n===END_AMARKTAI_SUMMARY===|$)",
+    re.DOTALL,
+)
+
+
+def _parse_amarktai_blocks(text: str) -> dict:
+    """Parse AMARKTAI file block format output from Coder/Iteration/RepoFix agents.
+
+    Expected format::
+
+        ===AMARKTAI_FILE[index.html]===
+        ...verbatim file content...
+        ===END_AMARKTAI_FILE[index.html]===
+
+        ===AMARKTAI_SUMMARY===
+        2-3 line summary.
+        ===END_AMARKTAI_SUMMARY===
+
+    Returns a dict compatible with the old JSON protocol::
+
+        {"files": [{"path": ..., "language": ..., "content": ...}], "summary": ...}
+    """
+    files = []
+    for m in _AMARKTAI_FILE_PAT.finditer(text):
+        path = m.group("path").strip()
+        content = m.group("content")
+        # Strip a single trailing newline that is part of the block delimiter
+        if content.endswith("\n"):
+            content = content[:-1]
+        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+        language = _EXT_LANG.get(ext, "text")
+        files.append({"path": path, "language": language, "content": content})
+
+    summary_m = _AMARKTAI_SUMMARY_PAT.search(text)
+    summary = summary_m.group("s").strip() if summary_m else ""
+
+    return {"files": files, "summary": summary}
+
+
 def _has_app_files(files: list[dict]) -> bool:
     """Return True if there are generated app files (not just metadata)."""
     return any(f["path"] not in _META_FILES for f in files)
@@ -282,6 +344,74 @@ class Orchestrator:
                                  meta={"model": result["model_label"]})
         return {"data": data, "model_label": result["model_label"]}
 
+    async def _run_agent_blocks(self, agent: str, system: str, user: str) -> dict:
+        """Like _run_agent but parses AMARKTAI file blocks instead of JSON.
+
+        Tries AMARKTAI block format first. Falls back to JSON parsing when no
+        blocks are found so that test mocks returning the old JSON format still
+        work without modification.
+
+        Returns the same ``{"data": {...}, "model_label": ...}`` dict as
+        ``_run_agent``, where ``data`` contains ``{"files": [...], "summary": "..."}``.
+        """
+        timeout = AGENT_TIMEOUTS.get(agent, 300)
+        await self._record_event(agent, "started", f"{agent.title()} engaged.")
+        await self._record_event(agent, "thinking", "Calling model...")
+        try:
+            result = await asyncio.wait_for(
+                self.provider.complete(
+                    agent=agent, system_prompt=system, user_message=user,
+                    session_id=f"{self.project_id}:{agent}",
+                ),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            msg = f"Build timed out during {agent} after {timeout}s."
+            await self._record_event(agent, "failed", msg)
+            raise TimeoutError(msg)
+        await self._track_usage(result["model_label"], len(system) + len(user), len(result["text"]))
+
+        raw = result["text"]
+
+        # Try AMARKTAI block parsing first
+        data = _parse_amarktai_blocks(raw)
+        if data["files"]:
+            await self._record_event(
+                agent, "completed",
+                f"{agent.title()} done (AMARKTAI block format).",
+                meta={"model": result["model_label"]},
+            )
+            return {"data": data, "model_label": result["model_label"]}
+
+        # Fallback: JSON parsing (backward-compat / model did not follow new format)
+        await self._record_event(
+            agent, "thinking",
+            "No AMARKTAI file blocks detected; attempting JSON fallback.",
+        )
+        try:
+            data = _parse_json(raw)
+        except Exception as e:
+            parse_err = str(e)
+            await self._record_event(agent, "failed",
+                                     f"JSON fallback parse failed: {parse_err}",
+                                     meta={"raw": raw[:2000]})
+            try:
+                data = await self._repair_json(agent, raw, parse_err)
+                await self._record_event(agent, "repaired",
+                                         f"JSON repair succeeded for {agent}.")
+            except Exception as repair_err:
+                err_msg = (
+                    f"{agent.title()} returned neither valid AMARKTAI file blocks "
+                    f"nor valid JSON, and automatic repair failed."
+                )
+                await self._record_event(agent, "failed",
+                                         f"Repair also failed: {repair_err}",
+                                         meta={"repair_error": str(repair_err)})
+                raise ValueError(err_msg) from repair_err
+        await self._record_event(agent, "completed", f"{agent.title()} done.",
+                                 meta={"model": result["model_label"]})
+        return {"data": data, "model_label": result["model_label"]}
+
     # ---------- full build pipeline ----------
 
     async def run_full_build(self, user_prompt: str, mode: str = "web_app",
@@ -418,7 +548,7 @@ class Orchestrator:
             "media_strategy": shared_ctx.get("media_strategy", {}),
             "shared_context": shared_ctx,
         }, indent=2)
-        coder = await self._run_agent("coder", CODER_PROMPT, coder_input)
+        coder = await self._run_agent_blocks("coder", CODER_PROMPT, coder_input)
         await self._check_cancel()
         coder_data = coder["data"]
         generated_files = coder_data.get("files", [])
@@ -670,7 +800,7 @@ class Orchestrator:
             "request": user_prompt,
             "files": [{"path": f["path"], "content": f["content"]} for f in app_files],
         }, indent=2)
-        fix = await self._run_agent("repo_fix", REPO_FIX_PROMPT, fix_input)
+        fix = await self._run_agent_blocks("repo_fix", REPO_FIX_PROMPT, fix_input)
         await self._check_cancel()
         fix_data = fix["data"]
         for f in fix_data.get("files", []):
@@ -713,7 +843,7 @@ class Orchestrator:
                 "request": user_prompt,
                 "files": [{"path": f["path"], "content": f["content"]} for f in app_files],
             }
-            iter_res = await self._run_agent("iteration", ITERATION_PROMPT, json.dumps(payload, indent=2))
+            iter_res = await self._run_agent_blocks("iteration", ITERATION_PROMPT, json.dumps(payload, indent=2))
             data = iter_res["data"]
             for f in data.get("files", []):
                 await self.fs.write(f["path"], f["content"], f.get("language", "text"))
@@ -771,7 +901,7 @@ class Orchestrator:
                     arch_data = {}
                 await self._record_event("coder", "retry", "Retrying Coder with stored context.")
                 coder_input = json.dumps({"requirements": scout_data, "plan": arch_data}, indent=2)
-                coder = await self._run_agent("coder", CODER_PROMPT, coder_input)
+                coder = await self._run_agent_blocks("coder", CODER_PROMPT, coder_input)
                 coder_data = coder["data"]
                 generated_files = coder_data.get("files", [])
                 if not generated_files:
