@@ -618,9 +618,42 @@ class Orchestrator:
         }
         await self.db.projects.update_one(
             {"id": self.project_id},
-            {"$set": {"validation_state": validation_state, "repair_attempts": repair_pass}},
+            {"$set": {
+                "validation_state": validation_state,
+                "repair_attempts": repair_pass,
+                # Phase 2: persist full validation for frontend quality/design/security panel
+                "last_validation": {
+                    "qualityScore": validation.get("qualityScore", 0),
+                    "designScore": validation.get("designScore", 0),
+                    "securityScore": validation.get("securityScore", 0),
+                    "qualityOk": validation.get("qualityOk", True),
+                    "designOk": validation.get("designOk", True),
+                    "securityOk": validation.get("securityOk", True),
+                    "canFinalize": validation["canFinalize"],
+                    "qualityErrors": validation.get("qualityErrors", []),
+                    "designErrors": validation.get("designErrors", []),
+                    "securityErrors": validation.get("securityErrors", []),
+                },
+            }},
         )
         await self.emit({"type": "validation_state", "data": validation_state})
+        # Phase 11: Emit typed quality/security events for Workspace.jsx to track
+        if validation_state["status"] == "passed":
+            await self.emit({
+                "type": "quality_validation_passed" if validation.get("qualityOk") else "quality_validation_failed",
+                "data": {
+                    "qualityScore": validation.get("qualityScore", 0),
+                    "designScore": validation.get("designScore", 0),
+                    "securityScore": validation.get("securityScore", 0),
+                    "qualityOk": validation.get("qualityOk", True),
+                    "designOk": validation.get("designOk", True),
+                    "securityOk": validation.get("securityOk", True),
+                    "canFinalize": validation["canFinalize"],
+                    "qualityErrors": validation.get("qualityErrors", []),
+                    "designErrors": validation.get("designErrors", []),
+                    "securityErrors": validation.get("securityErrors", []),
+                },
+            })
         return validation_state
 
     async def _run_build_pipeline(self, user_prompt: str, mode: str,

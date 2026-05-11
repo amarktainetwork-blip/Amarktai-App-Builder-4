@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Settings as SettingsIcon, Github, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export default function Header({ projectName, status, onOpenSettings, onFinalize, finalizing, repoUrl, rightExtra, onOpenPR, prUrl, hasGithub }) {
+export default function Header({ projectName, status, onOpenSettings, onFinalize, finalizing, canFinalize, repoUrl, rightExtra, onOpenPR, prUrl, hasGithub }) {
   return (
     <header
       data-testid="app-header"
@@ -75,8 +75,9 @@ export default function Header({ projectName, status, onOpenSettings, onFinalize
           <Button
             data-testid="header-finalize-btn"
             size="sm"
-            disabled={finalizing}
-            className="bg-white text-black hover:bg-zinc-200 font-mono text-xs h-8"
+            disabled={finalizing || canFinalize === false}
+            title={canFinalize === false ? "Finalize locked: quality/design/security scores must pass" : undefined}
+            className="bg-white text-black hover:bg-zinc-200 font-mono text-xs h-8 disabled:opacity-40"
             onClick={onFinalize}
           >
             <Github className="w-3.5 h-3.5 mr-1.5" strokeWidth={1.5} />

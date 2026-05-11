@@ -10,6 +10,8 @@ import FileTree from "@/components/FileTree";
 import CodeViewer from "@/components/CodeViewer";
 import LivePreview from "@/components/LivePreview";
 import StatusBar from "@/components/StatusBar";
+import ValidationPanel from "@/components/ValidationPanel";
+import RepoCollisionModal from "@/components/RepoCollisionModal";
 import SettingsDialog from "@/components/SettingsDialog";
 import PRDialog from "@/components/PRDialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -35,6 +37,11 @@ export default function WorkspacePage() {
   const [tab, setTab] = useState("preview");
   // Tracks the current pipeline sub-phase for the preview panel ("validating" | "repairing" | null)
   const [buildPhase, setBuildPhase] = useState(null);
+  // Validation result surfaced from the last quality/design/security pass
+  const [lastValidation, setLastValidation] = useState(null);
+  // GitHub name collision state
+  const [collisionModal, setCollisionModal] = useState(null); // { repoName, owner }
+  const [collisionBusy, setCollisionBusy] = useState(false);
 
   const wsRef = useRef(null);
 
@@ -92,12 +99,30 @@ export default function WorkspacePage() {
       setBuildPhase("validating");
     } else if (evt.type === "validation_passed" || evt.type === "validation_failed" || evt.type === "validation_exhausted") {
       setBuildPhase(null);
+      // Capture quality/design/security scores from validation events
+      if (evt.data) {
+        setLastValidation((prev) => ({ ...prev, ...evt.data }));
+      }
+    } else if (
+      evt.type === "quality_validation_passed" ||
+      evt.type === "quality_validation_failed" ||
+      evt.type === "security_validation_passed" ||
+      evt.type === "security_validation_failed"
+    ) {
+      // All score events merge into the same validation state
+      if (evt.data) setLastValidation((prev) => ({ ...prev, ...evt.data }));
+    } else if (evt.type === "design_direction") {
+      if (evt.data) setLastValidation((prev) => ({ ...prev, designDirection: evt.data }));
     } else if (evt.type === "repair_started") {
       setBuildPhase("repairing");
     } else if (evt.type === "repair_applied" || evt.type === "repair_failed") {
       setBuildPhase(null);
     } else if (evt.type === "build_complete") {
-      Projects.get(projectId).then(setProject);
+      Projects.get(projectId).then((p) => {
+        setProject(p);
+        // If project has last_validation, show it
+        if (p?.last_validation) setLastValidation(p.last_validation);
+      });
       Projects.files(projectId).then(setFiles);
       setRefreshKey((k) => k + 1);
     } else if (evt.type === "usage") {
@@ -113,8 +138,21 @@ export default function WorkspacePage() {
       } : p);
     } else if (evt.type === "finalized") {
       setProject((p) => p ? { ...p, repo_url: evt.data.url } : p);
-    } else if (evt.type === "pr_opened") {
+    } else if (evt.type === "pr_opened" || evt.type === "github_pr_created") {
       setProject((p) => p ? { ...p, pr_url: evt.data.pr_url } : p);
+      toast.success("Pull request opened.");
+    } else if (evt.type === "github_repo_exists") {
+      // Backend signals that the repo name already exists on GitHub
+      setCollisionModal({ repoName: evt.data.repo_name, owner: evt.data.owner });
+    } else if (evt.type === "job_ready") {
+      setProject((p) => p ? { ...p, status: "ready" } : p);
+    } else if (evt.type === "job_failed") {
+      setProject((p) => p ? { ...p, status: "failed", error: evt.data?.reason } : p);
+    } else if (evt.type === "clarification_needed") {
+      // Backend signals clarification during an in-progress build (future support)
+      toast.info("Build agents need clarification — see conversation panel.");
+    } else if (evt.type === "media_choice_needed") {
+      toast.info("Media: agents are choosing the best source for your project.");
     }
   }, [projectId]);
 
@@ -165,9 +203,53 @@ export default function WorkspacePage() {
       await Projects.finalize(projectId);
       toast.success("Created GitHub repository.");
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Failed to finalize");
+      const status = e.response?.status;
+      const detail = e.response?.data?.detail;
+      // Phase 9: Handle repo name collision gracefully
+      if (status === 409 && detail?.repo_exists) {
+        setCollisionModal({ repoName: detail.repo_name, owner: detail.owner });
+      } else {
+        toast.error(detail || "Failed to finalize");
+      }
     } finally {
       setFinalizing(false);
+    }
+  };
+
+  const handleCollisionBranchPR = async () => {
+    setCollisionBusy(true);
+    try {
+      const result = await Projects.finalizeAsBranch(projectId);
+      setCollisionModal(null);
+      toast.success("Branch created and PR opened.");
+      if (result?.pr_url) {
+        setProject((p) => p ? { ...p, pr_url: result.pr_url } : p);
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to create branch PR");
+    } finally {
+      setCollisionBusy(false);
+    }
+  };
+
+  const handleCollisionRename = async (newName) => {
+    setCollisionBusy(true);
+    try {
+      const result = await Projects.finalize(projectId, { repo_name_override: newName });
+      setCollisionModal(null);
+      toast.success("Repository created.");
+      if (result?.url) {
+        setProject((p) => p ? { ...p, repo_url: result.url } : p);
+      }
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      if (e.response?.status === 409 && detail?.repo_exists) {
+        setCollisionModal({ repoName: detail.repo_name, owner: detail.owner });
+      } else {
+        toast.error(detail || "Failed to create repository");
+      }
+    } finally {
+      setCollisionBusy(false);
     }
   };
 
@@ -177,9 +259,24 @@ export default function WorkspacePage() {
 
   const busy = project?.status === "running" || project?.status === "queued";
   const failed = project?.status === "failed" || project?.status === "cancelled";
+  const ready = project?.status === "ready";
+  // Phase 2: Gate finalize on validation scores
+  const validation = lastValidation || project?.last_validation;
+  const canFinalize = ready && (!validation || validation.canFinalize !== false);
 
   return (
     <div className="h-screen flex flex-col bg-amk-base">
+      {/* Phase 9: GitHub repo name collision modal */}
+      {collisionModal && (
+        <RepoCollisionModal
+          repoName={collisionModal.repoName}
+          owner={collisionModal.owner}
+          onBranchPR={handleCollisionBranchPR}
+          onRename={handleCollisionRename}
+          onCancel={() => setCollisionModal(null)}
+          busy={collisionBusy}
+        />
+      )}
       <Header
         projectName={project?.name}
         status={project?.status}
@@ -188,6 +285,7 @@ export default function WorkspacePage() {
         hasGithub={!!project?.github}
         onOpenPR={() => setPrOpen(true)}
         finalizing={finalizing}
+        canFinalize={canFinalize}
         onFinalize={finalize}
         onOpenSettings={() => setSettingsOpen(true)}
         rightExtra={
@@ -271,6 +369,8 @@ export default function WorkspacePage() {
               {project.error}
             </div>
           )}
+          {/* Phase 2: Quality/design/security validation scores */}
+          <ValidationPanel validation={validation} />
           <ChatPanel messages={messages} onSend={send} disabled={busy} busy={busy} />
         </aside>
 
