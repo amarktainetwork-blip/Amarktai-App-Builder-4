@@ -10,7 +10,7 @@ Optional: Only used when PIXABAY_API_KEY is configured.
 from __future__ import annotations
 
 import asyncio
-import hashlib
+import json
 import time
 from typing import Any
 
@@ -26,8 +26,7 @@ _cache_lock = asyncio.Lock()
 
 
 def _cache_key(endpoint: str, params: dict) -> str:
-    raw = f"{endpoint}:{sorted(params.items())}"
-    return hashlib.sha256(raw.encode()).hexdigest()
+    return f"{endpoint}::{json.dumps(sorted(params.items()), sort_keys=True)}"
 
 
 async def _get_cached(key: str) -> Any | None:

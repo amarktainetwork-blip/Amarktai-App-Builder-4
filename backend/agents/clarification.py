@@ -18,14 +18,8 @@ from typing import Any
 
 # Short prompts or prompts that only describe a generic concept
 _MIN_WORDS_FOR_CLEAR_PROMPT = 12
-_VAGUE_INTROS = re.compile(
-    r"^\s*build\s+(me\s+)?(an?\s+)?(app|site|website|platform|saas|dashboard|tool|product|thing|project)\s*[.!?]*\s*$",
-    re.IGNORECASE,
-)
-_VAGUE_SUFFIXES = re.compile(
-    r"\b(for me|please|now|quickly|asap|fast)\b",
-    re.IGNORECASE,
-)
+_VAGUE_INTROS_WORDS = {"app", "site", "website", "platform", "saas", "dashboard", "tool", "product", "thing", "project"}
+_VAGUE_PREFIXES = {"build", "make", "create", "generate"}
 
 # Keywords that imply a known mode — prompt is likely specific enough
 _MODE_KEYWORDS: dict[str, str] = {
@@ -97,15 +91,23 @@ def _implied_mode(prompt_lower: str) -> str | None:
 
 def _is_vague(prompt: str) -> bool:
     """Return True if the prompt is too vague for reliable generation."""
-    stripped = prompt.strip()
-    if _VAGUE_INTROS.match(stripped):
-        return True
+    stripped = prompt.strip().rstrip(".!?,")
+    words_lower = stripped.lower().split()
+    # Only 1-3 words total → definitely vague
+    if len(words_lower) <= 3:
+        # e.g. "build an app", "build site", "make a dashboard"
+        non_articles = [w for w in words_lower if w not in ("a", "an", "the", "me")]
+        if len(non_articles) <= 2:
+            has_vague_obj = any(w in _VAGUE_INTROS_WORDS for w in non_articles)
+            has_verb = any(w in _VAGUE_PREFIXES for w in non_articles)
+            if has_verb or has_vague_obj:
+                return True
     words = _word_count(stripped)
     if words < _MIN_WORDS_FOR_CLEAR_PROMPT:
-        # Very short prompt — likely vague unless it names a specific type
+        # Short prompt — only vague unless it names a specific known mode
         prompt_lower = stripped.lower()
         if _implied_mode(prompt_lower):
-            # Named a specific mode — check if there's enough additional context
+            # Named a specific mode — still vague if under 6 words
             if words < 6:
                 return True
         else:
