@@ -190,9 +190,29 @@ def _score_static_landing(
             "No visual elements detected (no gradients, images, SVGs, or visual sections)."
         )
 
-    # CSS minimum length check (very thin CSS = thin design)
+    # CSS presence and quality check
+    # Check if any CSS file exists (styles.css, main.css, etc.)
+    has_css_file = bool(styles.get("content", "").strip()) or any(
+        k.endswith(".css") and v.get("content", "").strip()
+        for k, v in files_by_path.items()
+        if k != "styles.css"
+    )
+    # Also detect framework CSS loaded via CDN (Tailwind, Bootstrap, etc.)
+    has_framework_css = bool(re.search(
+        r'tailwind|bootstrap|bulma|materialize|foundation',
+        html, re.IGNORECASE,
+    ))
+
     css_content = css.strip()
-    if len(css_content) < 500:
+    if not has_css_file and not has_framework_css:
+        # No CSS at all: hard design fail — site will render completely unstyled
+        design -= 30
+        design_errors.append(
+            "No CSS file found (styles.css missing) and no framework CSS detected. "
+            "Site will render unstyled. Create styles.css with full styling."
+        )
+    elif len(css_content) < 500:
+        # CSS present but very thin
         design -= 15
         design_errors.append(
             f"CSS is very thin ({len(css_content)} chars). Expected substantial styling."
@@ -432,6 +452,19 @@ def score_project_quality(
                     quality_errors.append(
                         f"Prompt mentions '{keyword}' but {page_file} was not generated."
                     )
+            # Multi-page: ensure all generated HTML pages link a stylesheet
+            for path, f in files_by_path.items():
+                if path.endswith(".html"):
+                    content = f.get("content", "")
+                    if content.strip() and not re.search(
+                        r'<link[^>]+rel=["\']stylesheet["\']|tailwind|bootstrap',
+                        content, re.IGNORECASE,
+                    ):
+                        design_score -= 8
+                        design_errors.append(
+                            f"{path} does not link a stylesheet. "
+                            "Add <link rel=\"stylesheet\" href=\"styles.css\"> in <head>."
+                        )
 
     elif project_type == "pwa":
         quality_score, quality_errors = _score_pwa(files_by_path)

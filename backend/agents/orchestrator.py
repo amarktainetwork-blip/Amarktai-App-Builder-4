@@ -1109,7 +1109,7 @@ class Orchestrator:
         }, indent=2)
         fix = await self._run_agent_blocks("repo_fix", REPO_FIX_PROMPT, fix_input)
         await self._check_cancel()
-        fix_data = fix["data"]
+        fix_data = fix["data"] or {}
         changed: list[str] = []
         added: list[str] = []
         existing_paths = {f["path"] for f in app_files}
@@ -1187,12 +1187,15 @@ class Orchestrator:
                 "files": [{"path": f["path"], "content": f["content"]} for f in app_files],
             }
             iter_res = await self._run_agent_blocks("iteration", ITERATION_PROMPT, json.dumps(payload, indent=2))
-            data = iter_res["data"]
+            # Guard: model may return null/non-dict JSON — treat as empty rather than crash
+            data = iter_res["data"] if isinstance(iter_res["data"], dict) else {}
             if not data.get("files"):
                 raise ValueError("Iteration returned no editable file changes.")
+            changed_paths: list[str] = []
             for f in data.get("files", []):
                 await self.fs.write(f["path"], f["content"], f.get("language", "text"))
                 await self.emit({"type": "file_written", "data": {"path": f["path"]}})
+                changed_paths.append(f["path"])
             project = await self._load_project()
             await self._ensure_contract_files(project.get("prompt", ""), None)
             validation_state = await self._validate_contract(project.get("prompt", ""), None, 0, [])
@@ -1205,10 +1208,10 @@ class Orchestrator:
                 "agent", "iteration",
                 data.get("summary", "Updated."),
                 meta={"model": iter_res["model_label"],
-                      "files": [f["path"] for f in data.get("files", [])]},
+                      "files": changed_paths},
             )
             await self._set_status("ready")
-            await self.emit({"type": "build_complete", "data": {}})
+            await self.emit({"type": "build_complete", "data": {"changedFiles": changed_paths}})
         except Exception as e:
             err = str(e)
             await self._fail_project("iteration", err)

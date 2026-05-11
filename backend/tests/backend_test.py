@@ -2640,3 +2640,271 @@ def test_preview_fallback_next_actions_api_only():
     assert any("api" in a.lower() or "server" in a.lower() or "dependency" in a.lower() for a in actions), \
         f"Expected API/server action, got: {actions}"
     assert any("docker" in a.lower() for a in actions), f"Expected docker action, got: {actions}"
+
+
+# ── Live-blocker regression tests ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_run_iteration_null_data_does_not_crash():
+    """Iteration agent returning null JSON must raise ValueError, not AttributeError."""
+    db, proj, files, events, messages = _make_db()
+    proj["mode"] = "landing_page"
+
+    # Provider returns JSON null ("null" string)
+    provider = MagicMock()
+    provider.complete = AsyncMock(return_value={
+        "text": "null",
+        "model_label": "test-model",
+        "model": "test-model",
+        "session_id": "sess",
+        "usage": {},
+    })
+
+    events_received = []
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    # Pre-populate app files so the empty-files guard is bypassed
+    orch.fs.list_full = AsyncMock(return_value=[
+        {"path": "index.html", "content": "<h1>Test</h1>", "language": "html"},
+        {"path": "styles.css", "content": "body{}", "language": "css"},
+    ])
+    orch.fs.write = AsyncMock()
+
+    with pytest.raises(Exception) as exc_info:
+        await orch.run_iteration("Make the hero darker")
+
+    # Must NOT be an AttributeError (NoneType crash)
+    assert not isinstance(exc_info.value, AttributeError), (
+        f"Got AttributeError (NoneType crash) instead of controlled error: {exc_info.value}"
+    )
+    # Project must be marked failed
+    assert proj.get("status") == "failed"
+
+
+@pytest.mark.asyncio
+async def test_run_iteration_returns_changed_files_in_build_complete():
+    """run_iteration must emit changedFiles in build_complete event."""
+    db, proj, files, events, messages = _make_db()
+    proj["prompt"] = "Build a landing page"
+    proj["mode"] = "landing_page"
+
+    updated_html = (
+        "<html><head><link rel='stylesheet' href='styles.css'></head><body>"
+        "<h1>Updated</h1><section class='hero'><p>Premium hero.</p></section>"
+        "</body></html>"
+    )
+    updated_css = "body{background:#000}" * 30  # >500 chars
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(return_value={
+        "text": json.dumps({
+            "files": [
+                {"path": "index.html", "content": updated_html, "language": "html"},
+                {"path": "styles.css", "content": updated_css, "language": "css"},
+            ],
+            "summary": "Updated hero and styling.",
+        }),
+        "model_label": "test-model",
+        "model": "test-model",
+        "session_id": "sess",
+        "usage": {},
+    })
+
+    events_received = []
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    orch.fs.write = AsyncMock()
+    orch.fs.list_full = AsyncMock(return_value=[
+        {"path": "index.html", "content": updated_html, "language": "html"},
+        {"path": "styles.css", "content": updated_css, "language": "css"},
+        {"path": "README.md", "content": "# Test", "language": "markdown"},
+        {"path": "amarktai.project.json", "content": '{"files":[], "preview":{}}', "language": "json"},
+    ])
+    orch.fs.list = AsyncMock(return_value=[
+        {"path": "index.html"}, {"path": "styles.css"},
+    ])
+
+    # Patch contract helpers so validation passes without file system complications
+    async def fake_ensure(prompt, plan):
+        return [], []
+    orch._ensure_contract_files = fake_ensure
+
+    async def fake_validate(prompt, plan, pass_num, warnings):
+        return {"status": "passed", "errors": []}
+    orch._validate_contract = fake_validate
+
+    await orch.run_iteration("Make the hero more premium")
+
+    build_complete_events = [e for e in events_received if e.get("type") == "build_complete"]
+    assert build_complete_events, "build_complete event must be emitted"
+    changed = build_complete_events[-1].get("data", {}).get("changedFiles", [])
+    assert "index.html" in changed or "styles.css" in changed, (
+        f"Expected changedFiles to include written paths, got: {changed}"
+    )
+
+
+# ── detect_update_intent tests ────────────────────────────────────────────────
+
+from agents.repo_analyzer import detect_update_intent
+
+
+def test_detect_intent_complete_website_is_full_app_completion():
+    """'complete this website and this app and get it go live ready' → full_app_completion."""
+    files = [
+        {"path": "index.html", "content": "<h1>Dating</h1>"},
+        {"path": "app.js", "content": "// app"},
+        {"path": "README.md", "content": "# Dating App"},
+    ]
+    intent = detect_update_intent(
+        "complete this website and this app and get it go live ready",
+        files,
+    )
+    assert intent == "full_app_completion", f"Expected full_app_completion, got {intent}"
+
+
+def test_detect_intent_complete_app_is_full_app_completion():
+    """'complete this app' with few files → full_app_completion."""
+    files = [{"path": "index.html", "content": ""}]
+    intent = detect_update_intent("complete this app", files)
+    assert intent == "full_app_completion", f"Expected full_app_completion, got {intent}"
+
+
+def test_detect_intent_go_live_ready():
+    """'make it go live ready' → full_app_completion."""
+    files = [{"path": "index.html", "content": ""}]
+    intent = detect_update_intent("make it go live ready", files)
+    assert intent == "full_app_completion", f"Expected full_app_completion, got {intent}"
+
+
+def test_detect_intent_bug_fix():
+    """'fix the crash on login page' → bug_fix."""
+    files = [{"path": "app.py", "content": ""}] * 3
+    intent = detect_update_intent("fix the crash on login page", files)
+    assert intent == "bug_fix", f"Expected bug_fix, got {intent}"
+
+
+# ── quality_validator CSS tests ───────────────────────────────────────────────
+
+from agents.quality_validator import score_project_quality, MIN_DESIGN_SCORE
+
+
+def test_multipage_missing_css_fails_design():
+    """A multi-page site with no CSS must fail designScore (< 70)."""
+    html_content = (
+        "<html><head><title>Test</title></head><body>"
+        "<header><nav><a href='index.html'>Home</a><a href='about.html'>About</a></nav></header>"
+        "<main><section class='hero'><h1>Welcome</h1><p>Premium consulting services for your business needs.</p></section>"
+        "<section id='features'><article><h2>Service A</h2><p>Detailed description of our consulting services.</p></article>"
+        "<article><h2>Service B</h2><p>Expert guidance and support.</p></article></section>"
+        "<section id='pricing'><h2>Pricing</h2><p>Contact us for pricing.</p></section>"
+        "<section id='contact'><h2>Contact</h2><p>Email us at info@example.com</p></section>"
+        "</main><footer>Footer content here with more text.</footer></body></html>"
+    )
+    files = [
+        {"path": "index.html", "content": html_content, "language": "html"},
+        # Deliberately NO styles.css
+    ]
+    result = score_project_quality(
+        files=files,
+        project_type="multi-page-site",
+        build_mode="multi-page-website",
+        prompt="5 page consulting website",
+    )
+    assert result["designScore"] < MIN_DESIGN_SCORE, (
+        f"Expected designScore < {MIN_DESIGN_SCORE} when CSS is missing, "
+        f"got {result['designScore']}. Errors: {result['designErrors']}"
+    )
+    assert not result["designOk"], "designOk must be False when CSS is missing"
+
+
+def test_multipage_with_css_can_pass_design():
+    """A multi-page site with proper CSS should be able to pass design score."""
+    html_content = (
+        "<html><head><title>Test</title><link rel='stylesheet' href='styles.css'></head><body>"
+        "<header><nav><a href='index.html'>Home</a></nav></header>"
+        "<main><section class='hero'><h1>Welcome</h1><p>Premium services.</p><a class='btn' href='#contact'>Get started</a></section>"
+        "<section id='features'><article><h2>Service</h2><p>Description.</p></article></section>"
+        "<section id='pricing'><h2>Pricing</h2><p>Plans available.</p></section>"
+        "<section id='about'><h2>About</h2><p>Our story.</p></section>"
+        "<section id='contact'><h2>Contact</h2><p>Reach out.</p></section>"
+        "</main><footer>Copyright</footer></body></html>"
+    )
+    css_content = (
+        "* { box-sizing: border-box; } body { margin: 0; background: #000; color: #fff; font-family: sans-serif; } "
+        ".hero { min-height: 80vh; display: flex; align-items: center; background: linear-gradient(135deg, #000, #111); } "
+        "h1 { font-size: 3rem; } .btn { display: inline-block; padding: 12px 24px; background: #0f0; color: #000; } "
+        "nav a { color: #ccc; text-decoration: none; margin-right: 16px; } "
+        "@media (max-width: 768px) { .hero { flex-direction: column; } h1 { font-size: 2rem; } } "
+        "section { padding: 48px; border-bottom: 1px solid #222; } "
+        "article { background: #111; padding: 24px; border-radius: 8px; margin: 8px; } "
+        "footer { padding: 24px; border-top: 1px solid #222; color: #aaa; } "
+        ".visual { min-height: 300px; background: radial-gradient(circle, #001, #000); } "
+    ) * 2  # Repeat to exceed 500 chars
+    files = [
+        {"path": "index.html", "content": html_content, "language": "html"},
+        {"path": "styles.css", "content": css_content, "language": "css"},
+    ]
+    result = score_project_quality(
+        files=files,
+        project_type="multi-page-site",
+        build_mode="multi-page-website",
+        prompt="5 page consulting website",
+    )
+    assert result["designScore"] >= MIN_DESIGN_SCORE, (
+        f"Expected designScore >= {MIN_DESIGN_SCORE} with proper CSS, "
+        f"got {result['designScore']}. Errors: {result['designErrors']}"
+    )
+
+
+# ── coverage_score CSS tests ──────────────────────────────────────────────────
+
+from agents.coverage_score import compute_coverage_score
+
+
+def test_coverage_website_missing_css_fails():
+    """Website mode missing CSS must fail coverage (< 80) or have CSS in missing requirements."""
+    files = [
+        {"path": "index.html", "content": "<h1>Hello</h1>"},
+        {"path": "README.md", "content": "# Site"},
+        {"path": "amarktai.project.json", "content": '{}'},
+    ]
+    result = compute_coverage_score(
+        prompt="Build a 5-page professional consulting website",
+        files=files,
+        mode="website",
+        intent="full_app_completion",
+        preview_url="/api/projects/test/preview",
+    )
+    # Either coverage fails OR CSS is listed as a missing requirement
+    css_missing = any("css" in req.lower() or "stylesheet" in req.lower() for req in result["missingRequirements"])
+    assert not result["canFinalize"] or css_missing or result["coverageScore"] < 80, (
+        f"Expected CSS to fail or coverage < 80 when CSS is missing. "
+        f"Got coverageScore={result['coverageScore']}, canFinalize={result['canFinalize']}, "
+        f"missing={result['missingRequirements']}"
+    )
+
+
+def test_coverage_website_with_css_passes():
+    """Website mode with CSS should not flag CSS as missing."""
+    files = [
+        {"path": "index.html", "content": "<h1>Hello</h1>"},
+        {"path": "styles.css", "content": "body { color: white; } @media (max-width: 768px) { body { font-size: 14px; } }"},
+        {"path": "README.md", "content": "# Site"},
+        {"path": "amarktai.project.json", "content": '{}'},
+    ]
+    result = compute_coverage_score(
+        prompt="Build a website",
+        files=files,
+        mode="website",
+        intent="small_patch",
+        preview_url="/api/projects/test/preview",
+    )
+    css_missing = any("css" in req.lower() or "stylesheet" in req.lower() for req in result["missingRequirements"])
+    assert not css_missing, (
+        f"CSS should not be in missing requirements when styles.css exists. "
+        f"missing={result['missingRequirements']}"
+    )
