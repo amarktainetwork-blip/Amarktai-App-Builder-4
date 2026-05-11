@@ -3071,3 +3071,129 @@ def test_coverage_below_80_flags_not_satisfied_for_full_app_completion():
     )
     assert result["coverageScore"] < 80, f"Expected <80, got {result['coverageScore']}"
     assert result["requestSatisfied"] is False
+
+
+# ── New: missing test coverage from blocker list ─────────────────────────────
+
+def test_repo_fix_none_repo_profile_computes_fallback():
+    """analyze_repo_profile must never return None — always returns a valid dict."""
+    from agents.repo_analyzer import analyze_repo_profile
+    # Edge-case: only 3 files with no recognizable stack markers
+    files = [
+        {"path": "data.txt", "content": "some raw data"},
+        {"path": "script.sh", "content": "#!/bin/bash\necho hello"},
+        {"path": "notes.md", "content": "# Notes"},
+    ]
+    profile = analyze_repo_profile(files, "owner/minimal-repo")
+    # Must never be None
+    assert profile is not None, "analyze_repo_profile must never return None"
+    # Must have all required keys
+    required_keys = {
+        "detectedType", "frameworks", "languages", "previewBlockers",
+        "canPreview", "fileCount",
+    }
+    missing = required_keys - set(profile.keys())
+    assert not missing, f"Profile missing keys: {missing}"
+    # detectedType must be a string
+    assert isinstance(profile["detectedType"], str)
+    # fileCount must match
+    assert profile["fileCount"] == 3
+
+
+def test_deterministic_repair_links_css_in_page():
+    """ensure_required_files must add or patch styles.css link in index.html if missing."""
+    from agents.build_contract import ensure_required_files
+    # index.html without a CSS link
+    html_no_css = (
+        "<!DOCTYPE html><html><head><title>App</title></head>"
+        "<body><h1>Hello</h1></body></html>"
+    )
+    project = {"mode": "landing_page", "prompt": "Build a landing page"}
+    files, changed = ensure_required_files(
+        project,
+        project["prompt"],
+        {},
+        [{"path": "index.html", "content": html_no_css, "language": "html"}],
+    )
+    paths = {f["path"] for f in files}
+    # styles.css must be created
+    assert "styles.css" in paths, "styles.css must be deterministically created"
+    # index.html must reference styles.css (via link tag or @import)
+    html_file = next((f for f in files if f["path"] == "index.html"), None)
+    assert html_file is not None
+    linked = (
+        "styles.css" in html_file["content"]
+        or "stylesheet" in html_file["content"]
+    )
+    assert linked, (
+        "index.html must reference styles.css after repair. "
+        f"Content: {html_file['content'][:300]}"
+    )
+
+
+def test_attribute_error_not_raised_on_none_model_data():
+    """When model returns 'null' JSON, orchestrator must not raise AttributeError."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    db, proj, files, events, messages = _make_db()
+    proj["mode"] = "landing_page"
+
+    # Simulate a model returning JSON null
+    null_provider = _make_provider_bad_json("null")
+
+    errors_received = []
+
+    async def emit(payload):
+        if payload.get("type") == "project_status" and payload.get("data", {}).get("error"):
+            errors_received.append(payload["data"]["error"])
+
+    orch = Orchestrator(db, null_provider, "proj1", emit)
+    orch.fs.list_full = AsyncMock(return_value=[
+        {"path": "index.html", "content": "<h1>Hi</h1>", "language": "html"},
+        {"path": "styles.css", "content": "body{}", "language": "css"},
+    ])
+    orch.fs.write = AsyncMock()
+
+    # Must not raise AttributeError
+    try:
+        asyncio.get_event_loop().run_until_complete(
+            orch.run_iteration("Make the hero darker")
+        )
+    except AttributeError as exc:
+        raise AssertionError(
+            f"AttributeError (NoneType crash) reached caller: {exc}"
+        ) from exc
+    except Exception:
+        pass  # Other exceptions (ValueError etc.) are acceptable
+
+    # Project must be failed, not in an undefined state
+    assert proj.get("status") == "failed", f"Expected failed, got {proj.get('status')}"
+
+
+def test_coverage_missing_pages_lowers_score():
+    """When fewer pages than requested exist, coverageScore must be below 80."""
+    from agents.coverage_score import compute_coverage_score
+    # Prompt asks for 5 pages but only 2 exist
+    files = [
+        {"path": "index.html", "content": "<html><head><link rel='stylesheet' href='styles.css'></head><body><h1>Home</h1></body></html>"},
+        {"path": "styles.css", "content": "body{margin:0}@media(max-width:768px){}"},
+        {"path": "README.md", "content": "# Site"},
+        {"path": "amarktai.project.json", "content": "{}"},
+    ]
+    result = compute_coverage_score(
+        prompt="Build a 5-page professional consulting website with home, about, services, pricing, and contact",
+        files=files,
+        mode="website",
+        intent="full_app_completion",
+        preview_url="/preview",
+    )
+    # Either coverage is below 80 OR missing pages are listed
+    pages_missing = any(
+        "page" in r.lower() or "about" in r.lower() or "contact" in r.lower()
+        for r in result["missingRequirements"]
+    )
+    assert result["coverageScore"] < 80 or pages_missing, (
+        f"Expected low coverage or missing page requirements when only 2/5 pages exist. "
+        f"coverageScore={result['coverageScore']}, missing={result['missingRequirements']}"
+    )

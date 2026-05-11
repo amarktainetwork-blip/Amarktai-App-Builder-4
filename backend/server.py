@@ -1401,7 +1401,14 @@ async def iterate_project(project_id: str, body: IterateBody, claims: dict = Dep
         updates["quality_tier"] = body.tier
     await db.projects.update_one({"id": project_id}, {"$set": updates})
     await hub.broadcast(project_id, {"type": "project_status", "data": {"status": "queued"}})
-    asyncio.create_task(_launch_pipeline(project_id, body.message, "iterate"))
+    # Route imported-repo (repo_fix) projects through the build pipeline with build_mode="repo_fix"
+    # so that _run_repo_fix is called directly (intent detection, full_app_completion escalation,
+    # 1500s global timeout) instead of run_iteration with its 600s limit.
+    project_mode = proj.get("mode", "web_app")
+    if project_mode == "repo_fix" or proj.get("github"):
+        asyncio.create_task(_launch_pipeline(project_id, body.message, "build", build_mode="repo_fix"))
+    else:
+        asyncio.create_task(_launch_pipeline(project_id, body.message, "iterate"))
     return {"ok": True, "queued": True, "projectId": project_id}
 
 
