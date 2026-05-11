@@ -169,6 +169,7 @@ export default function SettingsDialog({ open, onOpenChange }) {
               { v: "ai",     label: "AI Providers" },
               { v: "media",  label: "Media" },
               { v: "github", label: "GitHub" },
+              { v: "search", label: "Search" },
               { v: "system", label: "System" },
             ].map(({ v, label }) => (
               <TabsTrigger
@@ -192,18 +193,6 @@ export default function SettingsDialog({ open, onOpenChange }) {
               info={state["GENX_API_KEY"] || {}}
               value={values["GENX_API_KEY"]}
               onChange={(v) => setValue("GENX_API_KEY", v)}
-              onClear={clear}
-              inputType="password"
-            />
-            {/* Brave Search */}
-            <SettingRow
-              fieldKey="BRAVE_SEARCH_API_KEY"
-              label="Brave Search Key"
-              hint="Optional. Enables web research for Scout agent."
-              optional={true}
-              info={state["BRAVE_SEARCH_API_KEY"] || {}}
-              value={values["BRAVE_SEARCH_API_KEY"]}
-              onChange={(v) => setValue("BRAVE_SEARCH_API_KEY", v)}
               onClear={clear}
               inputType="password"
             />
@@ -261,6 +250,24 @@ export default function SettingsDialog({ open, onOpenChange }) {
               inputType="password"
             />
             <GithubStatusBlock github={github} onRefresh={refresh} />
+          </TabsContent>
+
+          {/* Search tab */}
+          <TabsContent value="search" className="m-0 p-5 space-y-4 overflow-y-auto max-h-[60vh]">
+            <SettingRow
+              fieldKey="BRAVE_SEARCH_API_KEY"
+              label="Brave Search API Key"
+              hint="Optional. Enables live web research for the Scout agent during builds. Without this key, Scout uses model knowledge only."
+              optional={true}
+              info={state["BRAVE_SEARCH_API_KEY"] || {}}
+              value={values["BRAVE_SEARCH_API_KEY"]}
+              onChange={(v) => setValue("BRAVE_SEARCH_API_KEY", v)}
+              onClear={clear}
+              inputType="password"
+            />
+            <p className="font-mono text-[10px] text-amk-fg3 leading-relaxed">
+              Get a free Brave Search API key at <span className="text-amk-fg">search.brave.com/app</span>. Amarktai uses it for research-mode builds and Scout agent context gathering.
+            </p>
           </TabsContent>
 
           {/* System tab */}

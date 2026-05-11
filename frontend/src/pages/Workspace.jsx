@@ -194,6 +194,14 @@ export default function WorkspacePage() {
     } else if (evt.type === "iteration_complete") {
       if (evt.data) {
         setIterationResult(evt.data);
+        // Notify user if iteration left unsatisfied changes
+        const unsatisfied = evt.data.unsatisfiedChanges;
+        if (Array.isArray(unsatisfied) && unsatisfied.length > 0) {
+          toast.warning(
+            `${unsatisfied.length} requested change${unsatisfied.length > 1 ? "s" : ""} could not be applied — see iteration panel.`,
+            { duration: 6000 }
+          );
+        }
       }
     }
   }, [projectId]);
@@ -520,6 +528,7 @@ export default function WorkspacePage() {
               iterationResult.changedFiles?.length > 0 || iterationResult.addedFiles?.length > 0
             );
             if (!hasIterationResult) return null;
+            const unsatisfied = iterationResult.unsatisfiedChanges || [];
             return (
               <div
                 data-testid="iteration-result-panel"
@@ -543,6 +552,27 @@ export default function WorkspacePage() {
                 {iterationResult.addedFiles?.length > 0 && (
                   <div className="mt-0.5 text-amk-fg2">
                     Added: {iterationResult.addedFiles.join(", ")}
+                  </div>
+                )}
+                {unsatisfied.length > 0 && (
+                  <div
+                    data-testid="iteration-unsatisfied-panel"
+                    className="mt-2 border border-agent-scout/40 bg-agent-scout/10 px-2 py-1.5 rounded-sm"
+                  >
+                    <div className="text-agent-scout uppercase tracking-wider mb-1">
+                      {unsatisfied.length} change{unsatisfied.length > 1 ? "s" : ""} not applied
+                    </div>
+                    <ul className="space-y-0.5 text-amk-fg2">
+                      {unsatisfied.map((item, i) => (
+                        <li key={i} className="flex items-start gap-1">
+                          <span className="text-agent-scout shrink-0">·</span>
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="mt-1.5 text-amk-fg3">
+                      Reply with details or ask agents to continue fixing remaining changes.
+                    </div>
                   </div>
                 )}
               </div>

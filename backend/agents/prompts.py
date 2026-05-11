@@ -215,11 +215,17 @@ Return ONLY the files you need to modify or add.
 
 Output your response using AMARKTAI file blocks — do NOT embed file contents inside JSON.
 
-Format (repeat one block per changed file, then one summary block):
+Format (repeat one block per changed file, then a checklist block, then a summary block):
 
 ===AMARKTAI_FILE[index.html]===
 ...full new file content verbatim...
 ===END_AMARKTAI_FILE[index.html]===
+
+===AMARKTAI_CHECKLIST===
+REQUESTED: <comma-separated list of what the user asked for, extracted verbatim or paraphrased>
+SATISFIED: <comma-separated list of changes you actually completed in this iteration>
+UNSATISFIED: <comma-separated list of requested changes you could NOT complete, or "none">
+===END_AMARKTAI_CHECKLIST===
 
 ===AMARKTAI_SUMMARY===
 1-2 line description of what you changed.
@@ -231,8 +237,10 @@ Rules:
 - Always return the FULL new content of any file you touch — never a diff.
 - Write file content verbatim — do NOT JSON-escape, do NOT add backticks or fences.
 - Do not include files that did not change.
-- After ALL file blocks, write one ===AMARKTAI_SUMMARY=== block.
-- Output ONLY the file blocks and the summary block — no JSON, no other text.
+- After ALL file blocks, write one ===AMARKTAI_CHECKLIST=== block listing REQUESTED, SATISFIED, and UNSATISFIED changes.
+- After the checklist block, write one ===AMARKTAI_SUMMARY=== block.
+- Output ONLY the file blocks, the checklist block, and the summary block — no JSON, no other text.
+- Be honest: if a requested change could not be applied (e.g. requires AI media unavailable, specific assets missing), list it in UNSATISFIED.
 """
 
 # ── Amarktai Assistant / Wingman ──────────────────────────────────────────────
