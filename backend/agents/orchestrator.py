@@ -1301,11 +1301,19 @@ class Orchestrator:
                       "changedFiles": changed,
                       "addedFiles": added},
             )
+            # Increment preview_iteration counter and emit version
+            new_preview_iter = project.get("preview_iteration", 0) + 1
+            await self.db.projects.update_one(
+                {"id": self.project_id},
+                {"$set": {"preview_iteration": new_preview_iter, "updated_at": _now()}},
+            )
             await self._set_status("ready")
             await self.emit({"type": "iteration_complete", "data": {
                 "changedFiles": changed,
                 "addedFiles": added,
                 "summary": data.get("summary", "Updated."),
+                "previewVersion": f"0-{new_preview_iter}",
+                "previewIteration": new_preview_iter,
             }})
             await self.emit({"type": "build_complete", "data": {"changedFiles": changed}})
         except Exception as e:

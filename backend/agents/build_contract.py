@@ -316,6 +316,37 @@ def _ensure_index_links_css(files_by_path: dict[str, dict]) -> bool:
     return True
 
 
+def _ensure_html_pages_link_css(files_by_path: dict[str, dict]) -> list[str]:
+    """Ensure ALL HTML pages (not just index.html) link styles.css.
+
+    Returns a list of page paths that were patched.
+    Only runs when styles.css is present.
+    """
+    if "styles.css" not in files_by_path:
+        return []
+    patched: list[str] = []
+    for path, file_dict in files_by_path.items():
+        if not path.endswith((".html", ".htm")):
+            continue
+        content = file_dict.get("content", "")
+        # Skip if page already has a stylesheet link or inline style
+        has_link = (
+            re.search(r'<link[^>]+rel=["\']stylesheet["\']', content, re.IGNORECASE)
+            or re.search(r'<link[^>]+href=["\'][^"\']*\.css["\']', content, re.IGNORECASE)
+            or re.search(r'<style[\s>]', content, re.IGNORECASE)
+        )
+        if has_link:
+            continue
+        # Insert the stylesheet link before </head> or append at end
+        css_link = '  <link rel="stylesheet" href="styles.css">\n'
+        if "</head>" in content:
+            file_dict["content"] = content.replace("</head>", css_link + "</head>", 1)
+        else:
+            file_dict["content"] = content + "\n" + css_link
+        patched.append(path)
+    return patched
+
+
 def ensure_required_files(project: dict, prompt: str, plan: dict | None, generated_files: list[dict]) -> tuple[list[dict], list[str]]:
     project_type = infer_project_type(project.get("mode"), project.get("project_type"))
     build_mode = project.get("build_mode") if project.get("build_mode") in BUILD_MODES else infer_build_mode(project.get("mode"))
@@ -337,8 +368,10 @@ def ensure_required_files(project: dict, prompt: str, plan: dict | None, generat
             files_by_path[path] = _file(path, _fallback_content(path, project_type, build_mode, prompt, list(files_by_path.values())))
             changed.append(path)
 
-    if _ensure_index_links_css(files_by_path) and "index.html" not in changed:
-        changed.append("index.html")
+    # Link styles.css in every HTML page (not just index.html)
+    for patched_path in _ensure_html_pages_link_css(files_by_path):
+        if patched_path not in changed:
+            changed.append(patched_path)
 
     manifest_path = "amarktai.project.json"
     current = files_by_path.get(manifest_path, {})

@@ -14,7 +14,7 @@ from typing import Optional, List
 import httpx
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Query
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -132,6 +132,32 @@ app.state.db = db
 api = APIRouter(prefix="/api")
 secured = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
 admin_api = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
+
+
+@app.exception_handler(AttributeError)
+async def _attribute_error_handler(request: Request, exc: AttributeError) -> JSONResponse:
+    """Convert AttributeError (often NoneType.get() crashes) to a structured JSON error.
+
+    Prevents raw Python tracebacks reaching the frontend and provides actionable next steps.
+    """
+    logger.error("AttributeError in %s: %s", request.url.path, exc, exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "ok": False,
+            "code": "internal_context_error",
+            "message": (
+                "An internal context error occurred. "
+                "The project or repo context may be incomplete."
+            ),
+            "detail": str(exc),
+            "nextActions": [
+                "Run repo analysis again",
+                "Continue full app completion",
+                "Restart from imported files",
+            ],
+        },
+    )
 
 
 def _now() -> str:
