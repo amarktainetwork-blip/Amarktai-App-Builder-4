@@ -33,12 +33,16 @@ services:
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
       GITHUB_PAT: ${GITHUB_PAT:-}
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      MEDIA_STORAGE_PATH: ${MEDIA_STORAGE_PATH:-/app/storage/media}
+      MEDIA_MAX_UPLOAD_MB: ${MEDIA_MAX_UPLOAD_MB:-25}
     depends_on:
       mongo:
         condition: service_healthy
     networks: [amk-net]
     ports:
       - "${BACKEND_PORT:-8001}:8001"
+    volumes:
+      - media_data:/app/storage/media
 
   frontend:
     build:
@@ -56,3 +60,4 @@ networks:
 
 volumes:
   mongo_data:
+  media_data:

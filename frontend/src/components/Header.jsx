@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
-import { Settings as SettingsIcon, Github, Activity } from "lucide-react";
+import { Settings as SettingsIcon, Github, Activity, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export default function Header({ projectName, status, onOpenSettings, onFinalize, finalizing, canFinalize, repoUrl, rightExtra, onOpenPR, prUrl, hasGithub }) {
+export default function Header({ projectName, status, onOpenSettings, onFinalize, finalizing, canFinalize, repoUrl, rightExtra, onOpenPR, prUrl, hasGithub, onOpenMediaLibrary }) {
   return (
     <header
       data-testid="app-header"
@@ -33,6 +33,18 @@ export default function Header({ projectName, status, onOpenSettings, onFinalize
 
       <div className="flex items-center gap-2">
         {rightExtra}
+        {onOpenMediaLibrary && (
+          <Button
+            data-testid="header-media-btn"
+            variant="ghost"
+            size="sm"
+            className="text-amk-fg2 hover:text-white hover:bg-amk-surface font-mono text-xs"
+            onClick={onOpenMediaLibrary}
+            title="Media Library"
+          >
+            <ImageIcon className="w-3.5 h-3.5 mr-1.5" strokeWidth={1.5} /> Media
+          </Button>
+        )}
         <Button
           data-testid="header-settings-btn"
           variant="ghost"

@@ -15,6 +15,7 @@ import RepoCollisionModal from "@/components/RepoCollisionModal";
 import RepoWorkbenchPanel from "@/components/RepoWorkbenchPanel";
 import SettingsDialog from "@/components/SettingsDialog";
 import PRDialog from "@/components/PRDialog";
+import MediaLibraryDialog from "@/components/MediaLibraryDialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Projects, openProjectSocket } from "@/lib/amk-api";
 import { useAuth } from "@/lib/auth-context";
@@ -32,6 +33,7 @@ export default function WorkspacePage() {
   const [lastModel, setLastModel] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prOpen, setPrOpen] = useState(false);
+  const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -360,6 +362,7 @@ export default function WorkspacePage() {
         canFinalize={canFinalize}
         onFinalize={finalize}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenMediaLibrary={() => setMediaLibraryOpen(true)}
         rightExtra={
           <div className="flex items-center gap-1">
             {busy && (
@@ -597,6 +600,11 @@ export default function WorkspacePage() {
       <StatusBar project={project} lastModel={lastModel} connected={connected} />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <PRDialog open={prOpen} onOpenChange={setPrOpen} project={project} onSubmit={submitPR} />
+      <MediaLibraryDialog
+        open={mediaLibraryOpen}
+        onOpenChange={setMediaLibraryOpen}
+        projectId={projectId}
+      />
     </div>
   );
 }
