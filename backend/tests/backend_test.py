@@ -1159,3 +1159,311 @@ async def test_cancelled_project_never_becomes_ready():
     assert "cancelled" in statuses
 
 
+
+# ========== NEW: Quality Validator Tests ==========
+
+from agents.quality_validator import score_project_quality, MIN_QUALITY_SCORE, MIN_DESIGN_SCORE
+
+
+def _html_landing_page(sections: int = 7, words: int = 600, has_hero: bool = True,
+                        has_cta: bool = True, has_responsive: bool = True) -> str:
+    """Build a minimal landing page HTML for testing."""
+    hero = '<section id="hero"><h1>Welcome to Amarktai</h1><p>The best platform for building apps.</p></section>' if has_hero else ''
+    cta = '<a href="#get-started" class="btn-cta">Get Started Today</a>' if has_cta else ''
+    responsive = '@media (max-width: 768px) { body { flex-direction: column; } }' if has_responsive else ''
+    # Generate enough words per section to meet minimum word count
+    words_per_section = max(100, words // max(sections, 1))
+    word_block = " ".join(["Amarktai platform professional solution enterprise"] * (words_per_section // 5))
+    sec_tags = (
+        f'<section id="features" class="features"><h2>Features</h2><p>{word_block}</p></section>'
+        + "".join(
+            f'<section class="section-{i}"><h2>Section {i}</h2><p>{word_block}</p></section>'
+            for i in range(1, max(sections - 1, 1))
+        )
+    )
+    return f"""<!DOCTYPE html>
+<html><head><style>{responsive}</style></head>
+<body>
+{hero}
+{sec_tags}
+{cta}
+<footer><p>Footer content here for the page.</p></footer>
+</body></html>"""
+
+
+def test_quality_validator_thin_landing_page_fails():
+    """Thin landing page (nav/footer only, <6 sections) must score below MIN_QUALITY_SCORE."""
+    html = "<html><body><nav>Nav</nav><footer>Footer</footer></body></html>"
+    files = [
+        {"path": "index.html", "content": html, "language": "html"},
+        {"path": "styles.css", "content": "body{}", "language": "css"},
+    ]
+    result = score_project_quality(files, "static-site", "landing-page", "Build a landing page")
+    assert result["qualityScore"] < MIN_QUALITY_SCORE, (
+        f"Thin page must score below {MIN_QUALITY_SCORE}. Got: {result['qualityScore']}"
+    )
+    assert not result["qualityOk"], "Thin page must not pass quality check"
+    assert result["qualityErrors"], "Thin page must have quality errors"
+
+
+def test_quality_validator_complete_landing_page_passes():
+    """Complete landing page with 7 sections, 600+ words, hero, CTA, responsive must pass."""
+    html = _html_landing_page(sections=7, words=600, has_hero=True, has_cta=True, has_responsive=True)
+    css = "body { display: flex; } @media (max-width: 768px) { body { flex-direction: column; } } .hero { background: linear-gradient(135deg, #000, #333); }"
+    files = [
+        {"path": "index.html", "content": html, "language": "html"},
+        {"path": "styles.css", "content": css * 10, "language": "css"},
+    ]
+    result = score_project_quality(files, "static-site", "landing-page", "Build a landing page")
+    assert result["qualityScore"] >= MIN_QUALITY_SCORE, (
+        f"Complete page must score >= {MIN_QUALITY_SCORE}. Got: {result['qualityScore']}\n"
+        f"Errors: {result['qualityErrors']}"
+    )
+    assert result["qualityOk"], f"Complete page must pass quality. Errors: {result['qualityErrors']}"
+
+
+def test_quality_validator_missing_hero_penalizes():
+    """Landing page without hero/h1 must be penalized."""
+    html = _html_landing_page(sections=7, words=600, has_hero=False, has_cta=True, has_responsive=True)
+    files = [
+        {"path": "index.html", "content": html, "language": "html"},
+        {"path": "styles.css", "content": "body{} @media(max-width:768px){} .x{ background: linear-gradient(#a,#b); }" * 20, "language": "css"},
+    ]
+    result = score_project_quality(files, "static-site", "landing-page", "Build a landing page")
+    hero_errors = [e for e in result["qualityErrors"] if "hero" in e.lower() or "h1" in e.lower()]
+    assert hero_errors, f"Missing hero must generate quality error. Got: {result['qualityErrors']}"
+
+
+def test_quality_validator_generic_copy_penalizes():
+    """Pages with 'lorem ipsum' must be penalized."""
+    html = f"<html><body><h1>App</h1>{'<section><p>Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p></section>' * 7}<a class='btn'>CTA</a><footer>Footer</footer><style>@media(max-width:768px){{}}</style></body></html>"
+    files = [
+        {"path": "index.html", "content": html, "language": "html"},
+        {"path": "styles.css", "content": "body{display:flex} @media(max-width:768px){} .hero{background:linear-gradient(#a,#b)}" * 15, "language": "css"},
+    ]
+    result = score_project_quality(files, "static-site", "landing-page", "Build a landing page")
+    generic_errors = [e for e in result["qualityErrors"] if "lorem" in e.lower() or "placeholder" in e.lower() or "generic" in e.lower()]
+    assert generic_errors, f"Generic copy must be flagged. Got: {result['qualityErrors']}"
+
+
+def test_quality_validator_pwa_missing_manifest_fails():
+    """PWA without manifest.json must fail quality."""
+    files = [
+        {"path": "index.html", "content": "<html><body>App</body></html>", "language": "html"},
+        {"path": "service-worker.js", "content": "self.addEventListener('install',()=>{}); self.addEventListener('fetch',()=>{})", "language": "javascript"},
+    ]
+    result = score_project_quality(files, "pwa", "pwa", "Build a PWA")
+    assert not result["qualityOk"], "PWA without manifest must fail quality"
+    assert any("manifest" in e.lower() for e in result["qualityErrors"])
+
+
+def test_quality_validator_pwa_complete_passes():
+    """Complete PWA with manifest and service worker must pass quality."""
+    manifest = json.dumps({"name": "My App", "short_name": "App", "start_url": "/", "display": "standalone", "icons": [{"src": "/icon.png", "sizes": "192x192"}]})
+    sw = "self.addEventListener('install', e => {}); self.addEventListener('fetch', e => {});"
+    files = [
+        {"path": "index.html", "content": "<html><body><h1>App</h1><p>My great PWA app with full offline support and meaningful UI.</p></body></html>", "language": "html"},
+        {"path": "manifest.json", "content": manifest, "language": "json"},
+        {"path": "service-worker.js", "content": sw, "language": "javascript"},
+    ]
+    result = score_project_quality(files, "pwa", "pwa", "Build a PWA task tracker")
+    assert result["qualityScore"] >= MIN_QUALITY_SCORE, (
+        f"Complete PWA must score >= {MIN_QUALITY_SCORE}. Got: {result['qualityScore']}\n"
+        f"Errors: {result['qualityErrors']}"
+    )
+
+
+def test_security_validator_hardcoded_secret_fails():
+    """Hardcoded JWT secret must fail security validation."""
+    files = [
+        {"path": "backend/main.py", "content": 'jwt_secret = "my-super-secret-key-abc123def456ghi789"', "language": "python"},
+        {"path": ".env.example", "content": "JWT_SECRET=change-me", "language": "text"},
+    ]
+    result = score_project_quality(files, "fullstack-app", "full-stack", "Build a SaaS", auth_required=True)
+    assert not result["securityOk"], f"Hardcoded secret must fail security. Score: {result['securityScore']}"
+    assert result["securityErrors"], "Security errors must be populated"
+
+
+def test_security_validator_env_example_missing_fails_fullstack():
+    """Full-stack app without .env.example must fail security."""
+    files = [
+        {"path": "backend/main.py", "content": "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/health')\ndef health(): return {'ok': True}", "language": "python"},
+        {"path": "frontend/src/App.jsx", "content": "export default function App() { return <div>Hello World App Content Here For Testing</div>; }", "language": "jsx"},
+        {"path": "docker-compose.yml", "content": "version: '3'\nservices:\n  backend:\n    build: ./backend", "language": "yaml"},
+    ]
+    result = score_project_quality(files, "fullstack-app", "full-stack", "Build SaaS with auth", auth_required=True)
+    assert not result["securityOk"], "Full-stack without .env.example must fail security"
+
+
+def test_security_validator_clean_project_passes():
+    """Clean project with no secrets must pass security."""
+    files = [
+        {"path": "index.html", "content": "<html><body><h1>Hello</h1></body></html>", "language": "html"},
+        {"path": "styles.css", "content": "body{}", "language": "css"},
+    ]
+    result = score_project_quality(files, "static-site", "landing-page", "Build a landing page")
+    assert result["securityOk"], f"Clean project must pass security. Errors: {result['securityErrors']}"
+
+
+def test_quality_validator_broken_local_image_flagged():
+    """Local image paths that aren't https:// should be flagged as media errors."""
+    html = '<html><body><img src="./images/hero.jpg"><img src="https://images.unsplash.com/good.jpg"></body></html>'
+    files = [{"path": "index.html", "content": html, "language": "html"}]
+    result = score_project_quality(files, "static-site", "landing-page", "Build a landing page")
+    assert not result["mediaOk"], "Broken local image paths must be flagged"
+    assert result["mediaErrors"], "mediaErrors must list the broken paths"
+
+
+# ========== NEW: Clarification Engine Tests ==========
+
+from agents.clarification import check_clarification_needed, apply_clarification_answers
+
+
+def test_clarification_vague_prompt_needs_clarification():
+    """Very vague prompts must require clarification."""
+    result = check_clarification_needed("build me an app")
+    assert result["needs_clarification"] is True, "Vague prompt must need clarification"
+    assert result["questions"], "Must return focused questions"
+    assert len(result["questions"]) <= 5, "Must not ask more than 5 questions"
+
+
+def test_clarification_specific_prompt_no_clarification():
+    """A detailed, specific prompt must not require clarification."""
+    prompt = (
+        "Build a modern professional 5-page website for a consulting business "
+        "with home, about, services, pricing, and contact pages. "
+        "Use React Vite with Tailwind CSS. No auth needed. No database."
+    )
+    result = check_clarification_needed(prompt)
+    assert result["needs_clarification"] is False, (
+        f"Specific prompt must not need clarification. Questions: {result['questions']}"
+    )
+
+
+def test_clarification_infers_mode_from_prompt():
+    """Clarification engine must infer mode from prompt keywords."""
+    result = check_clarification_needed("build a saas platform with login and dashboard")
+    assert result["inferred_mode"] in ("full_stack", "dashboard", "web_app"), (
+        f"SaaS prompt must infer correct mode. Got: {result['inferred_mode']}"
+    )
+
+
+def test_clarification_infers_auth_from_prompt():
+    """Clarification engine must detect auth keywords."""
+    result = check_clarification_needed("build an app with login and register for users")
+    assert result["inferred_auth"] is True, "Auth keywords must be detected"
+
+
+def test_clarification_apply_answers_enriches_prompt():
+    """Applying clarification answers must produce an enriched prompt."""
+    enriched, params = apply_clarification_answers(
+        "build me an app",
+        {"mode": "Landing page", "auth_required": "No auth needed", "database": "No database"},
+    )
+    assert "Landing page" in enriched or "landing" in enriched.lower(), (
+        f"Enriched prompt must include mode. Got: {enriched}"
+    )
+    assert params.get("mode") == "landing_page"
+    assert params.get("auth_required") is False
+
+
+# ========== NEW: Design Engine Tests ==========
+
+from agents.design_engine import create_design_direction, get_available_styles, _DESIGN_STYLES
+
+
+def test_design_engine_returns_valid_style():
+    """create_design_direction must return a complete style dict."""
+    direction = create_design_direction(
+        prompt="Build a modern SaaS landing page",
+        project_type="static-site",
+        audience="startup founders",
+        tier="balanced",
+    )
+    assert "name" in direction
+    assert "palette" in direction
+    assert "typography" in direction
+    assert "coder_instructions" in direction
+    assert "visual_motifs" in direction
+
+
+def test_design_engine_different_prompts_can_produce_different_styles():
+    """Different prompt topics should produce different design styles."""
+    d1 = create_design_direction("Build a fintech trading dashboard", "dashboard", "traders", "premium")
+    d2 = create_design_direction("Build an organic farm market website", "static-site", "farmers", "balanced")
+    # At least the palettes or names should differ
+    same = d1["name"] == d2["name"] and d1["palette"] == d2["palette"]
+    assert not same, "Different topics should produce different design directions"
+
+
+def test_design_engine_finance_uses_fintech_style():
+    """Finance/trading prompts should select the fintech-dashboard style."""
+    direction = create_design_direction("Build a crypto trading platform", "dashboard", "traders", "premium")
+    assert direction["name"] == "fintech-dashboard", (
+        f"Finance prompt should select fintech-dashboard. Got: {direction['name']}"
+    )
+
+
+def test_design_engine_nature_uses_organic_style():
+    """Nature/eco prompts should select the organic-nature style."""
+    direction = create_design_direction("Build a sustainable organic farm marketplace", "static-site", "farmers", "balanced")
+    assert direction["name"] == "organic-nature", (
+        f"Nature prompt should select organic-nature. Got: {direction['name']}"
+    )
+
+
+def test_design_engine_get_available_styles():
+    """get_available_styles must return all available styles with name and label."""
+    styles = get_available_styles()
+    assert len(styles) == len(_DESIGN_STYLES), "Must return all styles"
+    for s in styles:
+        assert "name" in s
+        assert "label" in s
+
+
+def test_design_engine_deterministic_same_prompt():
+    """Same prompt must always produce the same design direction."""
+    d1 = create_design_direction("Build a luxury jewelry brand website", "static-site", "affluent shoppers", "premium")
+    d2 = create_design_direction("Build a luxury jewelry brand website", "static-site", "affluent shoppers", "premium")
+    assert d1["name"] == d2["name"], "Same prompt must produce same design direction"
+
+
+# ========== NEW: Pixabay Integration Tests ==========
+
+from agents.pixabay import build_media_manifest
+
+
+def test_pixabay_build_media_manifest_structure():
+    """build_media_manifest must return a properly structured manifest."""
+    images = [
+        {"url": "https://pixabay.com/img1.jpg", "full_url": "https://pixabay.com/img1-large.jpg",
+         "tags": "horse nature", "attribution": "Photo by user on Pixabay", "pixabay_page_url": "https://pixabay.com/1"},
+    ]
+    videos = [
+        {"url": "https://pixabay.com/vid1.mp4", "tags": "horse run", "duration": 30,
+         "attribution": "Video by user on Pixabay", "pixabay_page_url": "https://pixabay.com/2"},
+    ]
+    manifest = build_media_manifest(images, videos, "horse")
+    assert manifest["query"] == "horse"
+    assert manifest["source"] == "pixabay"
+    assert manifest["attribution_required"] is True
+    assert len(manifest["images"]) == 1
+    assert len(manifest["videos"]) == 1
+    assert "license" in manifest
+    assert "pixabay" in manifest["license"].lower()
+
+
+@pytest.mark.asyncio
+async def test_pixabay_search_images_no_api_key_returns_empty():
+    """search_images must return empty list when no API key is provided."""
+    from agents.pixabay import search_images
+    results = await search_images("horse", api_key="", per_page=5)
+    assert results == [], "No API key must return empty list"
+
+
+@pytest.mark.asyncio
+async def test_pixabay_search_videos_no_api_key_returns_empty():
+    """search_videos must return empty list when no API key is provided."""
+    from agents.pixabay import search_videos
+    results = await search_videos("nature", api_key="", per_page=3)
+    assert results == [], "No API key must return empty list"

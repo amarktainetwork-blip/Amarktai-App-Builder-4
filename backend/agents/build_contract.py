@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any
 
+from .quality_validator import score_project_quality
+
 PROJECT_STATUSES = (
     "queued", "classifying", "planning", "generating", "reviewing",
     "validating", "repairing", "preview_preparing", "ready",
@@ -406,15 +408,63 @@ def validate_project_files(project: dict, files: list[dict], prompt: str = "", p
 
     preview_entry = "index.html" if "index.html" in by_path else ("frontend/index.html" if "frontend/index.html" in by_path else None)
     can_preview = bool(preview_entry and project_type not in {"fullstack-app", "api-service", "repo-upgrade", "automation-bot-scaffold", "trading-bot-scaffold"})
+
+    # ── Quality / design / security scoring ──────────────────────────────────
+    auth_required = bool(project.get("auth_required") or project.get("selected_stack", {}).get("auth") not in (None, "none", ""))
+    quality_result = score_project_quality(
+        files=files,
+        project_type=project_type,
+        build_mode=build_mode,
+        prompt=prompt,
+        auth_required=auth_required,
+    )
+
+    # Quality / design / security: contribute to warnings and canFinalize only.
+    # They do NOT affect the structural "ok" flag to preserve backward compat —
+    # structural validation ensures files are present; quality gates block finalization.
+    quality_ok = quality_result["qualityOk"]
+    design_ok = quality_result["designOk"]
+    security_ok = quality_result["securityOk"]
+    media_ok = quality_result["mediaOk"]
+
+    if not quality_ok:
+        warnings.extend(quality_result["qualityErrors"])
+    if not design_ok:
+        warnings.extend(quality_result["designErrors"])
+    if not security_ok:
+        warnings.extend(quality_result["securityErrors"])
+    if not media_ok:
+        warnings.extend(quality_result["mediaErrors"])
+
+    can_finalize = (
+        not errors
+        and quality_ok
+        and design_ok
+        and security_ok
+    )
+
     return {
         "ok": not errors,
+        "structureOk": not errors,
+        "securityOk": security_ok,
+        "qualityOk": quality_ok,
+        "designOk": design_ok,
+        "mediaOk": media_ok,
         "projectType": project_type,
+        "buildMode": build_mode,
         "errors": errors,
         "warnings": warnings,
+        "securityErrors": quality_result["securityErrors"],
+        "qualityErrors": quality_result["qualityErrors"],
+        "designErrors": quality_result["designErrors"],
+        "mediaErrors": quality_result["mediaErrors"],
         "missingFiles": missing,
         "previewEntry": preview_entry,
         "canPreview": can_preview,
-        "canFinalize": not errors,
+        "canFinalize": can_finalize,
+        "qualityScore": quality_result["qualityScore"],
+        "designScore": quality_result["designScore"],
+        "securityScore": quality_result["securityScore"],
         "validatedAt": _now(),
     }
 

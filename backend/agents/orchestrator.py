@@ -37,6 +37,7 @@ from .prompts import (
     REVIEWER_PROMPT,
     SCOUT_PROMPT,
 )
+from .design_engine import create_design_direction
 
 # Per-agent timeout in seconds
 AGENT_TIMEOUTS = {
@@ -595,13 +596,25 @@ class Orchestrator:
             "required_files_present": [p for p in get_required_files(validation["projectType"], None, prompt, plan)
                                        if any(f["path"] == p for f in files)],
             "required_files_missing": validation["missingFiles"],
-            "warnings": list(dict.fromkeys(warnings + validation["warnings"])),
+            "warnings": list(dict.fromkeys(warnings + validation.get("warnings", []))),
             "errors": validation["errors"],
             "repair_pass": repair_pass,
             "preview_entry": validation["previewEntry"],
             "can_preview": validation["canPreview"],
             "can_finalize": validation["canFinalize"],
             "project_type": validation["projectType"],
+            "build_mode": validation.get("buildMode"),
+            "quality_score": validation.get("qualityScore", 0),
+            "design_score": validation.get("designScore", 0),
+            "security_score": validation.get("securityScore", 0),
+            "quality_ok": validation.get("qualityOk", True),
+            "design_ok": validation.get("designOk", True),
+            "security_ok": validation.get("securityOk", True),
+            "media_ok": validation.get("mediaOk", True),
+            "quality_errors": validation.get("qualityErrors", []),
+            "design_errors": validation.get("designErrors", []),
+            "security_errors": validation.get("securityErrors", []),
+            "media_errors": validation.get("mediaErrors", []),
         }
         await self.db.projects.update_one(
             {"id": self.project_id},
@@ -668,8 +681,25 @@ class Orchestrator:
             meta={"model": arch["model_label"]},
         )
 
-        # 3) Coder
+        # 3) Coder — generate design direction and include in input
         await self._check_cancel()
+        project_for_design = await self._load_project()
+        project_type_for_design = infer_project_type(mode, project_for_design.get("project_type"))
+        design_direction = create_design_direction(
+            prompt=user_prompt,
+            project_type=project_type_for_design,
+            audience=scout_data.get("audience", ""),
+            tier=project_for_design.get("quality_tier", "balanced"),
+        )
+        await self.db.projects.update_one(
+            {"id": self.project_id},
+            {"$set": {"design_direction": design_direction, "updated_at": _now()}},
+        )
+        await self.emit({"type": "design_direction", "data": {
+            "name": design_direction["name"],
+            "label": design_direction["label"],
+        }})
+
         coder_input = json.dumps({
             "requirements": scout_data,
             "plan": arch_data,
@@ -678,7 +708,8 @@ class Orchestrator:
             "required_files": sd.get("required_files", []),
             "safety_notes": sd.get("safety_notes", []),
             "media_strategy": shared_ctx.get("media_strategy", {}),
-            "shared_context": shared_ctx,
+            "design_direction": design_direction,
+            "shared_context": {**shared_ctx, "design_direction": design_direction},
         }, indent=2)
         coder = await self._run_agent_blocks("coder", CODER_PROMPT, coder_input)
         await self._check_cancel()
