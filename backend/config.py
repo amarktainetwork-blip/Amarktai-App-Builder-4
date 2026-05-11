@@ -24,7 +24,20 @@ REQUIRED_ENV = [
     "DB_NAME",
     "CORS_ORIGINS",
 ]
-SECRET_KEYS = {"GENX_API_KEY", "GITHUB_PAT", "BRAVE_SEARCH_API_KEY"}
+SECRET_KEYS = {
+    "GENX_API_KEY",
+    "GITHUB_PAT",
+    "BRAVE_SEARCH_API_KEY",
+    "PIXABAY_API_KEY",
+    # Qwen — all optional
+    "QWEN_API_KEY",
+    "QWEN_BASE_URL",
+    "QWEN_MODEL_CHAT",
+    "QWEN_MODEL_CODE",
+    "QWEN_MODEL_IMAGE",
+    "QWEN_MODEL_VIDEO",
+    "QWEN_MODEL_AUDIO",
+}
 
 
 def app_env() -> str:

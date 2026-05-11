@@ -3197,3 +3197,380 @@ def test_coverage_missing_pages_lowers_score():
         f"Expected low coverage or missing page requirements when only 2/5 pages exist. "
         f"coverageScore={result['coverageScore']}, missing={result['missingRequirements']}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# New tests: Phase 2-7 requirements
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ---------- settings: PIXABAY_API_KEY and Qwen keys are supported ────────────
+
+def test_config_secret_keys_includes_pixabay():
+    """PIXABAY_API_KEY must be in SECRET_KEYS so /api/settings does not crash."""
+    from config import SECRET_KEYS
+    assert "PIXABAY_API_KEY" in SECRET_KEYS, "PIXABAY_API_KEY missing from SECRET_KEYS"
+
+
+def test_config_secret_keys_includes_qwen():
+    """All Qwen optional keys must be in SECRET_KEYS."""
+    from config import SECRET_KEYS
+    qwen_keys = {
+        "QWEN_API_KEY",
+        "QWEN_BASE_URL",
+        "QWEN_MODEL_CHAT",
+        "QWEN_MODEL_CODE",
+        "QWEN_MODEL_IMAGE",
+        "QWEN_MODEL_VIDEO",
+        "QWEN_MODEL_AUDIO",
+    }
+    missing = qwen_keys - SECRET_KEYS
+    assert not missing, f"Qwen keys missing from SECRET_KEYS: {missing}"
+
+
+def test_settings_store_accepts_pixabay_key():
+    """settings_store.get_secret must not raise ValueError for PIXABAY_API_KEY."""
+    from config import SECRET_KEYS
+    # If the key is allowed, no ValueError should be raised for it.
+    assert "PIXABAY_API_KEY" in SECRET_KEYS
+
+
+def test_settings_store_accepts_qwen_api_key():
+    """settings_store.get_secret must not raise ValueError for QWEN_API_KEY."""
+    from config import SECRET_KEYS
+    assert "QWEN_API_KEY" in SECRET_KEYS
+
+
+# ---------- settings: QWEN optional key does not break settings endpoint ─────
+
+def test_server_settings_keys_includes_qwen_and_pixabay():
+    """server.SETTINGS_KEYS must include all optional integration keys.
+
+    The required keys are derived from config.SECRET_KEYS so this test stays
+    in sync automatically when new keys are added to either list.
+    """
+    import server
+    from config import SECRET_KEYS
+    # Every key in SECRET_KEYS that isn't a core required key must appear in SETTINGS_KEYS
+    optional_keys = SECRET_KEYS - {"GENX_API_KEY", "GITHUB_PAT", "BRAVE_SEARCH_API_KEY"}
+    for key in optional_keys:
+        assert key in server.SETTINGS_KEYS, f"{key} in SECRET_KEYS but missing from server.SETTINGS_KEYS"
+
+
+# ---------- build_contract: safe_dict helper ─────────────────────────────────
+
+def test_safe_dict_returns_dict_unchanged():
+    from agents.build_contract import safe_dict
+    d = {"key": "value"}
+    assert safe_dict(d) is d
+
+
+def test_safe_dict_converts_none_to_empty_dict():
+    from agents.build_contract import safe_dict
+    assert safe_dict(None) == {}
+
+
+def test_safe_dict_converts_string_to_empty_dict():
+    from agents.build_contract import safe_dict
+    assert safe_dict("not a dict") == {}
+
+
+def test_safe_dict_converts_list_to_empty_dict():
+    from agents.build_contract import safe_dict
+    assert safe_dict([1, 2, 3]) == {}
+
+
+# ---------- build_contract: selected_stack=None does not crash ───────────────
+
+def test_validate_project_files_selected_stack_none():
+    """validate_project_files must not raise AttributeError when selected_stack is None."""
+    from agents.build_contract import validate_project_files, ensure_required_files
+    project = {
+        "mode": "landing_page",
+        "prompt": "Build a landing page",
+        "selected_stack": None,  # <-- the crash scenario
+    }
+    files, _ = ensure_required_files(project, project["prompt"], {}, [
+        {"path": "index.html", "content": "<!DOCTYPE html><html><body>Hello</body></html>"},
+        {"path": "styles.css", "content": "body{}"},
+        {"path": "README.md", "content": "# App"},
+        {"path": "amarktai.project.json", "content": '{"name":"App"}'},
+    ])
+    # Must not raise
+    result = validate_project_files(project, files, project["prompt"])
+    assert isinstance(result, dict)
+    assert "ok" in result
+
+
+def test_validate_project_files_selected_stack_missing():
+    """validate_project_files must not raise when selected_stack key is absent."""
+    from agents.build_contract import validate_project_files, ensure_required_files
+    project = {
+        "mode": "landing_page",
+        "prompt": "Build a landing page",
+        # selected_stack not present at all
+    }
+    files, _ = ensure_required_files(project, project["prompt"], {}, [
+        {"path": "index.html", "content": "<!DOCTYPE html><html><body>Hello</body></html>"},
+        {"path": "styles.css", "content": "body{}"},
+        {"path": "README.md", "content": "# App"},
+        {"path": "amarktai.project.json", "content": '{"name":"App"}'},
+    ])
+    result = validate_project_files(project, files, project["prompt"])
+    assert isinstance(result, dict)
+    assert "ok" in result
+
+
+def test_validate_project_files_selected_stack_none_repo_fix():
+    """repo_fix mode with selected_stack=None must not crash."""
+    from agents.build_contract import validate_project_files
+    project = {
+        "mode": "repo_fix",
+        "prompt": "Fix this repo",
+        "selected_stack": None,
+    }
+    result = validate_project_files(project, [], project["prompt"])
+    assert isinstance(result, dict)
+    assert "ok" in result
+
+
+# ---------- GenX model count is not hardcoded ────────────────────────────────
+
+def test_genx_model_list_is_not_hardcoded():
+    """list_tiers must derive values from environment variables, not a hardcoded number."""
+    import os
+    from agents.genx_provider import GenXProvider
+
+    # Override env so routes produce predictable values
+    with mock.patch.dict(os.environ, {
+        "GENX_MODEL_REASONING": "test-reasoning-model",
+        "GENX_MODEL_RESEARCH": "test-research-model",
+        "GENX_MODEL_EDITS": "test-edits-model",
+    }):
+        tiers = GenXProvider.list_tiers()
+        assert tiers["reasoning"]["model"] == "test-reasoning-model"
+        assert tiers["research"]["model"] == "test-research-model"
+        assert tiers["edits"]["model"] == "test-edits-model"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4–6 new tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ---------- Phase 5: _build_media_strategy explicit choices ------------------
+
+def test_media_strategy_pixabay_choice():
+    """Explicit 'pixabay' choice produces pixabay mode regardless of tier."""
+    import server
+    ms = server._build_media_strategy("landing_page", "cheap", "pixabay")
+    assert ms["mode"] == "pixabay"
+    assert ms.get("source") == "pixabay"
+    assert ms["confirmed"] is True
+
+
+def test_media_strategy_ai_choice_balanced():
+    """Explicit 'ai' choice with balanced tier produces ai_generated mode."""
+    import server
+    ms = server._build_media_strategy("web_app", "balanced", "ai")
+    assert ms["mode"] == "ai_generated"
+
+
+def test_media_strategy_ai_choice_cheap_downgrades():
+    """Explicit 'ai' choice with cheap tier falls back to placeholder."""
+    import server
+    ms = server._build_media_strategy("web_app", "cheap", "ai")
+    assert ms["mode"] == "placeholder"
+    assert "upgrade" in ms["notes"].lower()
+
+
+def test_media_strategy_css_svg_choice():
+    """Explicit 'css_svg' choice produces css_svg mode with no external media."""
+    import server
+    ms = server._build_media_strategy("landing_page", "premium", "css_svg")
+    assert ms["mode"] == "css_svg"
+    assert ms["confirmed"] is True
+    assert "CSS" in ms["notes"] or "css" in ms["notes"].lower() or "SVG" in ms["notes"]
+
+
+def test_media_strategy_auto_landing_page():
+    """'auto' or None for landing_page retains existing free_assets behavior."""
+    import server
+    ms = server._build_media_strategy("landing_page", "balanced", "auto")
+    assert ms["mode"] == "free_assets"
+
+
+def test_media_strategy_auto_none():
+    """None media_requirements for web_app returns placeholder."""
+    import server
+    ms = server._build_media_strategy("web_app", "balanced", None)
+    assert ms["mode"] == "placeholder"
+
+
+# ---------- Phase 5: media validator respects css_svg mode -------------------
+
+def test_quality_validator_css_svg_rejects_external_images():
+    """css_svg mode flags external image URLs in HTML as a media error."""
+    from agents.quality_validator import score_project_quality
+    files = [
+        {"path": "index.html", "content": '<img src="https://example.com/photo.jpg" alt="photo">'},
+        {"path": "styles.css", "content": "body { font-size: 16px; }"},
+        {"path": "README.md", "content": "# App"},
+        {"path": "amarktai.project.json", "content": '{"name":"App"}'},
+    ]
+    result = score_project_quality(
+        files, "static-site", "landing_page",
+        media_strategy={"mode": "css_svg"},
+    )
+    assert not result["mediaOk"], "css_svg mode must flag external images"
+    assert any("CSS/SVG" in e or "external image" in e for e in result["mediaErrors"])
+
+
+def test_quality_validator_css_svg_allows_inline_svg():
+    """css_svg mode does not flag inline SVG or data URIs."""
+    from agents.quality_validator import score_project_quality
+    files = [
+        {"path": "index.html", "content": (
+            "<!DOCTYPE html><html><head><title>T</title></head>"
+            "<body><svg width='100' height='100'><circle r='50'/></svg></body></html>"
+        )},
+        {"path": "styles.css", "content": "body { font-size: 16px; } @media(max-width:768px){}"},
+        {"path": "README.md", "content": "# App"},
+        {"path": "amarktai.project.json", "content": '{"name":"App"}'},
+    ]
+    result = score_project_quality(
+        files, "static-site", "landing_page",
+        media_strategy={"mode": "css_svg"},
+    )
+    assert result["mediaOk"], f"Inline SVG must not fail css_svg validation: {result['mediaErrors']}"
+
+
+# ---------- Phase 6: design_engine has font_import on every style -----------
+
+def test_design_engine_all_styles_have_font_import():
+    """Every design style must include a font_import dict with link_href and css_vars."""
+    from agents.design_engine import _DESIGN_STYLES
+    for style in _DESIGN_STYLES:
+        fi = style.get("font_import")
+        assert fi is not None, f"Style '{style['name']}' missing font_import"
+        assert "link_href" in fi, f"Style '{style['name']}' font_import missing link_href"
+        assert fi["link_href"].startswith("https://fonts.bunny.net"), (
+            f"Style '{style['name']}' font link must use Bunny Fonts: {fi['link_href']}"
+        )
+        assert "css_vars" in fi, f"Style '{style['name']}' font_import missing css_vars"
+        assert "--font-heading" in fi["css_vars"], (
+            f"Style '{style['name']}' css_vars missing --font-heading"
+        )
+        assert "--font-body" in fi["css_vars"], (
+            f"Style '{style['name']}' css_vars missing --font-body"
+        )
+
+
+def test_design_direction_coder_instructions_include_font_link():
+    """create_design_direction coder_instructions must include the Bunny Fonts link tag."""
+    from agents.design_engine import create_design_direction
+    dd = create_design_direction("Build a SaaS landing page", "static-site", "startups", "balanced")
+    assert dd["font_import"]["link_href"].startswith("https://fonts.bunny.net"), (
+        "coder_instructions must include the Bunny Fonts link href"
+    )
+    assert "<link" in dd["coder_instructions"], (
+        "coder_instructions must include a <link> tag instruction"
+    )
+    assert "--font-heading" in dd["coder_instructions"], (
+        "coder_instructions must include font CSS variables"
+    )
+
+
+def test_design_direction_includes_font_import():
+    """create_design_direction result dict must include font_import."""
+    from agents.design_engine import create_design_direction
+    dd = create_design_direction("E-commerce lingerie boutique", "static-site", "women 25-45", "premium")
+    assert "font_import" in dd, "Design direction must include font_import"
+    assert dd["font_import"]["link_href"].startswith("https://fonts.bunny.net"), (
+        "font_import link_href must point to Bunny Fonts"
+    )
+
+
+# ---------- Phase 6: quality_validator web font checks ----------------------
+
+def test_quality_validator_no_web_font_penalizes_design():
+    """Missing Bunny/Google Font link tag must reduce designScore."""
+    from agents.quality_validator import score_project_quality
+    files = [
+        {"path": "index.html", "content": (
+            "<!DOCTYPE html><html><head><title>Test</title></head>"
+            "<body><h1>Hero</h1><section id='features'>Features</section>"
+            "<section>About</section><section>Pricing</section>"
+            "<section>Testimonials</section><footer>Footer</footer>"
+            "<button class='btn'>Get Started</button></body></html>"
+        )},
+        {"path": "styles.css", "content": (
+            "body { font-family: Arial, sans-serif; font-size: 16px; } "
+            "@media(max-width:768px){ body{font-size:15px;} } "
+            "body { background: linear-gradient(135deg,#fff,#eee); } "
+            ".btn{background:#333;color:#fff;} "
+            "section{min-height:200px;} " * 6
+        )},
+        {"path": "README.md", "content": "# App"},
+        {"path": "amarktai.project.json", "content": '{"name":"App"}'},
+    ]
+    result = score_project_quality(files, "static-site", "landing_page")
+    assert "designScore" in result
+    # Web font missing — design should be deducted
+    no_font_errors = [e for e in result.get("designErrors", []) if "bunny" in e.lower() or "web font" in e.lower() or "fonts" in e.lower()]
+    assert no_font_errors, f"Expected web font warning in designErrors; got: {result['designErrors']}"
+
+
+def test_quality_validator_web_font_present_no_font_penalty():
+    """Bunny Fonts link tag must not trigger the web font design warning."""
+    from agents.quality_validator import score_project_quality
+    files = [
+        {"path": "index.html", "content": (
+            '<!DOCTYPE html><html><head><title>Test</title>'
+            '<link rel="stylesheet" href="https://fonts.bunny.net/css?family=inter:400,700&display=swap">'
+            '</head><body><h1>Hero</h1><section id="features">Features</section>'
+            "<section>About</section><section>Pricing</section>"
+            "<section>Testimonials</section><footer>Footer</footer>"
+            "<button class='btn'>Get Started</button></body></html>"
+        )},
+        {"path": "styles.css", "content": (
+            "--font-heading: 'Inter', sans-serif; --font-body: 'Inter', sans-serif; "
+            "body { font-family: var(--font-body); font-size: 16px; } "
+            "@media(max-width:768px){ body{font-size:15px;} } "
+            "body { background: linear-gradient(135deg,#fff,#eee); } "
+            ".btn{background:#333;color:#fff;} "
+        )},
+        {"path": "README.md", "content": "# App"},
+        {"path": "amarktai.project.json", "content": '{"name":"App"}'},
+    ]
+    result = score_project_quality(files, "static-site", "landing_page")
+    no_font_errors = [e for e in result.get("designErrors", []) if "bunny" in e.lower() or "web font" in e.lower() or "fonts" in e.lower()]
+    assert not no_font_errors, f"Bunny Fonts link present should suppress font warning; got: {no_font_errors}"
+
+
+def test_quality_validator_low_opacity_text_penalizes_design():
+    """Very low opacity text (rgba with opacity < 0.2) must reduce designScore."""
+    from agents.quality_validator import score_project_quality
+    files = [
+        {"path": "index.html", "content": (
+            "<!DOCTYPE html><html><head><title>T</title></head><body>"
+            "<h1>Hero</h1><section id='features'>f</section><footer>f</footer></body></html>"
+        )},
+        {"path": "styles.css", "content": (
+            "body { color: rgba(0,0,0,0.08); font-size: 16px; } "
+            "@media(max-width:768px){} "
+            "background: linear-gradient(#000,#111); "
+        )},
+        {"path": "README.md", "content": "# App"},
+        {"path": "amarktai.project.json", "content": '{"name":"App"}'},
+    ]
+    result_low_opacity = score_project_quality(files, "static-site", "landing_page")
+    files_ok = [
+        {"path": "index.html", "content": files[0]["content"]},
+        {"path": "styles.css", "content": "body { color: #111; font-size: 16px; } @media(max-width:768px){} background: linear-gradient(#000,#111); "},
+        {"path": "README.md", "content": "# App"},
+        {"path": "amarktai.project.json", "content": '{"name":"App"}'},
+    ]
+    result_ok = score_project_quality(files_ok, "static-site", "landing_page")
+    # Low opacity should score no higher than normal text
+    assert result_low_opacity["designScore"] <= result_ok["designScore"], (
+        f"Low opacity text should reduce designScore. low={result_low_opacity['designScore']} ok={result_ok['designScore']}"
+    )

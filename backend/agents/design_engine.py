@@ -39,10 +39,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#000c14",
         },
         "typography": {
-            "heading": "Inter, system-ui, sans-serif",
-            "body": "Inter, system-ui, sans-serif",
+            "heading": "'Space Grotesk', system-ui, sans-serif",
+            "body": "'DM Sans', system-ui, sans-serif",
             "weight_heading": "900",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=space-grotesk:700,900|dm-sans:400,500&display=swap",
+            "css_vars": "--font-heading: 'Space Grotesk', system-ui, sans-serif; --font-body: 'DM Sans', system-ui, sans-serif;",
         },
         "spacing": "generous",
         "layout_rhythm": "asymmetric_hero_left",
@@ -66,10 +70,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#f9f6f0",
         },
         "typography": {
-            "heading": "Playfair Display, Georgia, serif",
-            "body": "Source Serif 4, Georgia, serif",
+            "heading": "'Cormorant Garamond', Georgia, serif",
+            "body": "'Lora', Georgia, serif",
             "weight_heading": "700",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=cormorant-garamond:400,600,700|lora:400,500&display=swap",
+            "css_vars": "--font-heading: 'Cormorant Garamond', Georgia, serif; --font-body: 'Lora', Georgia, serif;",
         },
         "spacing": "spacious",
         "layout_rhythm": "magazine_columns",
@@ -93,10 +101,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#ffffff",
         },
         "typography": {
-            "heading": "JetBrains Mono, monospace",
-            "body": "IBM Plex Sans, system-ui, sans-serif",
+            "heading": "'IBM Plex Sans', system-ui, sans-serif",
+            "body": "'DM Sans', system-ui, sans-serif",
             "weight_heading": "700",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=ibm-plex-sans:400,500,700|dm-sans:400,500&display=swap",
+            "css_vars": "--font-heading: 'IBM Plex Sans', system-ui, sans-serif; --font-body: 'DM Sans', system-ui, sans-serif;",
         },
         "spacing": "compact",
         "layout_rhythm": "dashboard_grid",
@@ -120,10 +132,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#ffffff",
         },
         "typography": {
-            "heading": "Space Grotesk, Impact, Arial Black, sans-serif",
-            "body": "Space Grotesk, Arial, sans-serif",
+            "heading": "'Space Grotesk', Impact, Arial Black, sans-serif",
+            "body": "'Space Grotesk', Arial, sans-serif",
             "weight_heading": "900",
             "weight_body": "500",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=space-grotesk:500,700,900&display=swap",
+            "css_vars": "--font-heading: 'Space Grotesk', Impact, Arial Black, sans-serif; --font-body: 'Space Grotesk', Arial, sans-serif;",
         },
         "spacing": "tight",
         "layout_rhythm": "chunky_blocks",
@@ -147,10 +163,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#ffffff",
         },
         "typography": {
-            "heading": "Outfit, system-ui, sans-serif",
-            "body": "Outfit, system-ui, sans-serif",
+            "heading": "'Outfit', system-ui, sans-serif",
+            "body": "'Outfit', system-ui, sans-serif",
             "weight_heading": "800",
             "weight_body": "300",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=outfit:300,400,700,800&display=swap",
+            "css_vars": "--font-heading: 'Outfit', system-ui, sans-serif; --font-body: 'Outfit', system-ui, sans-serif;",
         },
         "spacing": "generous",
         "layout_rhythm": "centered_hero_gradient",
@@ -174,10 +194,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#000000",
         },
         "typography": {
-            "heading": "Helvetica Neue, Arial, sans-serif",
-            "body": "Helvetica Neue, Arial, sans-serif",
+            "heading": "'Manrope', Helvetica Neue, Arial, sans-serif",
+            "body": "'Manrope', Helvetica Neue, Arial, sans-serif",
             "weight_heading": "800",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=manrope:400,500,700,800&display=swap",
+            "css_vars": "--font-heading: 'Manrope', Helvetica Neue, Arial, sans-serif; --font-body: 'Manrope', Helvetica Neue, Arial, sans-serif;",
         },
         "spacing": "generous",
         "layout_rhythm": "minimal_centered",
@@ -201,10 +225,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#001233",
         },
         "typography": {
-            "heading": "JetBrains Mono, Consolas, monospace",
-            "body": "JetBrains Mono, Consolas, monospace",
+            "heading": "'JetBrains Mono', Consolas, monospace",
+            "body": "'IBM Plex Mono', Consolas, monospace",
             "weight_heading": "700",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=jetbrains-mono:400,700|ibm-plex-mono:400&display=swap",
+            "css_vars": "--font-heading: 'JetBrains Mono', Consolas, monospace; --font-body: 'IBM Plex Mono', Consolas, monospace;",
         },
         "spacing": "compact",
         "layout_rhythm": "technical_grid",
@@ -228,10 +256,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#ffffff",
         },
         "typography": {
-            "heading": "Lora, Georgia, serif",
-            "body": "Nunito, system-ui, sans-serif",
+            "heading": "'Lora', Georgia, serif",
+            "body": "'Nunito Sans', system-ui, sans-serif",
             "weight_heading": "600",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=lora:400,500,600|nunito-sans:400,600&display=swap",
+            "css_vars": "--font-heading: 'Lora', Georgia, serif; --font-body: 'Nunito Sans', system-ui, sans-serif;",
         },
         "spacing": "generous",
         "layout_rhythm": "flowing_sections",
@@ -255,10 +287,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#0a0800",
         },
         "typography": {
-            "heading": "Cinzel, Didot, Georgia, serif",
-            "body": "Cormorant Garamond, Georgia, serif",
+            "heading": "'Playfair Display', Didot, Georgia, serif",
+            "body": "'Cormorant Garamond', Georgia, serif",
             "weight_heading": "600",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=playfair-display:400,600,700|cormorant-garamond:400,500&display=swap",
+            "css_vars": "--font-heading: 'Playfair Display', Didot, Georgia, serif; --font-body: 'Cormorant Garamond', Georgia, serif;",
         },
         "spacing": "spacious",
         "layout_rhythm": "centered_luxury",
@@ -282,10 +318,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#000000",
         },
         "typography": {
-            "heading": "Syne, system-ui, sans-serif",
-            "body": "DM Sans, system-ui, sans-serif",
+            "heading": "'Syne', system-ui, sans-serif",
+            "body": "'DM Sans', system-ui, sans-serif",
             "weight_heading": "800",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=syne:400,700,800|dm-sans:400,500&display=swap",
+            "css_vars": "--font-heading: 'Syne', system-ui, sans-serif; --font-body: 'DM Sans', system-ui, sans-serif;",
         },
         "spacing": "generous",
         "layout_rhythm": "full_bleed_sections",
@@ -309,10 +349,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#ffffff",
         },
         "typography": {
-            "heading": "Inter, system-ui, sans-serif",
-            "body": "Inter, system-ui, sans-serif",
+            "heading": "'Inter', system-ui, sans-serif",
+            "body": "'Inter', system-ui, sans-serif",
             "weight_heading": "700",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap",
+            "css_vars": "--font-heading: 'Inter', system-ui, sans-serif; --font-body: 'Inter', system-ui, sans-serif;",
         },
         "spacing": "spacious",
         "layout_rhythm": "centered_minimal",
@@ -336,10 +380,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#000000",
         },
         "typography": {
-            "heading": "Barlow Condensed, Impact, Arial, sans-serif",
-            "body": "Barlow, system-ui, sans-serif",
+            "heading": "'Barlow Condensed', Impact, Arial, sans-serif",
+            "body": "'Barlow', system-ui, sans-serif",
             "weight_heading": "700",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=barlow-condensed:400,700|barlow:400,500&display=swap",
+            "css_vars": "--font-heading: 'Barlow Condensed', Impact, Arial, sans-serif; --font-body: 'Barlow', system-ui, sans-serif;",
         },
         "spacing": "compact",
         "layout_rhythm": "dense_grid",
@@ -429,6 +477,11 @@ def create_design_direction(
         f"text={style['palette']['text_primary']}. "
         f"Typography: heading font = {style['typography']['heading']}, "
         f"body font = {style['typography']['body']}. "
+        f"IMPORTANT — Load the web fonts using this <link> tag in every HTML <head>: "
+        f'<link rel="stylesheet" href="{style["font_import"]["link_href"]}">. '
+        f"Set CSS custom properties: {style['font_import']['css_vars']}. "
+        f"Use font-family: var(--font-heading) for all headings and var(--font-body) for body text. "
+        f"Body font-size must be at least 16px; heading font-size at least 2rem. "
         f"Visual motifs: {style['visual_motifs']}. "
         f"Layout rhythm: {style['layout_rhythm']}. "
         f"Media direction: {style['media_direction']}. "

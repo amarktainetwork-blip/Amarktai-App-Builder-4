@@ -295,23 +295,6 @@ export default function ProjectListPage() {
                   {/* Phase 3: Media source choice */}
                   <MediaChoiceSelect value={mediaChoice} onChange={setMediaChoice} />
 
-                  <div>
-                    <FieldLabel>Or pick a starter</FieldLabel>
-                    <div className="grid grid-cols-2 gap-2">
-                      {PROMPT_TEMPLATES.map((t) => (
-                        <button
-                          type="button"
-                          key={t.name}
-                          data-testid={`template-${t.name.replace(/\s+/g, "-").toLowerCase()}`}
-                          onClick={() => applyTemplate(t)}
-                          className="text-left p-3 border border-amk-line bg-amk-panel hover:bg-amk-surface transition-colors duration-150"
-                        >
-                          <div className="font-mono text-xs text-white mb-1">{t.name}</div>
-                          <div className="text-[11px] text-amk-fg3 leading-relaxed line-clamp-2">{t.prompt}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                   <Button data-testid="create-project-btn" type="submit" disabled={creating}
                     className="w-full bg-amk-accent text-black hover:bg-emerald-300 font-mono text-xs h-11 mt-4">
                     {creating ? "STARTING AGENTS..." : "BEGIN BUILD"}

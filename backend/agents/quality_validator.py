@@ -55,6 +55,31 @@ _GENERIC_COPY = re.compile(
     re.IGNORECASE,
 )
 
+# ── Font & readability helpers ───────────────────────────────────────────────
+
+# Detects a web font loaded from Bunny Fonts or Google Fonts
+_WEB_FONT_LINK = re.compile(
+    r'<link[^>]+href=["\'][^"\']*(?:fonts\.bunny\.net|fonts\.googleapis\.com)[^"\']*["\']'
+    r'|@import\s+url\s*\([^)]*(?:fonts\.bunny\.net|fonts\.googleapis\.com)[^)]*\)',
+    re.IGNORECASE,
+)
+# Detects only system/fallback font stacks (no custom named font)
+_ONLY_SYSTEM_FONTS = re.compile(
+    r"font-family\s*:[^;]*(?:sans-serif|serif|monospace|system-ui|Arial|Helvetica|Georgia|Verdana|Tahoma)[^;]*;",
+    re.IGNORECASE,
+)
+# Detects problematic very low text opacity (< 0.2)
+_LOW_OPACITY_TEXT = re.compile(
+    r"color\s*:[^;]*rgba?\([^)]*,\s*0\.(?:0\d*|1\d*)\s*\)",
+    re.IGNORECASE,
+)
+# Detects font-size explicitly set very small (< 12px) on body/p/li/span
+# Uses re.DOTALL so it can match across lines; scans CSS for "font-size: Npx" globally
+_TINY_FONT_SIZE = re.compile(
+    r"font-size\s*:\s*([0-9]+)px",
+    re.IGNORECASE,
+)
+
 # ── Security helpers ────────────────────────────────────────────────────────
 
 _HARDCODED_SECRET = re.compile(
@@ -255,6 +280,37 @@ def _score_static_landing(
                 "All pages require a shared stylesheet."
             )
 
+    # ── Font & readability checks ─────────────────────────────────────────────
+    # Check for web font loading (Bunny Fonts or Google Fonts)
+    if not _WEB_FONT_LINK.search(combined):
+        design -= 8
+        design_errors.append(
+            "No web font loaded from Bunny Fonts or Google Fonts. "
+            "Add a <link> to fonts.bunny.net to ensure custom typography renders."
+        )
+
+    # Flag very low opacity text (near-invisible)
+    if _LOW_OPACITY_TEXT.search(css):
+        design -= 10
+        design_errors.append(
+            "Very low-opacity text color detected (opacity < 0.2). "
+            "Ensure body text has sufficient opacity for readability."
+        )
+
+    # Flag tiny font sizes
+    for m in _TINY_FONT_SIZE.finditer(css):
+        try:
+            px = int(m.group(1))
+            if px < 12:
+                design -= 8
+                design_errors.append(
+                    f"Font size {px}px is too small for readable body text. "
+                    "Use at least 16px for body/paragraph text."
+                )
+                break
+        except ValueError:
+            pass
+
     return max(0, quality), max(0, design), quality_errors, design_errors
 
 
@@ -454,6 +510,7 @@ def score_project_quality(
     build_mode: str,
     prompt: str = "",
     auth_required: bool = False,
+    media_strategy: dict | None = None,
 ) -> dict[str, Any]:
     """Run quality, design, and security scoring for a generated project.
 
@@ -552,24 +609,39 @@ def score_project_quality(
     )
 
     # ── media validation ──────────────────────────────────────────────────────
-    # Currently: media is valid if images used are not broken local paths
+    # Validate media choices match what was requested
+    ms = media_strategy or {}
+    ms_mode = ms.get("mode", "auto")
     media_ok = True
     media_errors: list[str] = []
+
     for path, f in files_by_path.items():
         content = f.get("content", "")
         if path.endswith(".html"):
-            # Check for broken local image paths
-            broken_local = re.findall(
-                r'src=["\'](?!\s*https?://|/api/|data:)([^"\']+\.(jpg|jpeg|png|gif|webp))["\']',
-                content,
-                re.IGNORECASE,
-            )
-            if broken_local:
-                media_ok = False
-                for img_path, _ in broken_local[:3]:
+            # css_svg: no external image URLs allowed
+            if ms_mode == "css_svg":
+                ext_imgs = re.findall(
+                    r'src=["\']https?://[^"\']*\.(jpg|jpeg|png|gif|webp)["\']',
+                    content, re.IGNORECASE,
+                )
+                if ext_imgs:
+                    media_ok = False
                     media_errors.append(
-                        f"Possible broken local image reference: {img_path}"
+                        f"CSS/SVG-only mode selected but external image URLs found in {path}."
                     )
+            else:
+                # Check for broken local image paths (non-css_svg modes)
+                broken_local = re.findall(
+                    r'src=["\'](?!\s*https?://|/api/|data:)([^"\']+\.(jpg|jpeg|png|gif|webp))["\']',
+                    content,
+                    re.IGNORECASE,
+                )
+                if broken_local:
+                    media_ok = False
+                    for img_path, _ in broken_local[:3]:
+                        media_errors.append(
+                            f"Possible broken local image reference: {img_path}"
+                        )
 
     # ── threshold checks ─────────────────────────────────────────────────────
     quality_ok = quality_score >= MIN_QUALITY_SCORE
