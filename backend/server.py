@@ -897,6 +897,10 @@ async def cancel_project(project_id: str, claims: dict = Depends(require_user)) 
     if not proj:
         raise HTTPException(404, "Project not found")
     current_status = proj.get("status", "")
+    # Allow cancellation for any in-progress state (queued, running).
+    # The orchestrator also polls cancel_requested before every agent call and
+    # repair attempt, so setting cancel_requested=True is sufficient to stop a
+    # running pipeline regardless of which sub-phase (validating, repairing) it is in.
     if current_status not in ("queued", "running"):
         return {"ok": True, "status": current_status, "detail": "Build is not active."}
     now = _now()
@@ -1115,6 +1119,45 @@ async def project_preview(project_id: str, claims: dict = Depends(require_user))
     else:
         html = render_preview(files)
     return HTMLResponse(content=html, headers={"X-Frame-Options": "SAMEORIGIN"})
+
+
+# MIME type map for preview file serving
+_PREVIEW_MIME: dict[str, str] = {
+    "html": "text/html; charset=utf-8",
+    "htm": "text/html; charset=utf-8",
+    "css": "text/css; charset=utf-8",
+    "js": "application/javascript; charset=utf-8",
+    "mjs": "application/javascript; charset=utf-8",
+    "json": "application/json; charset=utf-8",
+    "svg": "image/svg+xml",
+    "txt": "text/plain; charset=utf-8",
+    "md": "text/markdown; charset=utf-8",
+}
+
+
+@secured.get("/projects/{project_id}/preview/{file_path:path}")
+async def project_preview_file(
+    project_id: str, file_path: str, claims: dict = Depends(require_user)
+):
+    """Serve an individual project file from the preview with the correct MIME type.
+
+    This endpoint allows the "Open preview in new tab" flow to load assets (styles.css,
+    app.js, manifest.json, etc.) as separate requests rather than relying on inlining.
+    MIME types are set explicitly so browsers validate and apply the resources correctly.
+    """
+    from fastapi.responses import Response
+    await _own(project_id, claims)
+    # Prevent path traversal
+    safe = file_path.lstrip("/").replace("..", "")
+    if not safe or safe != file_path.lstrip("/"):
+        raise HTTPException(400, "Invalid file path")
+    fs = ProjectFS(db, project_id)
+    file_doc = await fs.read(safe)
+    if file_doc is None:
+        raise HTTPException(404, f"File not found: {safe}")
+    ext = safe.rsplit(".", 1)[-1].lower() if "." in safe else ""
+    mime = _PREVIEW_MIME.get(ext, "text/plain; charset=utf-8")
+    return Response(content=file_doc["content"], media_type=mime)
 
 
 @secured.post("/projects/{project_id}/finalize")

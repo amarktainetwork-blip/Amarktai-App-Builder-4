@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Projects } from "@/lib/amk-api";
-import { RefreshCw, ExternalLink, Cpu, AlertTriangle, Loader2, BookOpen } from "lucide-react";
+import { RefreshCw, ExternalLink, Cpu, AlertTriangle, Loader2, BookOpen, Wrench, CheckCircle } from "lucide-react";
 
 // Modes that show repo structure instead of an iframe
 const REPO_STRUCTURE_MODES = new Set([
@@ -8,8 +8,11 @@ const REPO_STRUCTURE_MODES = new Set([
   "automation_bot", "trading_bot_scaffold", "repo_fix",
 ]);
 
-export default function LivePreview({ projectId, refreshKey, projectStatus, projectError, failedAgent, projectMode, previewStrategy }) {
+export default function LivePreview({ projectId, refreshKey, projectStatus, projectError, failedAgent, projectMode, previewStrategy, buildPhase }) {
   const [bust, setBust] = useState(0);
+  // NOTE: The preview URL contains a bearer token as a query parameter for iframe auth.
+  // TODO: Move to a short-lived preview token or use a dedicated preview origin to reduce
+  //       token exposure in browser history and server logs.
   const url = `${Projects.previewUrl(projectId)}&v=${refreshKey || 0}-${bust}`;
 
   useEffect(() => { setBust((b) => b + 1); }, [refreshKey]);
@@ -52,6 +55,19 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
   }
 
   if (isRunning) {
+    const isValidating = buildPhase === "validating";
+    const isRepairing = buildPhase === "repairing";
+    let phaseMsg = showRepoStructure
+      ? "Repo structure will appear when agents finish generating files."
+      : "Preview will appear when files are generated.";
+    let PhaseIcon = Loader2;
+    if (isValidating) {
+      phaseMsg = "Validating generated app…";
+      PhaseIcon = CheckCircle;
+    } else if (isRepairing) {
+      phaseMsg = "Repairing generated app…";
+      PhaseIcon = Wrench;
+    }
     return (
       <div data-testid="live-preview" className="h-full flex flex-col">
         <div className="h-9 border-b border-amk-line bg-amk-base flex items-center px-3 shrink-0">
@@ -62,12 +78,8 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
         </div>
         <div className="flex-1 bg-amk-panel flex items-center justify-center">
           <div className="border border-amk-line rounded-md bg-amk-base p-6 max-w-md text-center space-y-3">
-            <Loader2 className="w-7 h-7 text-amk-fg3 mx-auto animate-spin" />
-            <p className="font-mono text-[12px] text-amk-fg2">
-              {showRepoStructure
-                ? "Repo structure will appear when agents finish generating files."
-                : "Preview will appear when files are generated."}
-            </p>
+            <PhaseIcon className="w-7 h-7 text-amk-fg3 mx-auto animate-spin" />
+            <p className="font-mono text-[12px] text-amk-fg2">{phaseMsg}</p>
           </div>
         </div>
       </div>
@@ -105,8 +117,7 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
         <div className="flex items-center gap-2">
           <Cpu className="w-3.5 h-3.5 text-amk-fg3" strokeWidth={1.5} />
           <span className="font-mono text-[11px] text-amk-fg">Live Preview</span>
-          {/* TODO: use a separate preview origin to avoid allow-same-origin requirement */}
-          <span className="font-mono text-[10px] text-amk-fg3 uppercase">authenticated iframe</span>
+          <span className="font-mono text-[10px] text-amk-fg3 uppercase">sandboxed iframe</span>
         </div>
         <div className="flex items-center gap-1">
           <a data-testid="open-preview-btn" href={url} target="_blank" rel="noreferrer"
@@ -120,10 +131,19 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
         </div>
       </div>
       <div className="flex-1 bg-white">
-        {/* allow-same-origin is required for the preview token auth; TODO: move to separate origin */}
+        {/*
+         * Sandbox deliberately omits allow-same-origin to prevent the iframe from
+         * accessing the parent's cookies, localStorage, or DOM — even though it is
+         * served from the same origin. Having both allow-scripts and allow-same-origin
+         * allows a sandboxed document to escape its sandboxing entirely (browser warning).
+         * CSS and JavaScript work fine without allow-same-origin because the preview
+         * endpoint inlines all assets into a single HTML document.
+         * For features that require same-origin access (e.g. localStorage), use the
+         * "Open" button below to open the preview in a new tab without sandboxing.
+         */}
         <iframe data-testid="preview-iframe" title="preview" src={url}
           className="w-full h-full border-0"
-          sandbox="allow-scripts allow-forms allow-popups allow-same-origin" />
+          sandbox="allow-scripts allow-forms allow-popups allow-downloads" />
       </div>
     </div>
   );
