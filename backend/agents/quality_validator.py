@@ -59,7 +59,7 @@ _GENERIC_COPY = re.compile(
 
 _HARDCODED_SECRET = re.compile(
     r'(?i)(jwt[_-]?secret|jwt_key|secret[_-]?key|api[_-]?key|password|passwd)\s*[=:]\s*'
-    r'(?!change[_-]?me|your[_-]?|example|localhost|<|{|\$|""|\'\')'
+    r'(?!change[_-]?me|your[_-]?|example|localhost|<|{|\$|""|\'\'|placeholder|paste[_-]?here|process\.env|os\.getenv|os\.environ)'
     r'["\']?[A-Za-z0-9@#$%^&*!_\-]{12,}["\']?',
 )
 _PLAINTEXT_PASSWORD_STORE = re.compile(

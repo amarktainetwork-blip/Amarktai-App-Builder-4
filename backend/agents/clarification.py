@@ -49,7 +49,7 @@ _MODE_KEYWORDS: dict[str, str] = {
 
 # Keywords that indicate auth is requested
 _AUTH_KEYWORDS = re.compile(
-    r"\b(login|logout|register|sign.?up|sign.?in|auth|password|user\s+account|user\s+management|role|admin\s+access)\b",
+    r"\b(login|logout|register|sign[-\s]?up|sign[-\s]?in|auth|password|user\s+account|user\s+management|role|admin\s+access)\b",
     re.IGNORECASE,
 )
 

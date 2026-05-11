@@ -26,7 +26,7 @@ _cache_lock = asyncio.Lock()
 
 
 def _cache_key(endpoint: str, params: dict) -> str:
-    return f"{endpoint}::{json.dumps(sorted(params.items()), sort_keys=True)}"
+    return f"{endpoint}::{json.dumps(sorted(params.items()))}"
 
 
 async def _get_cached(key: str) -> Any | None:
