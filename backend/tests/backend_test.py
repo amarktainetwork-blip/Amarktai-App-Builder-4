@@ -1773,3 +1773,566 @@ async def test_pixabay_caches_results():
 
     assert r1 == r2
     assert call_count[0] == 1, f"Cache should prevent second API call, got {call_count[0]} calls"
+
+
+# ── Phase 2: Repo Analyzer ────────────────────────────────────────────────────
+
+def test_repo_analyzer_detects_static_site():
+    """analyze_repo_profile must identify a static site from index.html alone."""
+    from agents.repo_analyzer import analyze_repo_profile
+    files = [
+        {"path": "index.html", "content": "<html><body>Hello</body></html>"},
+        {"path": "styles.css", "content": "body { margin: 0; }"},
+    ]
+    profile = analyze_repo_profile(files, "owner/static-site")
+    assert profile["detectedType"] == "static"
+    assert profile["previewStrategy"] == "static"
+    assert profile["canPreview"] is True
+    assert profile["fileCount"] == 2
+    assert "HTML" in profile["languages"]
+
+
+def test_repo_analyzer_detects_react_vite():
+    """analyze_repo_profile must detect a Vite/React SPA from package.json."""
+    from agents.repo_analyzer import analyze_repo_profile
+    files = [
+        {"path": "package.json", "content": '{"dependencies":{"react":"^18","vite":"^4"},"scripts":{"dev":"vite"}}'},
+        {"path": "src/App.jsx", "content": 'import React from "react"; export default function App() { return <div>Hello</div>; }'},
+        {"path": "index.html", "content": '<html><body><div id="root"></div></body></html>'},
+    ]
+    profile = analyze_repo_profile(files, "owner/react-app")
+    assert profile["detectedType"] in ("vite_react", "next")
+    assert "React" in profile["frameworks"] or "Vite" in profile["frameworks"]
+    assert "JavaScript" in profile["languages"]
+
+
+def test_repo_analyzer_detects_next():
+    """analyze_repo_profile must detect Next.js from next.config.js."""
+    from agents.repo_analyzer import analyze_repo_profile
+    files = [
+        {"path": "next.config.js", "content": "/** @type {import('next').NextConfig} */\nmodule.exports = {}"},
+        {"path": "package.json", "content": '{"dependencies":{"next":"^14","react":"^18"}}'},
+        {"path": "pages/index.tsx", "content": "export default function Home() { return <h1>Home</h1>; }"},
+    ]
+    profile = analyze_repo_profile(files, "owner/next-app")
+    assert profile["detectedType"] == "next"
+    assert "Next.js" in profile["frameworks"]
+
+
+def test_repo_analyzer_detects_fastapi():
+    """analyze_repo_profile must detect a FastAPI backend."""
+    from agents.repo_analyzer import analyze_repo_profile
+    files = [
+        {"path": "main.py", "content": "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/')\ndef root(): return {}"},
+        {"path": "requirements.txt", "content": "fastapi\nuvicorn\n"},
+    ]
+    profile = analyze_repo_profile(files, "owner/api-app")
+    assert profile["detectedType"] == "api_service"
+    assert "FastAPI" in profile["frameworks"]
+    assert profile["packageManager"] == "pip"
+
+
+def test_repo_analyzer_detects_docker():
+    """analyze_repo_profile must flag docker_available when Dockerfile is present."""
+    from agents.repo_analyzer import analyze_repo_profile
+    files = [
+        {"path": "Dockerfile", "content": "FROM python:3.11\nCMD [\"uvicorn\"]"},
+        {"path": "docker-compose.yml", "content": "version: '3'\nservices:\n  app:\n    build: ."},
+        {"path": "main.py", "content": "from fastapi import FastAPI"},
+    ]
+    profile = analyze_repo_profile(files, "owner/dockerized")
+    assert profile["dockerAvailable"] is True
+    assert "docker compose build" in profile["buildCommands"]
+
+
+def test_repo_analyzer_empty_files():
+    """analyze_repo_profile must not crash on empty file list."""
+    from agents.repo_analyzer import analyze_repo_profile
+    profile = analyze_repo_profile([], "owner/empty")
+    assert profile["detectedType"] == "unknown"
+    assert profile["canPreview"] is False
+    assert profile["fileCount"] == 0
+
+
+def test_repo_analyzer_detects_mongo_db():
+    """analyze_repo_profile must detect MongoDB from source code."""
+    from agents.repo_analyzer import analyze_repo_profile
+    files = [
+        {"path": "server.py", "content": "from motor.motor_asyncio import AsyncIOMotorClient\nclient = AsyncIOMotorClient('mongodb://localhost')"},
+        {"path": "requirements.txt", "content": "motor\nfastapi\n"},
+    ]
+    profile = analyze_repo_profile(files, "owner/mongo-app")
+    assert "MongoDB" in profile["databases"]
+
+
+def test_repo_analyzer_extracts_env_vars():
+    """analyze_repo_profile must extract env var names from .env.example."""
+    from agents.repo_analyzer import analyze_repo_profile
+    files = [
+        {"path": ".env.example", "content": "DATABASE_URL=\nJWT_SECRET=\nAPI_KEY=\n"},
+        {"path": "main.py", "content": "import os\nDB = os.environ.get('DATABASE_URL', '')"},
+    ]
+    profile = analyze_repo_profile(files, "owner/env-app")
+    assert "DATABASE_URL" in profile["envRequired"]
+    assert "JWT_SECRET" in profile["envRequired"]
+
+
+def test_repo_analyzer_extracts_routes():
+    """analyze_repo_profile must extract route paths from Express/FastAPI source."""
+    from agents.repo_analyzer import analyze_repo_profile
+    files = [
+        {"path": "server.js", "content": "app.get('/api/users', handler);\napp.post('/api/login', auth);"},
+    ]
+    profile = analyze_repo_profile(files, "owner/express")
+    assert any("/api/users" in r or "/api/login" in r for r in profile["routeMap"])
+
+
+# ── Phase 3: Repo Preview Fallback ────────────────────────────────────────────
+
+def test_repo_analyzer_unknown_returns_blockers():
+    """analyze_repo_profile for unknown type must include previewBlockers."""
+    from agents.repo_analyzer import analyze_repo_profile
+    files = [
+        {"path": "some_random_file.xyz", "content": "some content"},
+    ]
+    profile = analyze_repo_profile(files, "owner/mystery")
+    assert profile["detectedType"] == "unknown"
+    assert len(profile["previewBlockers"]) > 0
+    assert profile["canPreview"] is False
+
+
+def test_repo_analyzer_fullstack_returns_blockers_when_env_missing():
+    """Fullstack repos must report env var blockers when env required."""
+    from agents.repo_analyzer import analyze_repo_profile
+    files = [
+        {"path": "backend/main.py", "content": "from fastapi import FastAPI\nfrom motor.motor_asyncio import AsyncIOMotorClient"},
+        {"path": ".env.example", "content": "MONGO_URL=\nJWT_SECRET=\n"},
+        {"path": "frontend/index.html", "content": "<html><body>App</body></html>"},
+    ]
+    profile = analyze_repo_profile(files, "owner/fullstack")
+    assert profile["detectedType"] == "fullstack"
+    # Fullstack with env requirements should show blockers
+    assert len(profile["previewBlockers"]) > 0 or profile["envRequired"]
+
+
+# ── Phase 4: Update Intent Detection ─────────────────────────────────────────
+
+def test_intent_detects_full_app_completion():
+    """detect_update_intent must identify full_app_completion requests."""
+    from agents.repo_analyzer import detect_update_intent
+    files = [{"path": "README.md", "content": "# My App"}]
+    intent = detect_update_intent("Build the complete app described in this repo", files)
+    assert intent == "full_app_completion"
+
+
+def test_intent_detects_bug_fix():
+    """detect_update_intent must identify bug_fix requests."""
+    from agents.repo_analyzer import detect_update_intent
+    files = [{"path": "app.py", "content": "# app"}]
+    intent = detect_update_intent("Fix the crash in the login route", files)
+    assert intent == "bug_fix"
+
+
+def test_intent_detects_feature_add():
+    """detect_update_intent must identify feature_add requests."""
+    from agents.repo_analyzer import detect_update_intent
+    files = [{"path": "app.js", "content": "// app"}]
+    intent = detect_update_intent("Add a dashboard page with analytics", files)
+    assert intent == "feature_add"
+
+
+def test_intent_detects_production_hardening():
+    """detect_update_intent must identify production_hardening requests."""
+    from agents.repo_analyzer import detect_update_intent
+    files = [{"path": "main.py", "content": "# main"}]
+    intent = detect_update_intent("Secure the API and add rate limiting", files)
+    assert intent == "production_hardening"
+
+
+def test_intent_detects_redesign():
+    """detect_update_intent must identify redesign requests."""
+    from agents.repo_analyzer import detect_update_intent
+    files = [{"path": "index.html", "content": "<html/>"}]
+    intent = detect_update_intent("Redesign the homepage with a completely new look", files)
+    assert intent == "redesign"
+
+
+def test_intent_detects_full_rebuild():
+    """detect_update_intent must identify full_rebuild_inside_repo requests."""
+    from agents.repo_analyzer import detect_update_intent
+    files = [{"path": "app.py", "content": "# placeholder"}]
+    intent = detect_update_intent("Rewrite everything from scratch using Next.js", files)
+    assert intent == "full_rebuild_inside_repo"
+
+
+def test_intent_defaults_to_small_patch():
+    """detect_update_intent must default to small_patch for simple requests."""
+    from agents.repo_analyzer import detect_update_intent
+    files = [{"path": "index.html", "content": "<html/>"}]
+    intent = detect_update_intent("Change the button color to blue", files)
+    assert intent == "small_patch"
+
+
+# ── Phase 5: Coverage Score ───────────────────────────────────────────────────
+
+def _make_files(*path_content_pairs):
+    """Helper to make file dicts for coverage score tests."""
+    return [{"path": p, "content": c} for p, c in path_content_pairs]
+
+
+def test_coverage_score_complete_landing_page():
+    """Coverage score for a complete landing page should be high (>= 70)."""
+    from agents.coverage_score import compute_coverage_score
+    files = _make_files(
+        ("index.html", """<!DOCTYPE html><html><body>
+            <section class="hero"><h1>Welcome</h1><a class="btn">Get Started</a></section>
+            <section id="features">Great features</section>
+            <section id="pricing">Pricing info</section>
+            <footer>Footer content</footer>
+        </body></html>"""),
+        ("styles.css", "body{margin:0} @media(max-width:768px){body{font-size:14px}}"),
+        ("README.md", "# My App\n\nInstall: npm install\nRun: npm start"),
+        ("amarktai.project.json", '{"name":"My App"}'),
+    )
+    result = compute_coverage_score(
+        prompt="Build a landing page for my SaaS product",
+        files=files,
+        mode="landing_page",
+        preview_url="http://localhost:8080/preview/123",
+    )
+    assert result["coverageScore"] >= 70, f"Expected >= 70, got {result['coverageScore']}"
+    assert isinstance(result["requestSatisfied"], bool)
+    assert "coverageScore" in result
+    assert "missingRequirements" in result
+    assert "checkedRequirements" in result
+
+
+def test_coverage_score_no_files_returns_zero():
+    """Coverage score for an empty project must be 0 and requestSatisfied=False."""
+    from agents.coverage_score import compute_coverage_score
+    result = compute_coverage_score(
+        prompt="Build a full app",
+        files=[],
+        mode="web_app",
+    )
+    assert result["coverageScore"] == 0
+    assert result["requestSatisfied"] is False
+    assert result["canFinalize"] is False
+
+
+def test_coverage_score_pwa_detects_missing_manifest():
+    """Coverage score for a PWA without manifest.json must list it as missing."""
+    from agents.coverage_score import compute_coverage_score
+    files = _make_files(
+        ("index.html", "<html><body>PWA app content here</body></html>"),
+        ("app.js", "// service worker registration"),
+        ("README.md", "# PWA"),
+    )
+    result = compute_coverage_score(
+        prompt="Build a PWA task tracker",
+        files=files,
+        mode="pwa",
+        preview_fallback={"fileTree": ["index.html"]},
+    )
+    missing = result["missingRequirements"]
+    assert any("manifest" in m.lower() for m in missing), f"Expected manifest in missing: {missing}"
+
+
+def test_coverage_score_fullstack_detects_missing_auth():
+    """Coverage score for full-stack must flag missing auth when requested."""
+    from agents.coverage_score import compute_coverage_score
+    files = _make_files(
+        ("frontend/index.html", "<html><body>Dashboard</body></html>"),
+        ("backend/main.py", "from fastapi import FastAPI\napp = FastAPI()"),
+        ("README.md", "# SaaS"),
+    )
+    result = compute_coverage_score(
+        prompt="Build a full-stack SaaS with secure login and dashboard",
+        files=files,
+        mode="full_stack",
+        preview_fallback={"fileTree": ["frontend/index.html"]},
+    )
+    missing = result["missingRequirements"]
+    assert any("auth" in m.lower() for m in missing), f"Expected auth in missing: {missing}"
+
+
+def test_coverage_score_full_app_completion_needs_80():
+    """Coverage score for full_app_completion intent must require >= 80 to pass."""
+    from agents.coverage_score import compute_coverage_score
+    # Minimal files — should not satisfy full_app_completion
+    files = _make_files(
+        ("README.md", "# placeholder"),
+    )
+    result = compute_coverage_score(
+        prompt="Build the complete app described in this repo",
+        files=files,
+        mode="repo_fix",
+        intent="full_app_completion",
+    )
+    assert result["minScore"] == 80
+    assert result["requestSatisfied"] is False
+
+
+def test_coverage_score_includes_preview_check():
+    """Coverage score must check for preview or fallback availability."""
+    from agents.coverage_score import compute_coverage_score
+    files = _make_files(
+        ("index.html", "<html><body>App</body></html>"),
+        ("styles.css", "body{margin:0}"),
+        ("README.md", "# App"),
+        ("amarktai.project.json", '{"name":"app"}'),
+    )
+    # Without preview
+    result_no_preview = compute_coverage_score(
+        prompt="Build a landing page",
+        files=files,
+        mode="landing_page",
+    )
+    # With preview
+    result_with_preview = compute_coverage_score(
+        prompt="Build a landing page",
+        files=files,
+        mode="landing_page",
+        preview_url="http://localhost:8080/preview/123",
+    )
+    # Preview should contribute positively
+    assert result_with_preview["coverageScore"] >= result_no_preview["coverageScore"]
+
+
+def test_coverage_score_5_page_site_checks_pages():
+    """Coverage score for a 5-page site must check whether pages were generated."""
+    from agents.coverage_score import compute_coverage_score
+    files = _make_files(
+        ("index.html", "<html><body>Home</body></html>"),
+        ("about.html", "<html><body>About</body></html>"),
+        ("contact.html", "<html><body>Contact</body></html>"),
+        ("styles.css", "body{margin:0}"),
+        ("README.md", "# Site"),
+        ("amarktai.project.json", '{"name":"site"}'),
+    )
+    result = compute_coverage_score(
+        prompt="Build a 5-page consulting website",
+        files=files,
+        mode="website",
+        preview_url="http://localhost/preview",
+    )
+    missing = result["missingRequirements"]
+    # Should note missing pages (only 3 of 5 generated)
+    assert any("page" in m.lower() or "view" in m.lower() for m in missing), \
+        f"Expected page count issue in missing: {missing}"
+
+
+# ── Phase 5: Intent + Coverage Integration ────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_repo_fix_intent_full_completion_triggers_build_pipeline():
+    """When intent=full_app_completion, orchestrator must run full build pipeline."""
+    import json
+    from unittest.mock import AsyncMock, MagicMock
+
+    db, _project, _files, _events, _messages = _make_db()
+    # Set up project as repo_fix mode
+    _project.update({"mode": "repo_fix", "quality_tier": "balanced", "prompt": "Build the complete app"})
+
+    emitted = []
+    async def emit(event):
+        emitted.append(event)
+
+    # Scout / Architect / Coder / Reviewer mock
+    coder_blocks = (
+        "===AMARKTAI_FILE[index.html]===\n"
+        "<!DOCTYPE html><html><head><title>App</title></head><body>"
+        "<section class='hero'><h1>Welcome</h1><a class='btn cta'>Get Started</a></section>"
+        "<section id='features'>Features here</section>"
+        "<section id='pricing'>Pricing</section>"
+        "<section id='about'>About</section>"
+        "<section id='workflow'>How it works</section>"
+        "<footer>Footer</footer>"
+        "</body></html>\n"
+        "===END_AMARKTAI_FILE[index.html]===\n"
+        "===AMARKTAI_FILE[styles.css]===\n"
+        "body{margin:0}@media(max-width:768px){body{font-size:14px}}\n"
+        "===END_AMARKTAI_FILE[styles.css]===\n"
+        "===AMARKTAI_FILE[README.md]===\n"
+        "# My App\n\nInstall: npm install\nRun: npm start\n"
+        "===END_AMARKTAI_FILE[README.md]===\n"
+        "===AMARKTAI_FILE[amarktai.project.json]===\n"
+        '{"name":"My App","mode":"landing_page","generated_by":"Amarktai App Builder","version":"1.0.0","media_strategy":{"mode":"placeholder","confirmed":false,"models_used":[],"notes":""}}\n'
+        "===END_AMARKTAI_FILE[amarktai.project.json]===\n"
+        "===AMARKTAI_SUMMARY===\nComplete app built.\n===END_AMARKTAI_SUMMARY===\n"
+    )
+
+    call_idx = [0]
+    responses = [
+        # Scout
+        json.dumps({"summary": "s", "audience": "a", "core_features": [], "requirements_md": "req", "make_it_better": [], "pain_points": []}),
+        # Architect
+        json.dumps({"tech_stack": {"frontend": "HTML", "backend": "none", "database": "none", "styling": "CSS", "libraries": []}, "file_plan": [{"path": "index.html", "purpose": "main"}], "design_notes": "clean"}),
+        # Coder
+        coder_blocks,
+        # Reviewer
+        json.dumps({"verdict": "pass", "issues": [], "patched_files": [], "summary": "ok"}),
+    ]
+
+    provider = MagicMock()
+    async def multi_complete(**kwargs):
+        idx = call_idx[0]
+        text = responses[idx] if idx < len(responses) else responses[-1]
+        call_idx[0] += 1
+        return {"text": text, "model_label": "test-model", "session_id": "s", "usage": {}}
+    provider.complete = AsyncMock(side_effect=multi_complete)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    written = []
+
+    # Pre-populate with "repo files" so intent detection works
+    written.append({"path": "README.md", "content": "# My App\nA placeholder.", "language": "markdown"})
+    written.append({"path": "index.html", "content": "<html><body>Placeholder</body></html>", "language": "html"})
+
+    async def fake_write(path, content, lang="text"):
+        written.append({"path": path, "content": content, "language": lang})
+
+    orch.fs.write = fake_write
+    orch.fs.list_full = AsyncMock(side_effect=lambda: list(written))
+    orch.fs.list = AsyncMock(side_effect=lambda: [{"path": f["path"]} for f in written])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    # full_app_completion intent should be detected from the prompt
+    await orch.run_full_build("Build the complete app described in this repo", mode="repo_fix")
+
+    # Verify build pipeline was triggered (scout + architect + coder events)
+    event_agents = [e.get("agent") for e in _events if isinstance(e, dict)]
+    # Expect events from the standard build pipeline
+    assert any(a in ("scout", "coder", "architect") for a in event_agents), \
+        f"Expected build pipeline agents in events, got: {event_agents}"
+
+
+# ── Phase 2+3: Repo Analysis via Orchestrator ────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_repo_fix_emits_repo_analysis_complete():
+    """repo_fix mode must emit repo_analysis_complete event with detected type."""
+    import json
+    from unittest.mock import AsyncMock, MagicMock
+
+    db, _project, _files, _events, _messages = _make_db()
+    _project.update({"mode": "repo_fix", "quality_tier": "balanced", "github": {}})
+
+    # Pre-populate repo files (static site)
+    repo_files = [
+        {"path": "index.html", "content": "<html><body>Repo App</body></html>", "language": "html"},
+        {"path": "styles.css", "content": "body{margin:0}", "language": "css"},
+    ]
+    final_files = repo_files + [
+        {"path": "README.md", "content": "# Fixed", "language": "markdown"},
+        {"path": "amarktai.project.json", "content": '{"name":"Repo"}', "language": "json"},
+    ]
+
+    emitted = []
+    async def emit(event):
+        emitted.append(event)
+
+    coder_blocks = (
+        "===AMARKTAI_FILE[index.html]===\n<html><body>Fixed</body></html>\n===END_AMARKTAI_FILE[index.html]===\n"
+        "===AMARKTAI_FILE[README.md]===\n# Fixed\n===END_AMARKTAI_FILE[README.md]===\n"
+        "===AMARKTAI_FILE[amarktai.project.json]===\n"
+        '{"name":"Repo","mode":"repo_fix","generated_by":"Amarktai App Builder","version":"1.0.0","media_strategy":{"mode":"placeholder","confirmed":false,"models_used":[],"notes":""}}\n'
+        "===END_AMARKTAI_FILE[amarktai.project.json]===\n"
+        "===AMARKTAI_SUMMARY===\nFixed.\n===END_AMARKTAI_SUMMARY===\n"
+    )
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(return_value={
+        "text": coder_blocks,
+        "model_label": "test-model",
+        "session_id": "s",
+        "usage": {},
+    })
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    orch.fs.write = AsyncMock()
+    orch.fs.list = AsyncMock(return_value=[{"path": f["path"]} for f in repo_files])
+    orch.fs.list_full = AsyncMock(side_effect=[
+        repo_files,   # first call: get repo files for intent detection + analysis
+        final_files, final_files, final_files, final_files,
+        final_files, final_files, final_files,
+    ])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    await orch.run_full_build("Fix the CSS layout", mode="repo_fix")
+
+    event_types = [e.get("type") for e in emitted]
+    assert "repo_analysis_complete" in event_types, \
+        f"Expected repo_analysis_complete event, got: {event_types}"
+
+    analysis_event = next(e for e in emitted if e.get("type") == "repo_analysis_complete")
+    assert "detectedType" in analysis_event["data"]
+    assert "intent" in analysis_event["data"]
+
+
+@pytest.mark.asyncio
+async def test_build_pipeline_emits_coverage_score():
+    """Standard build pipeline must emit coverage_score event on completion."""
+    import json
+    from unittest.mock import AsyncMock, MagicMock
+
+    db, _project, _files, _events, _messages = _make_db()
+    _project.update({"mode": "landing_page", "quality_tier": "balanced"})
+
+    emitted = []
+    async def emit(event):
+        emitted.append(event)
+
+    coder_blocks = (
+        "===AMARKTAI_FILE[index.html]===\n"
+        "<!DOCTYPE html><html><body>"
+        "<section class='hero'><h1>Welcome</h1><a class='btn'>Get Started</a></section>"
+        "<section>Features</section><section>Pricing</section><section>About</section>"
+        "<section>How it works</section><footer>Footer</footer>"
+        "</body></html>\n"
+        "===END_AMARKTAI_FILE[index.html]===\n"
+        "===AMARKTAI_FILE[styles.css]===\nbody{margin:0}\n===END_AMARKTAI_FILE[styles.css]===\n"
+        "===AMARKTAI_FILE[README.md]===\n# App\nInstall\n===END_AMARKTAI_FILE[README.md]===\n"
+        "===AMARKTAI_FILE[amarktai.project.json]===\n"
+        '{"name":"App","mode":"landing_page","generated_by":"Amarktai App Builder","version":"1.0.0","media_strategy":{"mode":"placeholder","confirmed":false,"models_used":[],"notes":""}}\n'
+        "===END_AMARKTAI_FILE[amarktai.project.json]===\n"
+        "===AMARKTAI_SUMMARY===\nDone.\n===END_AMARKTAI_SUMMARY===\n"
+    )
+
+    responses = [
+        json.dumps({"summary": "s", "audience": "a", "core_features": [], "requirements_md": "req", "make_it_better": [], "pain_points": []}),
+        json.dumps({"tech_stack": {"frontend": "HTML", "backend": "none", "database": "none", "styling": "CSS", "libraries": []}, "file_plan": [], "design_notes": ""}),
+        coder_blocks,
+        json.dumps({"verdict": "pass", "issues": [], "patched_files": [], "summary": "ok"}),
+    ]
+    idx = [0]
+
+    provider = MagicMock()
+    async def complete(**kw):
+        i = idx[0]; idx[0] += 1
+        return {"text": responses[i] if i < len(responses) else responses[-1], "model_label": "test", "session_id": "s", "usage": {}}
+    provider.complete = AsyncMock(side_effect=complete)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    written = []
+
+    async def fake_write(path, content, lang="text"):
+        written.append({"path": path, "content": content, "language": lang})
+
+    orch.fs.write = fake_write
+    orch.fs.list_full = AsyncMock(side_effect=lambda: list(written))
+    orch.fs.list = AsyncMock(return_value=[])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    from agents.stack_engine import decide_stack
+    sd = decide_stack(mode="landing_page")
+    await orch.run_full_build("Build a landing page for my product", mode="landing_page", stack_decision=sd)
+
+    event_types = [e.get("type") for e in emitted]
+    assert "coverage_score" in event_types, \
+        f"Expected coverage_score event in emitted, got: {event_types}"
+
+    cov_event = next(e for e in emitted if e.get("type") == "coverage_score")
+    assert "coverageScore" in cov_event["data"]
+    assert isinstance(cov_event["data"]["coverageScore"], int)
+

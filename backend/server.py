@@ -29,6 +29,8 @@ from agents.prompts import ASSISTANT_PROMPT
 from agents.clarification import check_clarification_needed, apply_clarification_answers
 from agents.pixabay import search_images, search_videos, build_media_manifest
 from agents.design_engine import get_available_styles
+from agents.repo_analyzer import analyze_repo_profile
+from agents.coverage_score import compute_coverage_score
 from auth import (
     decode_token,
     hash_password,
@@ -1050,6 +1052,18 @@ async def import_from_repo(body: RepoImportBody, claims: dict = Depends(require_
         "meta": {"imported_files": len(info["files"]), "skipped_files": info["skipped"]},
         "created_at": _now(),
     })
+
+    # Phase 2: Run repo analysis immediately after import and cache it
+    try:
+        all_files = await fs.list_full()
+        repo_profile = analyze_repo_profile(all_files, info["html_url"])
+        await db.projects.update_one(
+            {"id": proj.id},
+            {"$set": {"repo_profile": repo_profile, "updated_at": _now()}},
+        )
+    except Exception:
+        pass  # Non-fatal: analysis can be requested later via /repo-analysis endpoint
+
     return proj
 
 
@@ -1074,6 +1088,67 @@ async def get_project(project_id: str, claims: dict = Depends(require_user)) -> 
     if not doc:
         raise HTTPException(404, "Project not found")
     return Project(**doc)
+
+
+@secured.get("/projects/{project_id}/repo-analysis")
+async def repo_analysis(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Phase 2/3: Return the repo profile for an imported project.
+
+    If the profile is already stored (from a previous build pass), return it.
+    Otherwise, analyse the current project files on-the-fly and cache the result.
+    """
+    await _own(project_id, claims)
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+
+    # Return cached profile if available
+    cached = proj.get("repo_profile")
+    if cached:
+        return cached
+
+    # Analyse on-the-fly
+    files = await ProjectFS(db, project_id).list_full()
+    if not files:
+        raise HTTPException(404, "No files found in project")
+
+    repo_full_name = (proj.get("github") or {}).get("html_url", proj.get("name", ""))
+    profile = analyze_repo_profile(files, repo_full_name)
+    # Cache for subsequent calls
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$set": {"repo_profile": profile, "updated_at": _now()}},
+    )
+    return profile
+
+
+@secured.get("/projects/{project_id}/coverage")
+async def project_coverage(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Phase 5: Return the coverage score for the project.
+
+    Returns the cached coverage score if available, or computes it fresh.
+    """
+    await _own(project_id, claims)
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+
+    cached = proj.get("coverage_score")
+    if cached:
+        return cached
+
+    files = await ProjectFS(db, project_id).list_full()
+    coverage = compute_coverage_score(
+        prompt=proj.get("prompt", ""),
+        files=files,
+        mode=proj.get("mode", "web_app"),
+        intent=proj.get("update_intent", "small_patch"),
+    )
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$set": {"coverage_score": coverage, "updated_at": _now()}},
+    )
+    return coverage
 
 
 @secured.delete("/projects/{project_id}")
