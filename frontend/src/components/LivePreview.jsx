@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Projects } from "@/lib/amk-api";
-import { RefreshCw, ExternalLink, Cpu, AlertTriangle, Loader2, BookOpen, Wrench, CheckCircle } from "lucide-react";
+import { RefreshCw, ExternalLink, Cpu, AlertTriangle, Loader2, BookOpen, Wrench, CheckCircle, Terminal } from "lucide-react";
 
 // Modes that show repo structure instead of an iframe
 const REPO_STRUCTURE_MODES = new Set([
@@ -8,7 +8,7 @@ const REPO_STRUCTURE_MODES = new Set([
   "automation_bot", "trading_bot_scaffold", "repo_fix",
 ]);
 
-export default function LivePreview({ projectId, refreshKey, projectStatus, projectError, failedAgent, projectMode, previewStrategy, buildPhase }) {
+export default function LivePreview({ projectId, refreshKey, projectStatus, projectError, failedAgent, projectMode, previewStrategy, buildPhase, previewFallback }) {
   const [bust, setBust] = useState(0);
   // NOTE: The preview URL contains a bearer token as a query parameter for iframe auth.
   // TODO: Move to a short-lived preview token or use a dedicated preview origin to reduce
@@ -89,6 +89,11 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
     );
   }
 
+  // Phase 3: Show preview fallback when it exists and no live preview is possible
+  if (previewFallback && !previewFallback.canPreview) {
+    return <PreviewFallbackPanel fallback={previewFallback} />;
+  }
+
   if (showRepoStructure) {
     return (
       <div data-testid="live-preview" className="h-full flex flex-col">
@@ -148,6 +153,128 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
           className="w-full h-full border-0"
           sandbox="allow-scripts allow-forms allow-popups allow-downloads" />
       </div>
+    </div>
+  );
+}
+
+/**
+ * PreviewFallbackPanel
+ *
+ * Phase 3: Shows structured information when a live preview is not available.
+ * Displayed instead of a blank panel whenever previewFallback.canPreview is false.
+ *
+ * Props:
+ *   fallback – preview fallback contract object from GET /projects/{id}/preview-fallback
+ *              or from the preview_fallback_ready WebSocket event.
+ */
+function PreviewFallbackPanel({ fallback }) {
+  return (
+    <div data-testid="preview-fallback-panel" className="h-full flex flex-col overflow-auto bg-amk-panel">
+      <div className="h-9 border-b border-amk-line bg-amk-base flex items-center px-3 shrink-0">
+        <Terminal className="w-3.5 h-3.5 text-amk-fg3 mr-2" strokeWidth={1.5} />
+        <span className="font-mono text-[11px] text-amk-fg">Preview Unavailable</span>
+        {fallback.detectedType && (
+          <span className="ml-2 font-mono text-[10px] text-amk-fg3 uppercase">
+            {fallback.detectedType}
+          </span>
+        )}
+      </div>
+      <div className="flex-1 p-4 space-y-4 font-mono text-[11px] overflow-auto">
+        {/* Reason */}
+        <div className="border border-amk-line bg-amk-base p-3 space-y-1">
+          <AlertTriangle className="w-4 h-4 text-agent-scout mb-1" strokeWidth={1.5} />
+          <p className="text-amk-fg">{fallback.reason}</p>
+        </div>
+
+        {/* Stack */}
+        {(fallback.detectedStack || []).length > 0 && (
+          <FallbackSection label="Detected Stack">
+            <div className="flex flex-wrap gap-1">
+              {fallback.detectedStack.map((s, i) => (
+                <span key={i} className="px-1.5 py-0.5 border border-amk-line text-amk-fg2">{s}</span>
+              ))}
+            </div>
+          </FallbackSection>
+        )}
+
+        {/* Next actions */}
+        {(fallback.nextActions || []).length > 0 && (
+          <FallbackSection label="Next Actions">
+            {fallback.nextActions.map((a, i) => (
+              <div key={i} className="flex items-start gap-1.5 text-amk-fg2">
+                <span className="shrink-0 text-agent-coder">{i + 1}.</span>
+                <span>{a}</span>
+              </div>
+            ))}
+          </FallbackSection>
+        )}
+
+        {/* Install / Build / Dev commands */}
+        {[
+          { label: "Install", cmds: fallback.installCommands },
+          { label: "Build", cmds: fallback.buildCommands },
+          { label: "Dev", cmds: fallback.devCommands },
+        ].filter((g) => g.cmds?.length).map(({ label, cmds }) => (
+          <FallbackSection key={label} label={`${label} Commands`}>
+            {cmds.map((cmd, i) => (
+              <code key={i} className="block bg-amk-surface border border-amk-line px-2 py-1 text-amk-fg">
+                {cmd}
+              </code>
+            ))}
+          </FallbackSection>
+        ))}
+
+        {/* Missing env */}
+        {(fallback.missingEnv || []).length > 0 && (
+          <FallbackSection label="Required Env Vars">
+            <div className="flex flex-wrap gap-1">
+              {fallback.missingEnv.map((e, i) => (
+                <span key={i} className="px-1.5 py-0.5 border border-agent-scout text-agent-scout">{e}</span>
+              ))}
+            </div>
+          </FallbackSection>
+        )}
+
+        {/* Preview blockers */}
+        {(fallback.previewBlockers || []).length > 0 && (
+          <FallbackSection label="Preview Blockers">
+            {fallback.previewBlockers.map((b, i) => (
+              <div key={i} className="flex items-start gap-1 text-agent-scout">
+                <span className="shrink-0">·</span><span>{b}</span>
+              </div>
+            ))}
+          </FallbackSection>
+        )}
+
+        {/* Route map */}
+        {(fallback.routeMap || []).length > 0 && (
+          <FallbackSection label="Detected Routes">
+            {fallback.routeMap.slice(0, 20).map((r, i) => (
+              <div key={i} className="text-amk-fg2">
+                <code>{r}</code>
+              </div>
+            ))}
+          </FallbackSection>
+        )}
+
+        {/* README excerpt */}
+        {fallback.readmeExcerpt && (
+          <FallbackSection label="README">
+            <pre className="text-amk-fg2 whitespace-pre-wrap text-[10px] leading-relaxed">
+              {fallback.readmeExcerpt.slice(0, 800)}
+            </pre>
+          </FallbackSection>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FallbackSection({ label, children }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="text-amk-fg3 uppercase tracking-wider text-[10px]">{label}</div>
+      <div className="space-y-1 pl-1">{children}</div>
     </div>
   );
 }

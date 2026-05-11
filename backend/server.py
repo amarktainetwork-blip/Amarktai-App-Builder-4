@@ -31,6 +31,7 @@ from agents.pixabay import search_images, search_videos, build_media_manifest
 from agents.design_engine import get_available_styles
 from agents.repo_analyzer import analyze_repo_profile
 from agents.coverage_score import compute_coverage_score
+from agents.preview_executor import execute_preview
 from auth import (
     decode_token,
     hash_password,
@@ -1151,6 +1152,63 @@ async def project_coverage(project_id: str, claims: dict = Depends(require_user)
     return coverage
 
 
+@secured.get("/projects/{project_id}/preview-fallback")
+async def project_preview_fallback(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Phase 3: Return a structured preview fallback object for imported repos.
+
+    For static sites this returns canPreview=True with inlined HTML.
+    For all other strategies it returns the full fallback contract so the
+    frontend can display install commands, env requirements, and blockers.
+    """
+    await _own(project_id, claims)
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+
+    files = await ProjectFS(db, project_id).list_full()
+    if not files:
+        return {
+            "canPreview": False,
+            "type": "repo-preview-fallback",
+            "reason": "No files found in project",
+            "detectedStack": [],
+            "languages": [],
+            "fileTree": [],
+            "routeMap": [],
+            "readmeExcerpt": "",
+            "installCommands": [],
+            "buildCommands": [],
+            "devCommands": [],
+            "testCommands": [],
+            "missingEnv": [],
+            "logs": [],
+            "previewBlockers": ["No files found"],
+            "nextActions": ["Import a repository or start building"],
+            "riskNotes": [],
+            "recommendedPlan": "",
+            "detectedType": "unknown",
+            "packageManager": "",
+            "frontendPath": "",
+            "backendPath": "",
+        }
+
+    # Use cached profile or compute on-the-fly
+    profile = proj.get("repo_profile")
+    if not profile:
+        repo_full_name = (proj.get("github") or {}).get("html_url", proj.get("name", ""))
+        profile = analyze_repo_profile(files, repo_full_name)
+        await db.projects.update_one(
+            {"id": project_id},
+            {"$set": {"repo_profile": profile, "updated_at": _now()}},
+        )
+
+    result = execute_preview(files, profile)
+    # Broadcast the result so the frontend can pick it up via WS too
+    event_type = "preview_ready" if result.get("canPreview") else "preview_fallback_ready"
+    await hub.broadcast(project_id, {"type": event_type, "data": result})
+    return result
+
+
 @secured.delete("/projects/{project_id}")
 async def delete_project(project_id: str, claims: dict = Depends(require_user)) -> dict:
     query = {"id": project_id} if claims.get("role") == "admin" else {"id": project_id, "owner_id": claims["sub"]}
@@ -1461,6 +1519,24 @@ async def finalize(project_id: str, body: FinalizeOptions = FinalizeOptions(), c
         raise HTTPException(409, "Validation must pass before finalize/push. Fix validation errors first.")
     if proj and proj.get("status") not in ("ready", "finalized"):
         raise HTTPException(409, "Project must be ready before finalize/push.")
+
+    # Phase 6: Coverage enforcement for repo-update intents
+    _COVERAGE_INTENTS = {"full_app_completion", "repo_migration", "full_rebuild_inside_repo"}
+    update_intent = (proj or {}).get("update_intent", "")
+    if update_intent in _COVERAGE_INTENTS:
+        coverage = (proj or {}).get("coverage_score") or {}
+        cov_score = coverage.get("coverageScore", 0)
+        if cov_score < 80:
+            raise HTTPException(409, detail={
+                "coverage_failed": True,
+                "coverageScore": cov_score,
+                "intent": update_intent,
+                "message": (
+                    f"Coverage score {cov_score}/100 is below the required 80 for {update_intent}. "
+                    "Continue building missing requirements before finalizing."
+                ),
+            })
+
     files = await ProjectFS(db, project_id).list_full()
     payload_files = [{"path": f["path"], "content": f["content"]} for f in files if f["path"] != ".env" and not f["path"].endswith("/.env")]
     # Phase 9: Use override name if provided, otherwise derive from project name
@@ -1506,6 +1582,7 @@ async def finalize_as_branch_pr(project_id: str, claims: dict = Depends(require_
 
     Creates branch: amarktai-builder/{project_id[:8]}
     Opens a PR against the existing repo's default branch.
+    Phase 8: PR body includes validation scores and coverage score.
     """
     await _own(project_id, claims)
     pat = await _runtime_secret("GITHUB_PAT")
@@ -1526,15 +1603,27 @@ async def finalize_as_branch_pr(project_id: str, claims: dict = Depends(require_
     except Exception as exc:
         raise HTTPException(400, f"Could not verify GitHub PAT: {exc}")
 
+    # Phase 8: collect validation and coverage scores for enriched PR body
+    last_validation = proj.get("last_validation") or {}
+    coverage_score = proj.get("coverage_score") or {}
+    repo_profile = proj.get("repo_profile") or {}
+    frameworks = repo_profile.get("frameworks", [])
+    stack_str = ", ".join(frameworks) if frameworks else ""
+    preview_note = "Preview available via Amarktai Builder workspace." if proj.get("preview_strategy") else "No live preview — see install/build commands in repo README."
+
     job_slug = f"{repo_name[:20]}-{project_id[:8]}"
     try:
         result = await gh.create_branch_pr_from_files(
             owner=owner,
             repo=repo_name,
             files=payload_files,
-            prompt=proj.get("prompt", "")[:120],
+            prompt=proj.get("prompt", "")[:gh._PR_PROMPT_TRUNCATE],
             job_slug=job_slug,
             pat=pat,
+            validation_scores=last_validation or None,
+            coverage_score=coverage_score or None,
+            stack=stack_str,
+            preview_note=preview_note,
         )
     except Exception as exc:
         raise HTTPException(400, f"Failed to create branch PR: {exc}")
