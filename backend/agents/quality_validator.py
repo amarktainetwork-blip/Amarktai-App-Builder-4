@@ -68,14 +68,15 @@ _ONLY_SYSTEM_FONTS = re.compile(
     r"font-family\s*:[^;]*(?:sans-serif|serif|monospace|system-ui|Arial|Helvetica|Georgia|Verdana|Tahoma)[^;]*;",
     re.IGNORECASE,
 )
-# Detects problematic very low text opacity
+# Detects problematic very low text opacity (< 0.2)
 _LOW_OPACITY_TEXT = re.compile(
-    r"color\s*:[^;]*rgba?\([^)]*,\s*0\.[0-2]\d*\s*\)",
+    r"color\s*:[^;]*rgba?\([^)]*,\s*0\.(?:0\d*|1\d*)\s*\)",
     re.IGNORECASE,
 )
-# Detects font-size explicitly set very small (< 12px) on body/p/li
+# Detects font-size explicitly set very small (< 12px) on body/p/li/span
+# Uses re.DOTALL so it can match across lines; scans CSS for "font-size: Npx" globally
 _TINY_FONT_SIZE = re.compile(
-    r"(?:body|p|li|span)[^{]*\{[^}]*font-size\s*:\s*([0-9]+)px",
+    r"font-size\s*:\s*([0-9]+)px",
     re.IGNORECASE,
 )
 

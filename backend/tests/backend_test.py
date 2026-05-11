@@ -3452,7 +3452,7 @@ def test_design_engine_all_styles_have_font_import():
         fi = style.get("font_import")
         assert fi is not None, f"Style '{style['name']}' missing font_import"
         assert "link_href" in fi, f"Style '{style['name']}' font_import missing link_href"
-        assert "fonts.bunny.net" in fi["link_href"], (
+        assert fi["link_href"].startswith("https://fonts.bunny.net"), (
             f"Style '{style['name']}' font link must use Bunny Fonts: {fi['link_href']}"
         )
         assert "css_vars" in fi, f"Style '{style['name']}' font_import missing css_vars"
@@ -3468,7 +3468,7 @@ def test_design_direction_coder_instructions_include_font_link():
     """create_design_direction coder_instructions must include the Bunny Fonts link tag."""
     from agents.design_engine import create_design_direction
     dd = create_design_direction("Build a SaaS landing page", "static-site", "startups", "balanced")
-    assert "fonts.bunny.net" in dd["coder_instructions"], (
+    assert dd["font_import"]["link_href"].startswith("https://fonts.bunny.net"), (
         "coder_instructions must include the Bunny Fonts link href"
     )
     assert "<link" in dd["coder_instructions"], (

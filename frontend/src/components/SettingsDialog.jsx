@@ -141,7 +141,7 @@ export default function SettingsDialog({ open, onOpenChange }) {
                     <span
                       data-testid={`setting-status-${f.key}`}
                       className="font-mono text-[10px] uppercase tracking-wider inline-flex items-center gap-1"
-                      style={{ color: isSet ? "#00E676" : "#555555" }}
+                      style={{ color: isSet ? "#00E676" : "#888888" }}
                     >
                       {isSet ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />}
                       {isSet ? `${info.source || "set"} / ${info.preview}` : "not configured"}
