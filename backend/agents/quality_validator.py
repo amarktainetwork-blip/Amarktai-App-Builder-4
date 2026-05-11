@@ -190,9 +190,30 @@ def _score_static_landing(
             "No visual elements detected (no gradients, images, SVGs, or visual sections)."
         )
 
-    # CSS minimum length check (very thin CSS = thin design)
+    # CSS presence and quality check
+    # Check if any CSS file exists (styles.css, main.css, etc.)
+    has_css_file = bool(styles.get("content", "").strip()) or any(
+        k.endswith(".css") and v.get("content", "").strip()
+        for k, v in files_by_path.items()
+        if k != "styles.css"
+    )
+    # Detect framework CSS loaded via CDN: require a link/script tag or @import pointing to the framework
+    has_framework_css = bool(re.search(
+        r'<link[^>]+href=["\'][^"\']*(?:tailwind|bootstrap|bulma|materialize|foundation)[^"\']*["\']'
+        r'|@import\s+["\'][^"\']*(?:tailwind|bootstrap|bulma|materialize|foundation)[^"\']*["\']',
+        html, re.IGNORECASE,
+    ))
+
     css_content = css.strip()
-    if len(css_content) < 500:
+    if not has_css_file and not has_framework_css:
+        # No CSS at all: hard design fail — site will render completely unstyled
+        design -= 30
+        design_errors.append(
+            "No CSS file found (styles.css missing) and no framework CSS detected. "
+            "Site will render unstyled. Create styles.css with full styling."
+        )
+    elif len(css_content) < 500:
+        # CSS present but very thin
         design -= 15
         design_errors.append(
             f"CSS is very thin ({len(css_content)} chars). Expected substantial styling."
@@ -432,6 +453,27 @@ def score_project_quality(
                     quality_errors.append(
                         f"Prompt mentions '{keyword}' but {page_file} was not generated."
                     )
+            # Multi-page: ensure all generated HTML pages link a stylesheet.
+            # Cap total penalty at 16 points to avoid punishing large sites excessively.
+            pages_missing_css = [
+                path for path, f in files_by_path.items()
+                if path.endswith(".html")
+                and f.get("content", "").strip()
+                and not re.search(
+                    r'<link[^>]+rel=["\']stylesheet["\']'
+                    r'|<link[^>]+href=["\'][^"\']*\.css[^"\']*["\']'
+                    r'|tailwind|bootstrap',
+                    f.get("content", ""), re.IGNORECASE,
+                )
+            ]
+            if pages_missing_css:
+                penalty = min(16, len(pages_missing_css) * 8)
+                design_score -= penalty
+                design_errors.append(
+                    f"{len(pages_missing_css)} HTML page(s) do not link a stylesheet "
+                    f"({', '.join(pages_missing_css[:3])}{'...' if len(pages_missing_css) > 3 else ''}). "
+                    "Add <link rel=\"stylesheet\" href=\"styles.css\"> in <head> of each page."
+                )
 
     elif project_type == "pwa":
         quality_score, quality_errors = _score_pwa(files_by_path)

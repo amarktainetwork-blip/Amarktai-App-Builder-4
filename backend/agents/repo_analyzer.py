@@ -507,8 +507,10 @@ def detect_update_intent(request: str, files: list[dict]) -> str:
 
     # Full app completion signals
     if re.search(
-        r"\bbuild.*complete\b|\bcomplete.*app\b|\bfinish.*app\b|\bimplement.*everything\b"
-        r"|\bmake.*production.?ready\b|\bfull.?stack\b.*\bcomplete\b"
+        r"\bbuild.*complete\b|\bcomplete.*(?:app|website|site)\b|\bfinish.*(?:app|site)\b"
+        r"|\bimplement.*everything\b"
+        r"|\b(?:make|get).*(?:go.?live|production).?ready\b"
+        r"|\bfull.?stack\b.*\bcomplete\b"
         r"|\badd.*all.*(?:pages?|routes?|features?)\b"
         r"|\bdescribed in.*repo\b|\bbuild.*what.*described\b",
         req_lower,
