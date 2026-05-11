@@ -3574,3 +3574,87 @@ def test_quality_validator_low_opacity_text_penalizes_design():
     assert result_low_opacity["designScore"] <= result_ok["designScore"], (
         f"Low opacity text should reduce designScore. low={result_low_opacity['designScore']} ok={result_ok['designScore']}"
     )
+
+
+# ---------- _parse_amarktai_blocks: checklist parsing ─────────────────────────
+
+def test_parse_amarktai_blocks_extracts_checklist():
+    """_parse_amarktai_blocks must extract REQUESTED/SATISFIED/UNSATISFIED from checklist block."""
+    from agents.orchestrator import _parse_amarktai_blocks
+    text = (
+        "===AMARKTAI_FILE[index.html]===\n"
+        "<!DOCTYPE html><html><body>Test</body></html>\n"
+        "===END_AMARKTAI_FILE[index.html]===\n"
+        "\n"
+        "===AMARKTAI_CHECKLIST===\n"
+        "REQUESTED: black background, white text, BMW images\n"
+        "SATISFIED: black background, white text\n"
+        "UNSATISFIED: BMW images\n"
+        "===END_AMARKTAI_CHECKLIST===\n"
+        "\n"
+        "===AMARKTAI_SUMMARY===\n"
+        "Applied dark theme changes.\n"
+        "===END_AMARKTAI_SUMMARY===\n"
+    )
+    result = _parse_amarktai_blocks(text)
+    assert result["requestedChanges"] == ["black background", "white text", "BMW images"]
+    assert result["satisfiedChanges"] == ["black background", "white text"]
+    assert result["unsatisfiedChanges"] == ["BMW images"]
+    assert len(result["files"]) == 1
+    assert result["summary"] == "Applied dark theme changes."
+
+
+def test_parse_amarktai_blocks_empty_checklist():
+    """_parse_amarktai_blocks returns empty lists when no checklist block present."""
+    from agents.orchestrator import _parse_amarktai_blocks
+    text = (
+        "===AMARKTAI_FILE[styles.css]===\n"
+        "body { color: white; }\n"
+        "===END_AMARKTAI_FILE[styles.css]===\n"
+        "\n"
+        "===AMARKTAI_SUMMARY===\n"
+        "Updated CSS.\n"
+        "===END_AMARKTAI_SUMMARY===\n"
+    )
+    result = _parse_amarktai_blocks(text)
+    assert result["requestedChanges"] == []
+    assert result["satisfiedChanges"] == []
+    assert result["unsatisfiedChanges"] == []
+
+
+def test_parse_amarktai_blocks_unsatisfied_none():
+    """UNSATISFIED: none should return empty list."""
+    from agents.orchestrator import _parse_amarktai_blocks
+    text = (
+        "===AMARKTAI_FILE[app.js]===\n"
+        "console.log('ok');\n"
+        "===END_AMARKTAI_FILE[app.js]===\n"
+        "\n"
+        "===AMARKTAI_CHECKLIST===\n"
+        "REQUESTED: dark theme, contact form\n"
+        "SATISFIED: dark theme, contact form\n"
+        "UNSATISFIED: none\n"
+        "===END_AMARKTAI_CHECKLIST===\n"
+        "\n"
+        "===AMARKTAI_SUMMARY===\n"
+        "All changes applied.\n"
+        "===END_AMARKTAI_SUMMARY===\n"
+    )
+    result = _parse_amarktai_blocks(text)
+    assert result["unsatisfiedChanges"] == []
+    assert result["satisfiedChanges"] == ["dark theme", "contact form"]
+
+
+def test_parse_checklist_line_handles_missing_label():
+    """_parse_checklist_line returns empty list when label not found."""
+    from agents.orchestrator import _parse_checklist_line
+    body = "REQUESTED: a, b\nSATISFIED: a\n"
+    assert _parse_checklist_line(body, "UNSATISFIED") == []
+
+
+def test_parse_checklist_line_strips_whitespace():
+    """_parse_checklist_line strips leading/trailing whitespace from items."""
+    from agents.orchestrator import _parse_checklist_line
+    body = "REQUESTED:  item one ,  item two  , item three\n"
+    result = _parse_checklist_line(body, "REQUESTED")
+    assert result == ["item one", "item two", "item three"]

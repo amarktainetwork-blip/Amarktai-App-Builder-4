@@ -269,6 +269,7 @@ export default function ProjectListPage() {
                       <option value="repo_fix">Repo fix — imported repo edits only</option>
                     </optgroup>
                   </select>
+                  <BuildModeHint mode={mode} />
 
                   {/* Quality tier selector */}
                   <FieldLabel>Quality tier</FieldLabel>
@@ -472,6 +473,32 @@ function ReadinessStrip({ readiness, onRefresh }) {
 function StatusDot({ status }) {
   const colors = { running: "#FFC107", ready: "#00E676", failed: "#FF5722", queued: "#A1A1AA" };
   return <span title={status} className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: colors[status] || "#71717A" }} />;
+}
+
+const BUILD_MODE_HINTS = {
+  landing_page: "A single polished page for a business, product, event, or idea. Fast to build, easy to deploy.",
+  website: "A complete website with separate pages like Home, About, Services, Pricing, and Contact.",
+  media_page: "A visual-first page optimized for image galleries, video showcases, or music portfolios.",
+  web_app: "An interactive browser app with forms, state, local data, or custom workflows.",
+  pwa: "An installable app with mobile-friendly layout, home screen icon, and optional offline support.",
+  full_stack: "Frontend, backend, secure login, dashboard, database notes, Docker deployment, and README.",
+  dashboard: "A control panel with charts, tables, metric cards, settings, and admin views.",
+  admin_panel: "A CRUD admin interface with user management, data tables, and access control scaffold.",
+  api_service: "A backend REST API with routes, health checks, OpenAPI docs, and deployment notes.",
+  automation_bot: "A worker or scheduler scaffold with job queue, logging, and error handling.",
+  trading_bot_scaffold: "A paper-trading bot with risk controls, market data hooks, and backtesting scaffold.",
+  research: "A research brief with target audience, feature opportunities, and a recommended build prompt.",
+  repo_fix: "Import an existing GitHub repo, analyse it, fix it, and prepare a branch or PR.",
+};
+
+function BuildModeHint({ mode }) {
+  const hint = BUILD_MODE_HINTS[mode];
+  if (!hint) return null;
+  return (
+    <p data-testid="build-mode-hint" className="font-mono text-[10px] text-amk-fg3 mt-1.5 leading-relaxed">
+      {hint}
+    </p>
+  );
 }
 
 const MEDIA_OPTIONS = [

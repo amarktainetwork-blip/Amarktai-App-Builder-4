@@ -52,6 +52,9 @@ AGENT_TIMEOUTS = {
     "repo_fix": 480,
 }
 
+# Maximum number of iteration history entries to keep in project_memory
+_MAX_ITERATION_HISTORY = 20
+
 # App files that indicate the project has a previewable entry point
 _PREVIEW_ENTRY_FILES = {"index.html", "index.htm"}
 # Files that are metadata, not app output
@@ -126,6 +129,21 @@ _AMARKTAI_SUMMARY_PAT = re.compile(
     r"===AMARKTAI_SUMMARY===\n(?P<s>.*?)(?:\n===END_AMARKTAI_SUMMARY===|$)",
     re.DOTALL,
 )
+_AMARKTAI_CHECKLIST_PAT = re.compile(
+    r"===AMARKTAI_CHECKLIST===\n(?P<body>.*?)(?:\n===END_AMARKTAI_CHECKLIST===|$)",
+    re.DOTALL,
+)
+
+
+def _parse_checklist_line(body: str, label: str) -> list[str]:
+    """Extract comma-separated items from a labelled line like 'REQUESTED: a, b, c'."""
+    for line in body.splitlines():
+        if line.strip().upper().startswith(label + ":"):
+            raw = line.split(":", 1)[1].strip()
+            if not raw or raw.lower() in ("none", "n/a", "-"):
+                return []
+            return [item.strip() for item in raw.split(",") if item.strip()]
+    return []
 
 
 def _parse_amarktai_blocks(text: str) -> dict:
@@ -137,13 +155,25 @@ def _parse_amarktai_blocks(text: str) -> dict:
         ...verbatim file content...
         ===END_AMARKTAI_FILE[index.html]===
 
+        ===AMARKTAI_CHECKLIST===
+        REQUESTED: <items>
+        SATISFIED: <items>
+        UNSATISFIED: <items>
+        ===END_AMARKTAI_CHECKLIST===
+
         ===AMARKTAI_SUMMARY===
         2-3 line summary.
         ===END_AMARKTAI_SUMMARY===
 
     Returns a dict compatible with the old JSON protocol::
 
-        {"files": [{"path": ..., "language": ..., "content": ...}], "summary": ...}
+        {
+            "files": [{"path": ..., "language": ..., "content": ...}],
+            "summary": ...,
+            "requestedChanges": [...],
+            "satisfiedChanges": [...],
+            "unsatisfiedChanges": [...],
+        }
     """
     files = []
     for m in _AMARKTAI_FILE_PAT.finditer(text):
@@ -160,7 +190,24 @@ def _parse_amarktai_blocks(text: str) -> dict:
     summary_m = _AMARKTAI_SUMMARY_PAT.search(text)
     summary = summary_m.group("s").strip() if summary_m else ""
 
-    return {"files": files, "summary": summary}
+    # Parse checklist block (iteration agent only)
+    checklist_m = _AMARKTAI_CHECKLIST_PAT.search(text)
+    requested: list[str] = []
+    satisfied: list[str] = []
+    unsatisfied: list[str] = []
+    if checklist_m:
+        body = checklist_m.group("body")
+        requested = _parse_checklist_line(body, "REQUESTED")
+        satisfied = _parse_checklist_line(body, "SATISFIED")
+        unsatisfied = _parse_checklist_line(body, "UNSATISFIED")
+
+    return {
+        "files": files,
+        "summary": summary,
+        "requestedChanges": requested,
+        "satisfiedChanges": satisfied,
+        "unsatisfiedChanges": unsatisfied,
+    }
 
 
 def _has_app_files(files: list[dict]) -> bool:
@@ -1258,6 +1305,11 @@ class Orchestrator:
             if not data.get("files"):
                 raise ValueError("Iteration returned no editable file changes.")
 
+            # Extract checklist from iteration response
+            requested_changes: list[str] = data.get("requestedChanges", [])
+            satisfied_changes: list[str] = data.get("satisfiedChanges", [])
+            unsatisfied_changes: list[str] = data.get("unsatisfiedChanges", [])
+
             changed: list[str] = []
             added: list[str] = []
             for f in data.get("files", []):
@@ -1287,9 +1339,33 @@ class Orchestrator:
                 changed_files=changed,
                 added_files=added,
             )
+
+            # Build iteration history entry for project_memory
+            iteration_entry = {
+                "timestamp": _now(),
+                "request": user_prompt,
+                "requestedChanges": requested_changes,
+                "satisfiedChanges": satisfied_changes,
+                "unsatisfiedChanges": unsatisfied_changes,
+                "changedFiles": changed,
+                "addedFiles": added,
+                "model": iter_res.get("model_label", ""),
+            }
+
+            # Append to project_memory.iterationHistory (capped at 20 entries)
+            existing_memory = project.get("project_memory") or {}
+            iteration_history = existing_memory.get("iterationHistory", [])
+            iteration_history.append(iteration_entry)
+            if len(iteration_history) > _MAX_ITERATION_HISTORY:
+                iteration_history = iteration_history[-_MAX_ITERATION_HISTORY:]
+
             await self.db.projects.update_one(
                 {"id": self.project_id},
-                {"$set": {"coverage_score": coverage, "updated_at": _now()}},
+                {"$set": {
+                    "coverage_score": coverage,
+                    "project_memory.iterationHistory": iteration_history,
+                    "updated_at": _now(),
+                }},
             )
             await self.emit({"type": "coverage_score", "data": coverage})
 
@@ -1299,7 +1375,10 @@ class Orchestrator:
                 meta={"model": iter_res["model_label"],
                       "files": [f["path"] for f in data.get("files", [])],
                       "changedFiles": changed,
-                      "addedFiles": added},
+                      "addedFiles": added,
+                      "requestedChanges": requested_changes,
+                      "satisfiedChanges": satisfied_changes,
+                      "unsatisfiedChanges": unsatisfied_changes},
             )
             # Increment preview_iteration counter and emit version
             new_preview_iter = project.get("preview_iteration", 0) + 1
@@ -1312,6 +1391,9 @@ class Orchestrator:
                 "changedFiles": changed,
                 "addedFiles": added,
                 "summary": data.get("summary", "Updated."),
+                "requestedChanges": requested_changes,
+                "satisfiedChanges": satisfied_changes,
+                "unsatisfiedChanges": unsatisfied_changes,
                 "previewVersion": f"0-{new_preview_iter}",
                 "previewIteration": new_preview_iter,
             }})
