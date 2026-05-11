@@ -254,7 +254,10 @@ def compute_coverage_score(
     css_required = mode in ("landing_page", "website", "media_page")
     if css_required:
         has_css = any(f["path"].endswith(".css") for f in files) or bool(
-            re.search(r'tailwind|bootstrap|bulma', _all_content(files), re.IGNORECASE)
+            re.search(
+                r'<link[^>]+href=["\'][^"\']*(?:tailwind|bootstrap|bulma|materialize|foundation)[^"\']*["\']',
+                _all_content(files), re.IGNORECASE,
+            )
         )
         check("CSS stylesheet present", has_css, 8)
 

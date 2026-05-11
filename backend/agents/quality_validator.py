@@ -197,9 +197,10 @@ def _score_static_landing(
         for k, v in files_by_path.items()
         if k != "styles.css"
     )
-    # Also detect framework CSS loaded via CDN (Tailwind, Bootstrap, etc.)
+    # Detect framework CSS loaded via CDN: require a link/script tag or @import pointing to the framework
     has_framework_css = bool(re.search(
-        r'tailwind|bootstrap|bulma|materialize|foundation',
+        r'<link[^>]+href=["\'][^"\']*(?:tailwind|bootstrap|bulma|materialize|foundation)[^"\']*["\']'
+        r'|@import\s+["\'][^"\']*(?:tailwind|bootstrap|bulma|materialize|foundation)[^"\']*["\']',
         html, re.IGNORECASE,
     ))
 
@@ -452,19 +453,27 @@ def score_project_quality(
                     quality_errors.append(
                         f"Prompt mentions '{keyword}' but {page_file} was not generated."
                     )
-            # Multi-page: ensure all generated HTML pages link a stylesheet
-            for path, f in files_by_path.items():
-                if path.endswith(".html"):
-                    content = f.get("content", "")
-                    if content.strip() and not re.search(
-                        r'<link[^>]+rel=["\']stylesheet["\']|tailwind|bootstrap',
-                        content, re.IGNORECASE,
-                    ):
-                        design_score -= 8
-                        design_errors.append(
-                            f"{path} does not link a stylesheet. "
-                            "Add <link rel=\"stylesheet\" href=\"styles.css\"> in <head>."
-                        )
+            # Multi-page: ensure all generated HTML pages link a stylesheet.
+            # Cap total penalty at 16 points to avoid punishing large sites excessively.
+            pages_missing_css = [
+                path for path, f in files_by_path.items()
+                if path.endswith(".html")
+                and f.get("content", "").strip()
+                and not re.search(
+                    r'<link[^>]+rel=["\']stylesheet["\']'
+                    r'|<link[^>]+href=["\'][^"\']*\.css[^"\']*["\']'
+                    r'|tailwind|bootstrap',
+                    f.get("content", ""), re.IGNORECASE,
+                )
+            ]
+            if pages_missing_css:
+                penalty = min(16, len(pages_missing_css) * 8)
+                design_score -= penalty
+                design_errors.append(
+                    f"{len(pages_missing_css)} HTML page(s) do not link a stylesheet "
+                    f"({', '.join(pages_missing_css[:3])}{'...' if len(pages_missing_css) > 3 else ''}). "
+                    "Add <link rel=\"stylesheet\" href=\"styles.css\"> in <head> of each page."
+                )
 
     elif project_type == "pwa":
         quality_score, quality_errors = _score_pwa(files_by_path)
