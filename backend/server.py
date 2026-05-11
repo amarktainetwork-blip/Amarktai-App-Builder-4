@@ -26,6 +26,9 @@ from agents.preview import render_preview
 from agents.stack_engine import decide_stack
 from agents.build_contract import infer_build_mode, infer_project_type
 from agents.prompts import ASSISTANT_PROMPT
+from agents.clarification import check_clarification_needed, apply_clarification_answers
+from agents.pixabay import search_images, search_videos, build_media_manifest
+from agents.design_engine import get_available_styles
 from auth import (
     decode_token,
     hash_password,
@@ -74,7 +77,7 @@ client = AsyncIOMotorClient(os.environ["MONGO_URL"])
 db = client[os.environ["DB_NAME"]]
 PIPELINE_SEM = asyncio.Semaphore(2)
 LOGIN_ATTEMPTS: dict[str, deque[datetime]] = defaultdict(deque)
-SETTINGS_KEYS = ["GENX_API_KEY", "GITHUB_PAT", "BRAVE_SEARCH_API_KEY"]
+SETTINGS_KEYS = ["GENX_API_KEY", "GITHUB_PAT", "BRAVE_SEARCH_API_KEY", "PIXABAY_API_KEY"]
 
 
 @asynccontextmanager
@@ -237,6 +240,7 @@ class SettingsUpdate(BaseModel):
     GENX_API_KEY: Optional[str] = None
     GITHUB_PAT: Optional[str] = None
     BRAVE_SEARCH_API_KEY: Optional[str] = None
+    PIXABAY_API_KEY: Optional[str] = None
 
 
 class RetryBody(BaseModel):
@@ -792,6 +796,125 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
         "models_used": [],
         "notes": "SVG/gradient placeholders used. No external media dependencies.",
     }
+
+
+# ── Clarification endpoint ────────────────────────────────────────────────────
+
+class ClarificationRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=12000)
+    mode: Optional[str] = None
+
+
+class ClarificationAnswers(BaseModel):
+    original_prompt: str = Field(min_length=1, max_length=12000)
+    answers: dict[str, str]
+
+
+@api.post("/clarify")
+async def check_clarification(body: ClarificationRequest) -> dict:
+    """Check if a prompt needs clarification before building.
+
+    Returns focused questions if the prompt is too vague.
+    If the prompt is specific enough, returns needs_clarification=False
+    so the frontend can proceed directly to building.
+    """
+    result = check_clarification_needed(body.prompt, body.mode)
+    return result
+
+
+@api.post("/clarify/apply")
+async def apply_clarification(body: ClarificationAnswers) -> dict:
+    """Merge clarification answers with the original prompt.
+
+    Returns an enriched prompt and parameter overrides suitable for
+    passing to POST /api/projects.
+    """
+    enriched_prompt, params = apply_clarification_answers(body.original_prompt, body.answers)
+    return {"enriched_prompt": enriched_prompt, "params": params}
+
+
+# ── Pixabay media endpoints ───────────────────────────────────────────────────
+
+@api.get("/media/images")
+async def pixabay_images(
+    query: str,
+    per_page: int = 10,
+    image_type: str = "photo",
+    orientation: str = "horizontal",
+) -> dict:
+    """Search Pixabay for images (backend-only, API key never exposed to frontend).
+
+    Returns images suitable for use in generated projects.
+    Requires PIXABAY_API_KEY to be configured in settings or environment.
+    """
+    api_key = await _runtime_secret("PIXABAY_API_KEY") or os.environ.get("PIXABAY_API_KEY", "")
+    if not api_key:
+        raise HTTPException(
+            503,
+            "Pixabay image search is unavailable. Configure PIXABAY_API_KEY in Settings to enable stock images.",
+        )
+    if not query.strip():
+        raise HTTPException(400, "query parameter is required")
+    per_page = max(3, min(per_page, 50))
+    results = await search_images(
+        query=query.strip(),
+        api_key=api_key,
+        per_page=per_page,
+        image_type=image_type,
+        orientation=orientation,
+    )
+    return {
+        "query": query,
+        "count": len(results),
+        "images": results,
+        "source": "pixabay",
+        "license": "Pixabay License",
+        "license_url": "https://pixabay.com/service/license-summary/",
+        "attribution_required": True,
+    }
+
+
+@api.get("/media/videos")
+async def pixabay_videos(
+    query: str,
+    per_page: int = 5,
+    video_type: str = "all",
+) -> dict:
+    """Search Pixabay for videos (backend-only, API key never exposed to frontend).
+
+    Returns videos suitable for use in generated projects.
+    Requires PIXABAY_API_KEY to be configured in settings or environment.
+    """
+    api_key = await _runtime_secret("PIXABAY_API_KEY") or os.environ.get("PIXABAY_API_KEY", "")
+    if not api_key:
+        raise HTTPException(
+            503,
+            "Pixabay video search is unavailable. Configure PIXABAY_API_KEY in Settings to enable stock videos.",
+        )
+    if not query.strip():
+        raise HTTPException(400, "query parameter is required")
+    per_page = max(3, min(per_page, 20))
+    results = await search_videos(
+        query=query.strip(),
+        api_key=api_key,
+        per_page=per_page,
+        video_type=video_type,
+    )
+    return {
+        "query": query,
+        "count": len(results),
+        "videos": results,
+        "source": "pixabay",
+        "license": "Pixabay License",
+        "license_url": "https://pixabay.com/service/license-summary/",
+        "attribution_required": True,
+    }
+
+
+@api.get("/design/styles")
+async def design_styles() -> dict:
+    """Return the available design direction styles for the frontend style picker."""
+    return {"styles": get_available_styles()}
 
 
 @secured.post("/projects", response_model=Project)
