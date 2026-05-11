@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, Sparkles, GitPullRequest, Network, Boxes, Zap, Mail } from "lucide-react";
+import { ArrowRight, Sparkles, GitPullRequest, Network, Boxes, Zap, Mail, Cpu } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
 export default function LandingPage() {
@@ -61,16 +61,29 @@ function Hero() {
             <span className="pulse-dot bg-amk-accent" /> Amarktai App Builder · by Amarktai Network
           </div>
           <h1 className="font-display font-semibold text-5xl md:text-7xl leading-[0.95] tracking-tight mb-6">
-            Describe the product<br />
-            <span className="text-amk-fg2">you want. Amarktai</span><br />
-            <span className="text-amk-accent">plans, builds &amp; ships it.<span className="blink" /></span>
+            Build websites, apps,<br />
+            <span className="text-amk-fg2">and GitHub-ready</span><br />
+            <span className="text-amk-accent">projects from one prompt.<span className="blink" /></span>
           </h1>
-          <p className="text-base md:text-lg text-amk-fg2 max-w-xl leading-relaxed mb-8">
-            Amarktai App Builder is a prompt-first AI builder powered by Amarktai Network.
-            Describe a landing page, multi-page website, PWA, dashboard, API, or SaaS starter — and
-            four specialist agents plan, code, review, and validate it before you finalize to GitHub.
+          <p className="text-base md:text-lg text-amk-fg2 max-w-xl leading-relaxed mb-6">
+            Amarktai App Builder plans, designs, codes, validates, previews, and prepares your project
+            for GitHub using AmarktAI model routing behind the scenes.
             60+ AI models available through configured providers.
           </p>
+          {/* Capability chips */}
+          <div className="flex flex-wrap gap-1.5 mb-8">
+            {[
+              "Landing pages", "Multi-page sites", "PWAs", "SaaS starters",
+              "Dashboards", "API services", "Repo upgrades", "Media + logos", "GitHub PRs",
+            ].map((chip) => (
+              <span
+                key={chip}
+                className="font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 border border-amk-line bg-amk-panel/60 text-amk-fg2"
+              >
+                {chip}
+              </span>
+            ))}
+          </div>
           <div className="flex flex-wrap items-center gap-3" data-testid="hero-ctas">
             <Link to="/login" data-testid="hero-cta-primary" className="inline-flex items-center gap-2 h-12 px-6 bg-white text-black hover:bg-zinc-200 font-mono text-xs uppercase tracking-wider">
               Enter the workspace <ArrowRight className="w-4 h-4" strokeWidth={2} />
@@ -79,6 +92,10 @@ function Hero() {
               See how it works
             </a>
           </div>
+          <ul className="mt-5 space-y-1 font-mono text-[11px] text-amk-fg3">
+            <li>· Preview before deploy. Request changes before finalizing.</li>
+            <li>· Quality, design, security, and coverage checks keep incomplete builds from shipping.</li>
+          </ul>
           <div className="mt-10 grid grid-cols-3 gap-6 max-w-md">
             {[
               { v: "60+", k: "models · configured providers" },

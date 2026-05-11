@@ -155,16 +155,22 @@ export default function SettingsDialog({ open, onOpenChange }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-testid="settings-dialog" className="bg-amk-panel border border-amk-line text-amk-fg max-w-2xl p-0 rounded-md">
-        <DialogHeader className="px-5 pt-5 pb-3 border-b border-amk-line">
+      <DialogContent
+        data-testid="settings-dialog"
+        className="bg-amk-panel border border-amk-line text-amk-fg max-w-2xl w-full p-0 rounded-md flex flex-col"
+        style={{ maxHeight: "90vh" }}
+      >
+        {/* Sticky header */}
+        <DialogHeader className="px-5 pt-5 pb-3 border-b border-amk-line shrink-0">
           <DialogTitle className="font-mono text-sm tracking-tight uppercase">// Settings / Integrations</DialogTitle>
           <DialogDescription className="font-mono text-[11px] text-amk-fg3">
             Secrets are encrypted in MongoDB. Only GENX_API_KEY is required — all other keys are optional.
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="ai" className="flex-1">
-          <TabsList className="bg-transparent p-0 gap-0 border-b border-amk-line w-full justify-start rounded-none h-10">
+        <Tabs defaultValue="ai" className="flex flex-col flex-1 min-h-0">
+          {/* Sticky tab bar */}
+          <TabsList className="bg-transparent p-0 gap-0 border-b border-amk-line w-full justify-start rounded-none h-10 shrink-0 flex-wrap">
             {[
               { v: "ai",     label: "AI Providers" },
               { v: "media",  label: "Media" },
@@ -182,8 +188,9 @@ export default function SettingsDialog({ open, onOpenChange }) {
             ))}
           </TabsList>
 
+          {/* Scrollable tab content */}
           {/* AI Providers tab */}
-          <TabsContent value="ai" className="m-0 p-5 space-y-5 overflow-y-auto max-h-[60vh]">
+          <TabsContent value="ai" className="m-0 p-5 space-y-5 overflow-y-auto flex-1 min-h-0">
             {/* GenX (required) */}
             <SettingRow
               fieldKey="GENX_API_KEY"
@@ -222,7 +229,7 @@ export default function SettingsDialog({ open, onOpenChange }) {
           </TabsContent>
 
           {/* Media tab */}
-          <TabsContent value="media" className="m-0 p-5 space-y-4 overflow-y-auto max-h-[60vh]">
+          <TabsContent value="media" className="m-0 p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
             <SettingRow
               fieldKey="PIXABAY_API_KEY"
               label="Pixabay API Key"
@@ -234,10 +241,14 @@ export default function SettingsDialog({ open, onOpenChange }) {
               onClear={clear}
               inputType="password"
             />
+            <p className="font-mono text-[10px] text-amk-fg3 leading-relaxed">
+              Pixabay provides royalty-free images and videos. Attribution is shown on all Pixabay assets.
+              Get a free key at <span className="text-amk-fg">pixabay.com/api/docs</span>.
+            </p>
           </TabsContent>
 
           {/* GitHub tab */}
-          <TabsContent value="github" className="m-0 p-5 space-y-4 overflow-y-auto max-h-[60vh]">
+          <TabsContent value="github" className="m-0 p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
             <SettingRow
               fieldKey="GITHUB_PAT"
               label="GitHub Personal Access Token"
@@ -253,7 +264,7 @@ export default function SettingsDialog({ open, onOpenChange }) {
           </TabsContent>
 
           {/* Search tab */}
-          <TabsContent value="search" className="m-0 p-5 space-y-4 overflow-y-auto max-h-[60vh]">
+          <TabsContent value="search" className="m-0 p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
             <SettingRow
               fieldKey="BRAVE_SEARCH_API_KEY"
               label="Brave Search API Key"
@@ -271,7 +282,7 @@ export default function SettingsDialog({ open, onOpenChange }) {
           </TabsContent>
 
           {/* System tab */}
-          <TabsContent value="system" className="m-0 p-5 space-y-4 overflow-y-auto max-h-[60vh]">
+          <TabsContent value="system" className="m-0 p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
             <GithubStatusBlock github={github} onRefresh={refresh} showBadge />
             <p className="font-mono text-[10px] text-amk-fg3">
               Secrets are encrypted in MongoDB. Use the refresh button to re-check live provider status.
@@ -279,7 +290,8 @@ export default function SettingsDialog({ open, onOpenChange }) {
           </TabsContent>
         </Tabs>
 
-        <DialogFooter className="px-5 pb-5 pt-2 border-t border-amk-line">
+        {/* Sticky footer */}
+        <DialogFooter className="px-5 pb-5 pt-3 border-t border-amk-line shrink-0">
           <Button data-testid="settings-cancel-btn" variant="ghost" onClick={() => onOpenChange(false)}
             className="font-mono text-xs h-9 hover:bg-amk-surface">Cancel</Button>
           <Button data-testid="settings-save-btn" onClick={save} disabled={saving}

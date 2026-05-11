@@ -270,6 +270,7 @@ export default function ProjectListPage() {
                     </optgroup>
                   </select>
                   <BuildModeHint mode={mode} />
+                  <MultiPageWarning prompt={prompt} mode={mode} />
 
                   {/* Quality tier selector */}
                   <FieldLabel>Quality tier</FieldLabel>
@@ -505,25 +506,25 @@ const MEDIA_OPTIONS = [
   {
     id: "auto",
     label: "Auto",
-    desc: "Agents pick the best option",
+    desc: "Use the best available source. AI if available, otherwise Pixabay or SVG.",
     icon: <Cpu className="w-3.5 h-3.5" strokeWidth={1.5} />,
   },
   {
     id: "AI-generated images (GenX)",
     label: "AI Images",
-    desc: "GenX image models",
+    desc: "Use configured GenX/Qwen image models when available.",
     icon: <Sparkles className="w-3.5 h-3.5" strokeWidth={1.5} />,
   },
   {
     id: "Stock images from Pixabay",
     label: "Pixabay",
-    desc: "Free stock photos/video",
+    desc: "Use Pixabay stock images/videos. Requires Pixabay API key.",
     icon: <Image className="w-3.5 h-3.5" strokeWidth={1.5} />,
   },
   {
     id: "SVG / CSS visuals only (no external images)",
     label: "CSS/SVG only",
-    desc: "No external images",
+    desc: "No external images. Generate premium CSS/SVG visuals.",
     icon: <Palette className="w-3.5 h-3.5" strokeWidth={1.5} />,
   },
 ];
@@ -566,5 +567,22 @@ function MediaChoiceSelect({ value, onChange }) {
         </p>
       )}
     </div>
+  );
+}
+
+const MULTI_PAGE_PATTERN = /\b(?:\d\s*pages?|multi[-\s]?page|complete\s+website|full\s+website)\b/i;
+
+function MultiPageWarning({ prompt, mode }) {
+  const needsWarning = MULTI_PAGE_PATTERN.test(prompt) && mode !== "website";
+  if (!needsWarning) return null;
+  return (
+    <p
+      data-testid="multi-page-warning"
+      className="font-mono text-[10px] mt-1.5 leading-relaxed"
+      style={{ color: "#FFC107" }}
+    >
+      ⚠ Your prompt mentions multiple pages. Consider switching build mode to{" "}
+      <strong>Website</strong> for a complete multi-page site with separate pages.
+    </p>
   );
 }
