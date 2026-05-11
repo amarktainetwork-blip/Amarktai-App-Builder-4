@@ -103,9 +103,13 @@ export default function WorkspacePage() {
       if (evt.data) {
         setLastValidation((prev) => ({ ...prev, ...evt.data }));
       }
-    } else if (evt.type === "quality_validation_passed" || evt.type === "quality_validation_failed") {
-      if (evt.data) setLastValidation((prev) => ({ ...prev, ...evt.data }));
-    } else if (evt.type === "security_validation_passed" || evt.type === "security_validation_failed") {
+    } else if (
+      evt.type === "quality_validation_passed" ||
+      evt.type === "quality_validation_failed" ||
+      evt.type === "security_validation_passed" ||
+      evt.type === "security_validation_failed"
+    ) {
+      // All score events merge into the same validation state
       if (evt.data) setLastValidation((prev) => ({ ...prev, ...evt.data }));
     } else if (evt.type === "design_direction") {
       if (evt.data) setLastValidation((prev) => ({ ...prev, designDirection: evt.data }));

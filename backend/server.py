@@ -1389,7 +1389,7 @@ async def finalize(project_id: str, body: FinalizeOptions = FinalizeOptions(), c
     files = await ProjectFS(db, project_id).list_full()
     payload_files = [{"path": f["path"], "content": f["content"]} for f in files if f["path"] != ".env" and not f["path"].endswith("/.env")]
     # Phase 9: Use override name if provided, otherwise derive from project name
-    if body and body.repo_name_override:
+    if body.repo_name_override:
         repo_name = re.sub(r"[^a-z0-9-]+", "-", body.repo_name_override.lower()).strip("-")[:60] or "amarktai-app"
     else:
         repo_name = re.sub(r"[^a-z0-9-]+", "-", proj["name"].lower()).strip("-")[:60] or "amarktai-app"

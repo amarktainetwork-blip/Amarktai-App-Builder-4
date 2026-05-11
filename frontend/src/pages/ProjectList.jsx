@@ -95,8 +95,9 @@ export default function ProjectListPage() {
         setPendingCreate({ upgradeAcknowledged: false });
         return;
       }
-    } catch {
-      // If clarification check fails, proceed without it
+    } catch (err) {
+      // If clarification check fails (e.g. backend down), proceed without it
+      console.debug("Clarification check failed, proceeding:", err?.message);
     }
     await doCreate(prompt.trim(), false);
   };
@@ -106,7 +107,8 @@ export default function ProjectListPage() {
     try {
       const res = await Clarify.apply(prompt.trim(), answers);
       await doCreate(res.enriched_prompt, pendingCreate?.upgradeAcknowledged || false, res.params || {});
-    } catch {
+    } catch (err) {
+      console.debug("Clarification apply failed, using original prompt:", err?.message);
       await doCreate(prompt.trim(), pendingCreate?.upgradeAcknowledged || false);
     }
     setPendingCreate(null);
