@@ -38,6 +38,8 @@ from .prompts import (
     SCOUT_PROMPT,
 )
 from .design_engine import create_design_direction
+from .repo_analyzer import analyze_repo_profile, detect_update_intent
+from .coverage_score import compute_coverage_score
 
 # Per-agent timeout in seconds
 AGENT_TIMEOUTS = {
@@ -937,6 +939,21 @@ class Orchestrator:
                 return
 
         preview_strategy = sd.get("preview_strategy", "iframe")
+
+        # ── Phase 5: Coverage score for standard builds ────────────────────────
+        project_after = await self._load_project()
+        coverage = compute_coverage_score(
+            prompt=user_prompt,
+            files=final_files,
+            mode=mode,
+            intent="small_patch",  # standard builds are not repo-fix
+        )
+        await self.db.projects.update_one(
+            {"id": self.project_id},
+            {"$set": {"coverage_score": coverage, "updated_at": _now()}},
+        )
+        await self.emit({"type": "coverage_score", "data": coverage})
+
         await self._set_status("ready", {
             "completed_at": _now(),
             "preview_strategy": preview_strategy,
@@ -997,7 +1014,13 @@ class Orchestrator:
         await self.emit({"type": "build_complete", "data": {"preview_strategy": "brief_only"}})
 
     async def _run_repo_fix(self, user_prompt: str, stack_decision: dict | None) -> None:
-        """Repo fix mode: targeted edits to an imported repo."""
+        """Repo fix mode: targeted edits to an imported repo.
+
+        Detects update intent (Phase 4) and adjusts behaviour:
+        - small_patch / bug_fix / feature_add: targeted edits only
+        - full_app_completion / full_rebuild_inside_repo: full pipeline pass
+        - production_hardening / redesign: focused multi-file pass
+        """
         await self._check_cancel()
         current_files = await self.fs.list_full()
         app_files = [f for f in current_files if f["path"] not in _META_FILES]
@@ -1006,21 +1029,99 @@ class Orchestrator:
             await self._fail_project("scout", err)
             await self._record_message("system", None, err, meta={"error": err})
             return
-        await self._record_event("coder", "started", "Coder engaged in repo-fix mode.")
+
+        # ── Phase 4: Detect update intent ─────────────────────────────────────
+        intent = detect_update_intent(user_prompt, app_files)
+        await self.emit({"type": "repo_import_started", "data": {"intent": intent}})
+        await self._record_event(
+            "coder", "started",
+            f"Repo-fix mode — detected intent: {intent}.",
+            meta={"intent": intent, "file_count": len(app_files)},
+        )
+
+        # ── Analyse repo profile ───────────────────────────────────────────────
+        project = await self._load_project()
+        repo_full_name = (project.get("github") or {}).get("html_url", "")
+        repo_profile = analyze_repo_profile(app_files, repo_full_name)
+        await self.db.projects.update_one(
+            {"id": self.project_id},
+            {"$set": {"repo_profile": repo_profile, "update_intent": intent, "updated_at": _now()}},
+        )
+        await self.emit({"type": "repo_analysis_complete", "data": {
+            "detectedType": repo_profile["detectedType"],
+            "frameworks": repo_profile["frameworks"],
+            "languages": repo_profile["languages"],
+            "intent": intent,
+            "canPreview": repo_profile["canPreview"],
+            "previewBlockers": repo_profile["previewBlockers"],
+        }})
+
+        # ── For full app completion: use the full build pipeline ───────────────
+        if intent in ("full_app_completion", "full_rebuild_inside_repo", "repo_migration"):
+            await self._record_message(
+                "system", None,
+                f"**Intent detected:** `{intent}`\n\n"
+                f"Initiating full implementation pass. "
+                f"Detected stack: {', '.join(repo_profile['frameworks']) or 'unknown'}\n\n"
+                f"Repo profile: {len(app_files)} files · "
+                f"Languages: {', '.join(repo_profile['languages'][:3])}",
+                meta={"intent": intent, "repo_profile": repo_profile},
+            )
+            # Build an enriched prompt that includes the repo context
+            enriched_prompt = (
+                f"{user_prompt}\n\n"
+                f"[REPO CONTEXT]\n"
+                f"Detected type: {repo_profile['detectedType']}\n"
+                f"Frameworks: {', '.join(repo_profile['frameworks'])}\n"
+                f"Languages: {', '.join(repo_profile['languages'])}\n"
+                f"Databases: {', '.join(repo_profile['databases'])}\n"
+                f"Auth: {', '.join(repo_profile['authDetected'])}\n"
+                f"Frontend path: {repo_profile['frontendPath']}\n"
+                f"Backend path: {repo_profile['backendPath']}\n"
+                f"Env required: {', '.join(repo_profile['envRequired'][:8])}\n"
+                f"Existing routes: {', '.join(repo_profile['routeMap'][:10])}\n"
+            )
+            # Determine appropriate build mode from repo profile
+            repo_mode = {
+                "static": "landing_page",
+                "vite_react": "web_app",
+                "next": "web_app",
+                "fullstack": "full_stack",
+                "api_service": "api_service",
+            }.get(repo_profile["detectedType"], "web_app")
+            await self._run_build_pipeline(enriched_prompt, repo_mode, stack_decision)
+            return
+
+        # ── Standard targeted fix pass ─────────────────────────────────────────
         fix_input = json.dumps({
             "request": user_prompt,
+            "intent": intent,
+            "repo_profile": {
+                "detectedType": repo_profile["detectedType"],
+                "frameworks": repo_profile["frameworks"],
+                "databases": repo_profile["databases"],
+                "envRequired": repo_profile["envRequired"],
+            },
             "files": [{"path": f["path"], "content": f["content"]} for f in app_files],
         }, indent=2)
         fix = await self._run_agent_blocks("repo_fix", REPO_FIX_PROMPT, fix_input)
         await self._check_cancel()
         fix_data = fix["data"]
+        changed: list[str] = []
+        added: list[str] = []
+        existing_paths = {f["path"] for f in app_files}
         for f in fix_data.get("files", []):
             await self.fs.write(f["path"], f["content"], f.get("language", "text"))
             await self.emit({"type": "file_written", "data": {"path": f["path"]}})
+            if f["path"] in existing_paths:
+                changed.append(f["path"])
+            else:
+                added.append(f["path"])
         await self._record_message(
             "agent", "coder",
             fix_data.get("summary", "Repo updated."),
             meta={"model": fix["model_label"],
+                  "intent": intent,
                   "changes": fix_data.get("changes_made", []),
                   "files": [f["path"] for f in fix_data.get("files", [])]},
         )
@@ -1031,11 +1132,32 @@ class Orchestrator:
             await self._fail_project("validator", err)
             await self._record_message("system", None, err, meta={"error": err})
             return
+
+        # ── Phase 5: Coverage score ────────────────────────────────────────────
+        final_files = await self.fs.list_full()
+        coverage = compute_coverage_score(
+            prompt=user_prompt,
+            files=final_files,
+            mode=project.get("mode", "repo_fix"),
+            intent=intent,
+            changed_files=changed,
+            added_files=added,
+        )
+        await self.db.projects.update_one(
+            {"id": self.project_id},
+            {"$set": {"coverage_score": coverage, "updated_at": _now()}},
+        )
+        await self.emit({"type": "coverage_score", "data": coverage})
+
         await self._set_status("ready", {
             "completed_at": _now(),
-            "preview_strategy": "repo_structure",
+            "preview_strategy": repo_profile.get("previewStrategy") or "repo_structure",
         })
-        await self.emit({"type": "build_complete", "data": {"preview_strategy": "repo_structure"}})
+        await self.emit({"type": "build_complete", "data": {
+            "preview_strategy": repo_profile.get("previewStrategy") or "repo_structure",
+            "intent": intent,
+            "coverageScore": coverage["coverageScore"],
+        }})
 
 
     # ---------- iteration ----------
