@@ -510,7 +510,13 @@ def detect_update_intent(request: str, files: list[dict]) -> str:
         r"\bbuild.*complete\b|\bcomplete.*app\b|\bfinish.*app\b|\bimplement.*everything\b"
         r"|\bmake.*production.?ready\b|\bfull.?stack\b.*\bcomplete\b"
         r"|\badd.*all.*(?:pages?|routes?|features?)\b"
-        r"|\bdescribed in.*repo\b|\bbuild.*what.*described\b",
+        r"|\bdescribed in.*repo\b|\bbuild.*what.*described\b"
+        # Additional patterns: "complete this website", "go live ready", etc.
+        r"|\bcomplete.*(?:this|the)\s+(?:website|site|repo|app)\b"
+        r"|\bgo.?live.?ready\b|\bget.*(?:it|this).*(?:go.?live|live.?ready)\b"
+        r"|\bfinish.*(?:this|the).*(?:repo|website|app|site)\b"
+        r"|\bbuild.*(?:the\s+)?full.*app\b|\bcomplete.*(?:the\s+)?(?:build|project)\b"
+        r"|\bget.*(?:it|this).*(?:production|prod).?ready\b",
         req_lower,
     ):
         return "full_app_completion"

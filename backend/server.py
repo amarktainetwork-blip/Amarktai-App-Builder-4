@@ -240,6 +240,12 @@ class AssistantMessage(BaseModel):
 MessageCreate = AssistantMessage  # backward compat alias
 
 
+class IterateBody(BaseModel):
+    message: str = Field(min_length=1, max_length=12000)
+    tier: Optional[str] = None
+    mediaSource: Optional[str] = "auto"
+
+
 class SettingsUpdate(BaseModel):
     GENX_API_KEY: Optional[str] = None
     GITHUB_PAT: Optional[str] = None
@@ -1348,6 +1354,46 @@ async def send_message(project_id: str, body: MessageCreate, claims: dict = Depe
     await hub.broadcast(project_id, {"type": "project_status", "data": {"status": "queued"}})
     asyncio.create_task(_launch_pipeline(project_id, body.content, "iterate"))
     return {"ok": True, "queued": True}
+
+
+@secured.post("/projects/{project_id}/iterate")
+async def iterate_project(project_id: str, body: IterateBody, claims: dict = Depends(require_user)) -> dict:
+    """Post-build iteration — request changes to a completed project.
+
+    This is a dedicated iteration endpoint that accepts a structured change request.
+    For imported repos, this routes through the repo-fix pipeline to preserve context.
+
+    Request body:
+        message: the change request (required)
+        tier:    quality tier override (optional: cheap|balanced|premium)
+        mediaSource: media source hint (optional)
+
+    Response:
+        ok: True, queued: True, projectId: str
+    """
+    await _own(project_id, claims)
+    if not await _runtime_secret("GENX_API_KEY"):
+        raise HTTPException(503, "GENX_API_KEY is required for Amarktai Coding Agents.")
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    if proj.get("status") in ("running", "queued"):
+        raise HTTPException(409, "Build already in progress")
+    _meta = {"requirements.md", "tech_stack.json"}
+    existing_files = await ProjectFS(db, project_id).list()
+    app_file_count = sum(1 for f in existing_files if f["path"] not in _meta)
+    if app_file_count == 0:
+        raise HTTPException(
+            409,
+            "No app files found. Build the project first before requesting changes.",
+        )
+    updates: dict = {"status": "queued", "cancel_requested": False, "updated_at": _now()}
+    if body.tier and body.tier in ("cheap", "balanced", "premium"):
+        updates["quality_tier"] = body.tier
+    await db.projects.update_one({"id": project_id}, {"$set": updates})
+    await hub.broadcast(project_id, {"type": "project_status", "data": {"status": "queued"}})
+    asyncio.create_task(_launch_pipeline(project_id, body.message, "iterate"))
+    return {"ok": True, "queued": True, "projectId": project_id}
 
 
 @secured.post("/assistant/message")

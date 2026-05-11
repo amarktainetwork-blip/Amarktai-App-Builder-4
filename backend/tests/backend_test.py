@@ -2640,3 +2640,255 @@ def test_preview_fallback_next_actions_api_only():
     assert any("api" in a.lower() or "server" in a.lower() or "dependency" in a.lower() for a in actions), \
         f"Expected API/server action, got: {actions}"
     assert any("docker" in a.lower() for a in actions), f"Expected docker action, got: {actions}"
+
+
+# ---------- detect_update_intent ----------
+
+from agents.repo_analyzer import detect_update_intent
+
+
+def test_detect_update_intent_complete_website_is_full_app_completion():
+    """'complete this website and get it go live ready' must classify as full_app_completion."""
+    files = [
+        {"path": "index.html", "content": "<h1>Hello</h1>"},
+        {"path": "styles.css", "content": "body {}"},
+        {"path": "README.md", "content": "# Site"},
+    ]
+    intent = detect_update_intent("complete this website and get it go live ready", files)
+    assert intent == "full_app_completion", f"Expected full_app_completion, got {intent}"
+
+
+def test_detect_update_intent_go_live_ready():
+    """'go live ready' must classify as full_app_completion."""
+    files = [{"path": "index.html", "content": "<h1>Hello</h1>"}]
+    intent = detect_update_intent("make it go live ready", files)
+    assert intent == "full_app_completion", f"Expected full_app_completion, got {intent}"
+
+
+def test_detect_update_intent_finish_this_repo():
+    """'finish this repo' must classify as full_app_completion or production_hardening."""
+    files = [{"path": "app.py", "content": "print('hello')"}]
+    intent = detect_update_intent("finish this repo and make it production ready", files)
+    assert intent in ("full_app_completion", "production_hardening"), f"Got {intent}"
+
+
+def test_detect_update_intent_small_patch():
+    """Small cosmetic request must NOT classify as full_app_completion."""
+    files = [{"path": "index.html", "content": "<h1>Hello</h1>"}] * 10
+    intent = detect_update_intent("change the hero text to say Welcome", files)
+    assert intent not in ("full_app_completion", "full_rebuild_inside_repo"), f"Got {intent}"
+
+
+# ---------- coverage_score CSS checks ----------
+
+from agents.coverage_score import compute_coverage_score, _css_linked_in_pages, _has_css_file
+
+
+def test_coverage_missing_css_lowers_score_for_website():
+    """Multi-page website with no CSS must have coverageScore < 80."""
+    files = [
+        {"path": "index.html", "content": "<html><h1>Home</h1></html>"},
+        {"path": "about.html", "content": "<html><h1>About</h1></html>"},
+        {"path": "contact.html", "content": "<html><h1>Contact</h1></html>"},
+        {"path": "README.md", "content": "# Site"},
+        {"path": "amarktai.project.json", "content": "{}"},
+    ]
+    result = compute_coverage_score(
+        prompt="Build a 3-page website",
+        files=files,
+        mode="website",
+        intent="small_patch",
+    )
+    assert result["coverageScore"] < 80, (
+        f"Expected coverageScore < 80 for site missing CSS, got {result['coverageScore']}"
+    )
+    assert any("stylesheet" in m.lower() or "css" in m.lower() for m in result["missingRequirements"]), (
+        f"Expected CSS requirement in missing, got {result['missingRequirements']}"
+    )
+
+
+def test_coverage_with_css_scores_higher():
+    """Website with CSS properly linked must score higher than without."""
+    files_with_css = [
+        {"path": "index.html", "content": '<html><head><link rel="stylesheet" href="styles.css"></head><h1>Home</h1></html>'},
+        {"path": "about.html", "content": '<html><head><link rel="stylesheet" href="styles.css"></head><h1>About</h1></html>'},
+        {"path": "styles.css", "content": "body { margin: 0; } @media (max-width: 768px) { body { font-size: 14px; } }"},
+        {"path": "README.md", "content": "# Site"},
+        {"path": "amarktai.project.json", "content": "{}"},
+    ]
+    files_without_css = [
+        {"path": "index.html", "content": "<html><h1>Home</h1></html>"},
+        {"path": "about.html", "content": "<html><h1>About</h1></html>"},
+        {"path": "README.md", "content": "# Site"},
+        {"path": "amarktai.project.json", "content": "{}"},
+    ]
+    score_with = compute_coverage_score(
+        prompt="Build a website", files=files_with_css, mode="website", intent="small_patch"
+    )["coverageScore"]
+    score_without = compute_coverage_score(
+        prompt="Build a website", files=files_without_css, mode="website", intent="small_patch"
+    )["coverageScore"]
+    assert score_with > score_without, f"Score with CSS ({score_with}) should be > without ({score_without})"
+
+
+def test_css_linked_in_pages_detects_stylesheet_link():
+    """_css_linked_in_pages must count pages with <link rel=stylesheet>."""
+    files = [
+        {"path": "index.html", "content": '<html><link rel="stylesheet" href="styles.css"></html>'},
+        {"path": "about.html", "content": "<html><h1>No CSS</h1></html>"},
+    ]
+    total, linked = _css_linked_in_pages(files)
+    assert total == 2
+    assert linked == 1
+
+
+def test_css_linked_in_pages_detects_style_block():
+    """_css_linked_in_pages must count pages with inline <style> blocks."""
+    files = [
+        {"path": "index.html", "content": "<html><style>body {}</style></html>"},
+    ]
+    total, linked = _css_linked_in_pages(files)
+    assert total == 1
+    assert linked == 1
+
+
+# ---------- quality_validator multi-page CSS ----------
+
+from agents.quality_validator import score_project_quality
+
+
+def test_multi_page_no_css_fails_design():
+    """Five-page site with no CSS must have designScore well below 100."""
+    html_content = (
+        "<html><h1>Home</h1>"
+        "<section>A</section><section>B</section><section>C</section>"
+        "<section>D</section><section>E</section><section>F</section>"
+        "<p>Some content here about the homepage of the site and what it does.</p>"
+        "<a class='btn' href='#'>Get started</a>"
+        "<section id='features'>Features listed here</section>"
+        "</html>"
+    )
+    files = [
+        {"path": "index.html", "content": html_content},
+        {"path": "about.html", "content": "<html><h1>About</h1></html>"},
+        {"path": "services.html", "content": "<html><h1>Services</h1></html>"},
+        {"path": "pricing.html", "content": "<html><h1>Pricing</h1></html>"},
+        {"path": "contact.html", "content": "<html><h1>Contact</h1></html>"},
+        {"path": "README.md", "content": "# Site"},
+        {"path": "amarktai.project.json", "content": "{}"},
+    ]
+    result = score_project_quality(
+        files=files,
+        project_type="multi-page-site",
+        build_mode="multi-page-website",
+        prompt="5-page consulting website",
+        auth_required=False,
+    )
+    assert result["designScore"] < 100, (
+        f"Expected designScore < 100 for multi-page site with no CSS, got {result['designScore']}"
+    )
+    assert any(
+        "stylesheet" in e.lower() or "css" in e.lower() or "page" in e.lower()
+        for e in result["designErrors"]
+    ), f"Expected CSS/page error in designErrors, got {result['designErrors']}"
+
+
+# ---------- NoneType safety in _run_repo_fix ----------
+
+@pytest.mark.asyncio
+async def test_repo_fix_none_files_does_not_crash():
+    """_run_repo_fix with no files must fail gracefully, not crash with NoneType."""
+    db, proj, files, events, messages = _make_db()
+
+    provider = MagicMock()
+    provider.complete = AsyncMock()  # Should not be called
+
+    events_received = []
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    orch.fs.list_full = AsyncMock(return_value=[])  # No files
+    orch.fs.write = AsyncMock()
+    orch.fs.list = AsyncMock(return_value=[])
+
+    # Should not raise AttributeError or NoneType
+    await orch._run_repo_fix("complete this website and get it go live ready", None)
+
+    # Should have failed gracefully
+    assert proj.get("status") == "failed", f"Expected failed, got {proj.get('status')}"
+
+
+@pytest.mark.asyncio
+async def test_run_iteration_routes_repo_fix_to_repo_fix_pipeline():
+    """run_iteration on a repo_fix project must route to _run_repo_fix."""
+    db, proj, files, events, messages = _make_db()
+    proj["mode"] = "repo_fix"
+
+    repo_fix_called = []
+    provider = MagicMock()
+    provider.complete = AsyncMock()  # Should not be called directly
+
+    events_received = []
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    orch.fs.list_full = AsyncMock(return_value=[
+        {"path": "index.html", "content": "<h1>Hello</h1>", "language": "html"},
+        {"path": "styles.css", "content": "body {}", "language": "css"},
+        {"path": "README.md", "content": "# Site", "language": "markdown"},
+    ])
+    orch.fs.write = AsyncMock()
+    orch.fs.list = AsyncMock(return_value=[
+        {"path": "index.html"},
+        {"path": "styles.css"},
+        {"path": "README.md"},
+    ])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    # Track calls to _run_repo_fix
+    async def tracked_run_repo_fix(prompt, sd):
+        repo_fix_called.append(prompt)
+        await orch._set_status("ready")
+
+    orch._run_repo_fix = tracked_run_repo_fix
+
+    await orch.run_iteration("complete this website and get it go live ready")
+
+    assert repo_fix_called, "Expected _run_repo_fix to be called for repo_fix project"
+    provider.complete.assert_not_called()
+
+
+# ---------- coverage score for repo with few files ----------
+
+def test_coverage_score_handles_minimal_repo():
+    """Coverage score must not crash for a repo with very few files."""
+    files = [
+        {"path": "index.html", "content": "<h1>Hello</h1>"},
+        {"path": "app.js", "content": "console.log('hello')"},
+    ]
+    result = compute_coverage_score(
+        prompt="complete this website",
+        files=files,
+        mode="repo_fix",
+        intent="full_app_completion",
+    )
+    assert isinstance(result["coverageScore"], int)
+    assert 0 <= result["coverageScore"] <= 100
+
+
+def test_coverage_below_80_flags_not_satisfied_for_full_app_completion():
+    """Full app completion with only 2 files must have requestSatisfied=False."""
+    files = [
+        {"path": "index.html", "content": "<h1>Hello</h1>"},
+        {"path": "README.md", "content": "# Site"},
+    ]
+    result = compute_coverage_score(
+        prompt="complete this app",
+        files=files,
+        mode="repo_fix",
+        intent="full_app_completion",
+    )
+    assert result["coverageScore"] < 80, f"Expected <80, got {result['coverageScore']}"
+    assert result["requestSatisfied"] is False
