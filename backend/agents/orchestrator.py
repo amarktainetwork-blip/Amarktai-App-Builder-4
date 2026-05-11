@@ -1234,6 +1234,7 @@ class Orchestrator:
                 "files": [{"path": f["path"], "content": f["content"]} for f in app_files],
             }
             iter_res = await self._run_agent_blocks("iteration", ITERATION_PROMPT, json.dumps(payload, indent=2))
+            # Guard: model may return null/non-dict JSON — treat as empty rather than crash
             data = iter_res["data"] if isinstance(iter_res.get("data"), dict) else {}
             if not data.get("files"):
                 raise ValueError("Iteration returned no editable file changes.")
@@ -1287,7 +1288,7 @@ class Orchestrator:
                 "addedFiles": added,
                 "summary": data.get("summary", "Updated."),
             }})
-            await self.emit({"type": "build_complete", "data": {}})
+            await self.emit({"type": "build_complete", "data": {"changedFiles": changed}})
         except Exception as e:
             err = str(e)
             await self._fail_project("iteration", err)

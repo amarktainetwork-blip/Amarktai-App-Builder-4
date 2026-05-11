@@ -1338,6 +1338,8 @@ async def send_message(project_id: str, body: MessageCreate, claims: dict = Depe
     if not await _runtime_secret("GENX_API_KEY"):
         raise HTTPException(503, "GENX_API_KEY is required for Amarktai Assistant.")
     proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
     if proj.get("status") in ("running", "queued"):
         raise HTTPException(409, "Build already in progress")
     # Iteration guard: block iteration when no app files exist
@@ -1352,7 +1354,14 @@ async def send_message(project_id: str, body: MessageCreate, claims: dict = Depe
         )
     await db.projects.update_one({"id": project_id}, {"$set": {"status": "queued", "updated_at": _now()}})
     await hub.broadcast(project_id, {"type": "project_status", "data": {"status": "queued"}})
-    asyncio.create_task(_launch_pipeline(project_id, body.content, "iterate"))
+    # For imported repo (repo_fix) projects, route through the full build pipeline so that
+    # _run_repo_fix is called — it handles intent detection, completion, and targeted edits.
+    # Regular builds use the lightweight iteration path.
+    project_mode = proj.get("mode", "web_app")
+    if project_mode == "repo_fix":
+        asyncio.create_task(_launch_pipeline(project_id, body.content, "build", build_mode="repo_fix"))
+    else:
+        asyncio.create_task(_launch_pipeline(project_id, body.content, "iterate"))
     return {"ok": True, "queued": True}
 
 

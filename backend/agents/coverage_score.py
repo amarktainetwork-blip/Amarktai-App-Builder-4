@@ -279,6 +279,18 @@ def compute_coverage_score(
             10,
         )
 
+    # ── CSS stylesheet ────────────────────────────────────────────────────
+    # For static/multi-page/landing modes, a stylesheet is mandatory.
+    css_required = mode in ("landing_page", "website", "media_page")
+    if css_required:
+        has_css = any(f["path"].endswith(".css") for f in files) or bool(
+            re.search(
+                r'<link[^>]+href=["\'][^"\']*(?:tailwind|bootstrap|bulma|materialize|foundation)[^"\']*["\']',
+                _all_content(files), re.IGNORECASE,
+            )
+        )
+        check("CSS stylesheet present", has_css, 8)
+
     # ── Dashboard ────────────────────────────────────────────────────────
     if mode in ("dashboard", "admin_panel") or re.search(r"\bdashboard\b", prompt, re.IGNORECASE):
         check("dashboard page/component present", _has_dashboard_page(files), 8)
