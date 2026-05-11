@@ -24,6 +24,7 @@ from agents.mcp_tools import TOOL_SCHEMAS, ProjectFS
 from agents.orchestrator import Orchestrator
 from agents.preview import render_preview
 from agents.stack_engine import decide_stack
+from agents.build_contract import infer_build_mode, infer_project_type
 from agents.prompts import ASSISTANT_PROMPT
 from auth import (
     decode_token,
@@ -179,6 +180,8 @@ class Project(BaseModel):
     name: str
     prompt: str
     mode: str = "web_app"
+    project_type: str | None = None
+    build_mode: str | None = None
     quality_tier: str = "balanced"
     status: str = "queued"
     error: str | None = None
@@ -200,6 +203,8 @@ class Project(BaseModel):
     selected_stack: dict | None = None
     preview_strategy: str = "iframe"
     actual_models_used: list = Field(default_factory=list)
+    model_calls_used: int = 0
+    preview_url: str | None = None
     deployment_target: str | None = None
     repo_visibility: str = "public"
     manifest_status: str | None = None
@@ -270,9 +275,9 @@ async def _runtime_secret(key: str) -> str | None:
     return await get_secret(db, key)
 
 
-async def _genx_provider() -> GenXProvider:
+async def _genx_provider(quality_tier: str = "balanced") -> GenXProvider:
     key = await _runtime_secret("GENX_API_KEY")
-    return GenXProvider(api_key=key)
+    return GenXProvider(api_key=key, quality_tier=quality_tier)
 
 
 async def _launch_pipeline(project_id: str, prompt: str, mode: str,
@@ -281,6 +286,10 @@ async def _launch_pipeline(project_id: str, prompt: str, mode: str,
     async with PIPELINE_SEM:
         emit = emitter_for(project_id)
         started = _now()
+        existing = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1, "cancel_requested": 1})
+        if existing and (existing.get("cancel_requested") or existing.get("status") == "cancelled"):
+            await emit({"type": "project_status", "data": {"status": "cancelled", "error": "Build cancelled by user."}})
+            return
         await db.projects.update_one(
             {"id": project_id},
             {"$set": {
@@ -290,7 +299,8 @@ async def _launch_pipeline(project_id: str, prompt: str, mode: str,
         )
         await emit({"type": "project_status", "data": {"status": "running"}})
         try:
-            provider = await _genx_provider()
+            project = await db.projects.find_one({"id": project_id}, {"_id": 0, "quality_tier": 1}) or {}
+            provider = await _genx_provider(project.get("quality_tier", "balanced"))
             orch = Orchestrator(db, provider, project_id, emit)
             # Global timeouts: build 25 min, iterate 10 min
             global_timeout = 1500 if mode == "build" else 600
@@ -305,9 +315,12 @@ async def _launch_pipeline(project_id: str, prompt: str, mode: str,
             proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1})
             if proj and proj.get("status") not in ("failed", "cancelled"):
                 completed = _now()
+                updates = {"completed_at": completed, "updated_at": completed}
+                if proj.get("status") == "ready":
+                    updates["preview_url"] = f"/api/projects/{project_id}/preview"
                 await db.projects.update_one(
                     {"id": project_id},
-                    {"$set": {"completed_at": completed, "updated_at": completed}},
+                    {"$set": updates},
                 )
         except asyncio.TimeoutError:
             msg = f"Build timed out (global {global_timeout}s limit exceeded)."
@@ -350,6 +363,10 @@ async def _launch_retry(project_id: str, agent: str, quality_tier: str | None) -
     async with PIPELINE_SEM:
         emit = emitter_for(project_id)
         started = _now()
+        existing = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1, "cancel_requested": 1})
+        if existing and (existing.get("cancel_requested") or existing.get("status") == "cancelled"):
+            await emit({"type": "project_status", "data": {"status": "cancelled", "error": "Build cancelled by user."}})
+            return
         await db.projects.update_one(
             {"id": project_id},
             {"$set": {
@@ -359,9 +376,17 @@ async def _launch_retry(project_id: str, agent: str, quality_tier: str | None) -
         )
         await emit({"type": "project_status", "data": {"status": "running"}})
         try:
-            provider = await _genx_provider()
+            project = await db.projects.find_one({"id": project_id}, {"_id": 0, "quality_tier": 1}) or {}
+            provider = await _genx_provider(quality_tier or project.get("quality_tier", "balanced"))
             orch = Orchestrator(db, provider, project_id, emit)
             await asyncio.wait_for(orch.run_retry(agent, quality_tier), timeout=1500)
+            proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1})
+            if proj and proj.get("status") == "ready":
+                completed = _now()
+                await db.projects.update_one(
+                    {"id": project_id},
+                    {"$set": {"completed_at": completed, "updated_at": completed, "preview_url": f"/api/projects/{project_id}/preview"}},
+                )
         except Exception as exc:
             msg = str(exc)
             logger.exception("retry failed for %s: %s", project_id, msg)
@@ -673,18 +698,19 @@ async def models_router(tier: str = "balanced") -> dict:
         media_model = None
         media_note = "Placeholders/free assets only. Upgrade to balanced/premium for GenX image generation."
 
+    tier_model = cheap_model if tier_lower == "cheap" else (fast_model if tier_lower == "balanced" else premium_model)
     selected_models = {
-        "research":        fast_model if tier_lower != "premium" else premium_model,
-        "planning":        fast_model if tier_lower == "cheap" else premium_model,
-        "architecture":    premium_model,
+        "research":        tier_model,
+        "planning":        tier_model,
+        "architecture":    tier_model,
         "frontend_coding": coding_model,
         "backend_coding":  coding_model,
         "database_design": coding_model,
         "media_generation": media_model,
-        "validation":      fast_model if tier_lower != "premium" else premium_model,
-        "repair":          cheap_model if tier_lower == "cheap" else (fast_model if tier_lower == "balanced" else premium_model),
-        "review":          premium_model,
-        "assistant":       fast_model if tier_lower != "premium" else premium_model,
+        "validation":      tier_model,
+        "repair":          cheap_model if tier_lower == "cheap" else tier_model,
+        "review":          tier_model,
+        "assistant":       tier_model,
     }
 
     repair_limit = {"cheap": 1, "balanced": 2, "premium": 3}.get(tier_lower, 2)
@@ -699,14 +725,14 @@ async def models_router(tier: str = "balanced") -> dict:
     reasons = {
         "research":        "Scout research and Wingman assistant routing.",
         "planning":        "Product Planner: defines MVP scope and feature list.",
-        "architecture":    "Stack Architect always uses a strong reasoning model for design decisions.",
+        "architecture":    f"Stack Architect stays inside the selected {tier_lower} tier.",
         "frontend_coding": f"Frontend Builder routed to {'premium' if tier_lower == 'premium' else tier_lower} coding model.",
         "backend_coding":  f"Backend Builder routed to {'premium' if tier_lower == 'premium' else tier_lower} coding model.",
         "database_design": "Database Architect uses the same tier as coding agents.",
         "media_generation": media_note,
         "validation":      "Validator checks required files, linked assets, and structure.",
         "repair":          f"Repair Coder: up to {repair_limit} attempt(s) at this tier.",
-        "review":          "QA Reviewer always uses a premium reasoning model for accuracy.",
+        "review":          f"QA Reviewer stays inside the selected {tier_lower} tier and is advisory only.",
         "assistant":       "Amarktai Wingman responds to user questions and build guidance.",
     }
 
@@ -805,12 +831,15 @@ async def create_project(body: ProjectCreate, claims: dict = Depends(require_use
         name=body.name,
         prompt=body.prompt,
         mode=build_mode,
+        project_type=infer_project_type(build_mode),
+        build_mode=infer_build_mode(build_mode),
         quality_tier=quality_tier,
         recommended_tier=sd["recommended_tier"],
         requires_upgrade_confirmation=sd["requires_upgrade_confirmation"],
         upgrade_reason=sd["upgrade_reason"],
         selected_stack=sd["stack"],
         preview_strategy=sd["preview_strategy"],
+        preview_url=None,
         deployment_target=body.deployment_target,
         repo_visibility=body.repo_visibility or "public",
         owner_id=claims["sub"],
@@ -838,6 +867,10 @@ async def import_from_repo(body: RepoImportBody, claims: dict = Depends(require_
         name=f"{owner}/{repo}",
         prompt=f"Imported GitHub repo {info['html_url']} on branch {info['branch']}",
         status="ready",
+        mode="repo_fix",
+        project_type="repo-upgrade",
+        build_mode="repo-upgrade",
+        preview_strategy="repo_structure",
         completed_at=_now(),
         owner_id=claims["sub"],
         github={k: info[k] for k in ("owner", "repo", "branch", "default_branch", "commit_sha", "html_url")},
@@ -942,6 +975,13 @@ async def retry_project(project_id: str, body: RetryBody, claims: dict = Depends
         raise HTTPException(404, "Project not found")
     if proj.get("status") in ("running", "queued"):
         raise HTTPException(409, "Build already in progress")
+    updates = {"status": "queued", "cancel_requested": False, "updated_at": _now()}
+    if body.quality_tier:
+        if body.quality_tier not in ("cheap", "balanced", "premium"):
+            raise HTTPException(400, "quality_tier must be cheap, balanced, or premium.")
+        updates["quality_tier"] = body.quality_tier
+        updates["recommended_tier"] = body.quality_tier
+    await db.projects.update_one({"id": project_id}, {"$set": updates})
     # Record retry event
     now = _now()
     await db.agent_events.insert_one({
@@ -1176,8 +1216,13 @@ async def finalize(project_id: str, claims: dict = Depends(require_user)) -> dic
     if not pat:
         raise HTTPException(403, "Connect GitHub PAT in Settings to create repositories.")
     proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    validation = (proj or {}).get("validation_state") or {}
+    if validation and validation.get("status") != "passed":
+        raise HTTPException(409, "Validation must pass before finalize/push. Fix validation errors first.")
+    if proj and proj.get("status") not in ("ready", "finalized"):
+        raise HTTPException(409, "Project must be ready before finalize/push.")
     files = await ProjectFS(db, project_id).list_full()
-    payload_files = [{"path": f["path"], "content": f["content"]} for f in files]
+    payload_files = [{"path": f["path"], "content": f["content"]} for f in files if f["path"] != ".env" and not f["path"].endswith("/.env")]
     repo_name = re.sub(r"[^a-z0-9-]+", "-", proj["name"].lower()).strip("-")[:60] or "amarktai-app"
     private = (proj.get("repo_visibility", "public") == "private")
     try:
@@ -1200,12 +1245,15 @@ async def open_pr(project_id: str, body: PRBody, claims: dict = Depends(require_
     proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
     if not proj or not proj.get("github"):
         raise HTTPException(400, "Project was not imported from a GitHub repo")
+    validation = proj.get("validation_state") or {}
+    if validation and validation.get("status") == "failed":
+        raise HTTPException(409, "Validation must pass before opening a PR. Fix validation errors first.")
     pat = body.github_pat or await _runtime_secret("GITHUB_PAT")
     if not pat:
         raise HTTPException(403, "Connect GitHub PAT in Settings to open pull requests.")
     github = proj["github"]
     files = await ProjectFS(db, project_id).list_full()
-    payload_files = [{"path": f["path"], "content": f["content"]} for f in files]
+    payload_files = [{"path": f["path"], "content": f["content"]} for f in files if f["path"] != ".env" and not f["path"].endswith("/.env")]
     branch = body.branch_name or f"amarktai/{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
     title = body.title or "Amarktai App Builder: updates from coding agents"
     body_md = body.body or f"This PR was generated by **{AGENTS_NAME}** through {ROUTER_NAME}."

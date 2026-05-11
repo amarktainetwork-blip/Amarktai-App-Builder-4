@@ -55,14 +55,21 @@ def _routes() -> dict[str, tuple[str, str]]:
 class GenXProvider:
     """Single-key, multi-model provider with task-aware routing, backed by GenX Router."""
 
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None,
+                 quality_tier: str = "balanced"):
         self.api_key = api_key or os.environ.get("GENX_API_KEY")
         self.base_url = (base_url or os.environ.get("GENX_BASE_URL", "https://query.genx.sh/v1")).rstrip("/")
+        self.quality_tier = quality_tier if quality_tier in ("cheap", "balanced", "premium") else "balanced"
         if not self.api_key:
             raise RuntimeError("GENX_API_KEY is not configured. Add it in Settings or as an environment variable.")
 
     def route_for_agent(self, agent: str) -> tuple[str, str]:
-        tier = AGENT_TIER.get(agent, "reasoning")
+        if self.quality_tier == "cheap":
+            tier = "research" if agent == "scout" else "edits"
+        elif self.quality_tier == "balanced":
+            tier = "research" if agent in {"scout", "architect", "coder", "reviewer", "iteration", "repair"} else AGENT_TIER.get(agent, "research")
+        else:
+            tier = AGENT_TIER.get(agent, "reasoning")
         return _routes()[tier]
 
     @staticmethod

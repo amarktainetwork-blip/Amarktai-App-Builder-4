@@ -10,6 +10,11 @@ import pytest
 from agents.mcp_tools import safe_project_path
 from agents.orchestrator import Orchestrator, BuildCancelled
 from agents.genx_provider import GenXProvider
+from agents.build_contract import (
+    ensure_required_files,
+    extract_files_from_model_output,
+    validate_project_files,
+)
 from config import valid_fernet_key
 
 
@@ -409,6 +414,72 @@ def test_required_files_by_mode():
             f"Mode {mode} is missing README.md in required files"
 
 
+def test_extract_files_from_json_file_map():
+    files, warnings, summary = extract_files_from_model_output(json.dumps({
+        "index.html": "<h1>Hello</h1>",
+        "styles.css": "body{}",
+    }))
+    assert {f["path"] for f in files} == {"index.html", "styles.css"}
+    assert warnings == []
+
+
+def test_extract_files_from_markdown_code_blocks():
+    raw = """Here are files.
+
+file: index.html
+```html
+<h1>Amarktai</h1>
+```
+
+```styles.css
+body { color: white; }
+```
+"""
+    files, warnings, summary = extract_files_from_model_output(raw)
+    assert {f["path"] for f in files} == {"index.html", "styles.css"}
+
+
+def test_extract_rejects_unsafe_and_normalizes_duplicates():
+    raw = json.dumps({
+        "files": [
+            {"path": "../../.env", "content": "SECRET=bad"},
+            {"path": "index.html", "content": "first"},
+            {"path": "index.html", "content": "second"},
+        ]
+    })
+    files, warnings, summary = extract_files_from_model_output(raw)
+    assert [f["path"] for f in files] == ["index.html"]
+    assert files[0]["content"] == "second"
+    assert any("unsafe" in w.lower() for w in warnings)
+    assert any("duplicate" in w.lower() for w in warnings)
+
+
+def test_deterministic_repair_recreates_static_required_files():
+    project = {"mode": "landing_page", "prompt": "Build a modern professional landing page for Amarktai.com with images and easy deployment."}
+    files, changed = ensure_required_files(project, project["prompt"], {}, [{"path": "index.html", "content": "<html><head></head><body>Hi</body></html>"}])
+    paths = {f["path"] for f in files}
+    assert {"index.html", "styles.css", "README.md", "amarktai.project.json"} <= paths
+    validation = validate_project_files(project, files, project["prompt"])
+    assert validation["ok"], validation
+
+
+def test_pwa_contract_includes_manifest_and_service_worker():
+    project = {"mode": "pwa", "prompt": "Build a PWA task tracker"}
+    files, changed = ensure_required_files(project, project["prompt"], {}, [])
+    paths = {f["path"] for f in files}
+    assert "manifest.json" in paths
+    assert "service-worker.js" in paths
+    assert validate_project_files(project, files, project["prompt"])["ok"]
+
+
+def test_full_stack_contract_scaffolds_required_files():
+    project = {"mode": "full_stack", "prompt": "Build a full-stack SaaS starter with login"}
+    files, changed = ensure_required_files(project, project["prompt"], {}, [])
+    paths = {f["path"] for f in files}
+    assert {"README.md", ".env.example", "docker-compose.yml", "backend/main.py", "frontend/package.json", "amarktai.project.json"} <= paths
+    assert validate_project_files(project, files, project["prompt"])["ok"]
+
+
 # ---------- project manifest generation ----------
 
 def test_project_manifest_json_structure():
@@ -461,8 +532,8 @@ async def test_research_mode_produces_requirements_md():
 
 
 @pytest.mark.asyncio
-async def test_full_stack_mode_readme_required():
-    """Full-stack mode must fail if README.md is not in generated files."""
+async def test_full_stack_mode_deterministically_repairs_required_files():
+    """Full-stack mode must create required companion files before validation."""
     db, proj, files, events, messages = _make_db()
     call_count = [0]
     responses = [
@@ -517,8 +588,10 @@ async def test_full_stack_mode_readme_required():
 
     await orch.run_full_build("Build a full-stack app", mode="full_stack")
 
-    # full_stack mode requires README.md — should fail
-    assert proj.get("status") == "failed", f"Expected failed for full_stack without README.md, got {proj.get('status')}"
+    # full_stack mode now repairs README/.env/Docker/frontend/backend companion files deterministically.
+    assert proj.get("status") == "ready", f"Expected ready after deterministic full_stack repair, got {proj.get('status')}"
+    written_paths = {f["path"] for f in written_files}
+    assert {"README.md", ".env.example", "docker-compose.yml", "backend/main.py", "frontend/package.json", "amarktai.project.json"} <= written_paths
 
 
 # ---------- media strategy ----------
@@ -712,8 +785,8 @@ async def test_validation_events_emitted():
 
 
 @pytest.mark.asyncio
-async def test_repair_loop_triggers_on_missing_file():
-    """When a required file is missing after first reviewer pass, repair loop must trigger."""
+async def test_required_file_repair_prevents_expensive_model_repair():
+    """Missing companion files are repaired deterministically before model repair."""
     db, proj, files, events, messages = _make_db()
     call_count = [0]
     # Coder produces only index.html — missing styles.css, README.md, amarktai.project.json
@@ -764,9 +837,9 @@ async def test_repair_loop_triggers_on_missing_file():
     await orch.run_full_build("Build landing page", mode="landing_page", stack_decision=sd)
 
     event_types = [e.get("type") for e in events_received]
-    # Should have emitted validation_failed and repair_started before eventually passing
-    assert "validation_failed" in event_types, f"Expected validation_failed. Got: {event_types}"
-    assert "repair_started" in event_types, f"Expected repair_started. Got: {event_types}"
+    assert "required_files_repaired" in event_types, f"Expected deterministic required file repair. Got: {event_types}"
+    assert "validation_failed" not in event_types, f"Missing companion files should be fixed before validation. Got: {event_types}"
+    assert "repair_started" not in event_types, f"Model repair should not run for deterministic companion files. Got: {event_types}"
     # End state: must be ready (repair succeeded)
     status_events = [e for e in events_received if e.get("type") == "project_status"]
     statuses = [e["data"]["status"] for e in status_events]
@@ -775,17 +848,18 @@ async def test_repair_loop_triggers_on_missing_file():
 
 @pytest.mark.asyncio
 async def test_repair_loop_fails_after_max_attempts():
-    """When repair cannot fix missing files within the tier limit, project must be failed."""
+    """When validation errors remain after bounded repair, project must fail."""
     db, proj, files, events, messages = _make_db()
     # Set quality_tier to cheap so max_repairs = 1
     proj["quality_tier"] = "cheap"
     call_count = [0]
-    # Coder: only index.html; reviewer always returns no patches; repair also no patches
-    reviewer_resp = {"verdict": "warn", "issues": ["Missing styles.css"], "patched_files": [], "summary": "Still missing"}
+    # Coder emits a non-secret-looking shape but with a real secret-like value in index.html.
+    # Deterministic repair can add companion files, but it must not overwrite existing app content.
+    reviewer_resp = {"verdict": "warn", "issues": ["Possible secret"], "patched_files": [], "summary": "Still unsafe"}
     all_responses = [
         {"summary": "App", "audience": "users", "core_features": [], "requirements_md": "# Reqs"},
         {"tech_stack": {"frontend": "HTML", "styling": "CSS"}, "file_plan": []},
-        {"files": [{"path": "index.html", "language": "html", "content": "<html></html>"}], "summary": "Partial"},
+        {"files": [{"path": "index.html", "language": "html", "content": "<html><body>API_KEY=abcdef1234567890abcdef</body></html>"}], "summary": "Unsafe"},
         reviewer_resp,  # first reviewer pass
         reviewer_resp,  # repair pass (still no patched_files)
     ]
@@ -819,7 +893,7 @@ async def test_repair_loop_fails_after_max_attempts():
     sd["requires_upgrade_confirmation"] = False
     await orch.run_full_build("Build landing page", mode="landing_page", stack_decision=sd)
 
-    # Must be failed — could not repair within cheap tier limit
+    # Must be failed — validation error could not be repaired within cheap tier limit
     assert proj.get("status") == "failed", f"Expected failed, got {proj.get('status')}"
     event_types = [e.get("type") for e in events_received]
     assert "validation_exhausted" in event_types, f"Expected validation_exhausted. Got: {event_types}"
