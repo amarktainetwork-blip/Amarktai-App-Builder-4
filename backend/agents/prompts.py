@@ -131,6 +131,12 @@ Rules:
 - Make it visually polished with real content (no lorem ipsum).
 - Static/app modes MUST work when index.html is opened directly — no server, no build step.
 - Never hardcode secrets. Use .env.example placeholders.
+- Form accessibility rules (required):
+  * Every <input>, <textarea>, <select> must have BOTH id="" and name="" attributes.
+  * Every form field must have an associated <label for="..."> where for matches the field id,
+    OR an aria-label attribute on the field itself.
+  * Example: <label for="email">Email</label><input type="email" id="email" name="email">
+  * Contact/CTA/newsletter forms must always follow these rules.
 - Output ONLY the file blocks and the summary block — no JSON, no other text.
 """
 
@@ -144,7 +150,11 @@ You receive the generated files (and the build mode). Audit them for:
 - missing or incomplete README.md
 - missing amarktai.project.json
 - broken HTML tags or JS syntax errors
-- accessibility issues
+- accessibility issues:
+  * every <input>, <textarea>, <select> must have both id="" and name="" attributes
+  * every form field must have an associated <label for="..."> matching its id, or an aria-label attribute
+  * <label for="X"> must match an input with id="X"
+  * CTA email/contact forms must follow these rules
 - security issues (hardcoded secrets, etc.)
 - for trading_bot_scaffold: verify paper mode default, risk controls, kill switch, safety README section
 - visual coherence and obvious bugs

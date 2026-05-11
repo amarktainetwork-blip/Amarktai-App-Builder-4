@@ -162,6 +162,70 @@ def _has_preview_entry(files: list[dict]) -> bool:
     return any(f["path"] in _PREVIEW_ENTRY_FILES for f in files)
 
 
+# Pre-compiled patterns for form accessibility validation
+_FORM_INPUT_PAT = re.compile(
+    r"<(input|textarea|select)[^>]*>",
+    re.IGNORECASE,
+)
+_HAS_ID_PAT = re.compile(r'\bid=["\'][^"\']+["\']', re.IGNORECASE)
+_HAS_NAME_PAT = re.compile(r'\bname=["\'][^"\']+["\']', re.IGNORECASE)
+_HAS_ARIA_LABEL_PAT = re.compile(r'\baria-label=["\'][^"\']+["\']', re.IGNORECASE)
+_HAS_TYPE_HIDDEN_PAT = re.compile(r'\btype=["\']hidden["\']', re.IGNORECASE)
+_HAS_TYPE_SUBMIT_PAT = re.compile(r'\btype=["\']submit["\']', re.IGNORECASE)
+_HAS_TYPE_BUTTON_PAT = re.compile(r'\btype=["\']button["\']', re.IGNORECASE)
+_LABEL_FOR_PAT = re.compile(r'<label[^>]*\bfor=["\']([^"\']+)["\'][^>]*>', re.IGNORECASE)
+
+
+def _validate_form_accessibility(html_content: str) -> list[str]:
+    """Return a list of form accessibility issues found in HTML content.
+
+    Checks:
+    - Every <input>/<textarea>/<select> has id and name (unless hidden/submit/button).
+    - Every such field has a <label for="..."> matching its id, or an aria-label.
+    Only runs when form fields are present (non-form pages are not blocked).
+    """
+    issues: list[str] = []
+    inputs = _FORM_INPUT_PAT.findall(html_content)
+    if not inputs:
+        return issues  # No form fields — nothing to check
+
+    # Collect all label for="" values
+    label_fors = set(_LABEL_FOR_PAT.findall(html_content))
+
+    for m in _FORM_INPUT_PAT.finditer(html_content):
+        tag_html = m.group(0)
+        tag_name = m.group(1).lower()
+
+        # Skip hidden, submit, and button inputs — they don't need labels
+        if _HAS_TYPE_HIDDEN_PAT.search(tag_html):
+            continue
+        if tag_name == "input" and (
+            _HAS_TYPE_SUBMIT_PAT.search(tag_html) or _HAS_TYPE_BUTTON_PAT.search(tag_html)
+        ):
+            continue
+
+        has_id = _HAS_ID_PAT.search(tag_html)
+        has_name = _HAS_NAME_PAT.search(tag_html)
+        has_aria = _HAS_ARIA_LABEL_PAT.search(tag_html)
+
+        if not has_id:
+            issues.append(f"Form field <{tag_name}> is missing id attribute: {tag_html[:80]}")
+        if not has_name:
+            issues.append(f"Form field <{tag_name}> is missing name attribute: {tag_html[:80]}")
+        if has_id and not has_aria:
+            # Extract id value and check for matching label
+            id_match = re.search(r'\bid=["\']([^"\']+)["\']', tag_html, re.IGNORECASE)
+            if id_match:
+                field_id = id_match.group(1)
+                if field_id not in label_fors:
+                    issues.append(
+                        f"Form field id=\"{field_id}\" has no associated <label for=\"{field_id}\"> "
+                        f"and no aria-label attribute"
+                    )
+
+    return issues
+
+
 EmitFn = Callable[[dict], Awaitable[None]]
 
 
@@ -573,7 +637,9 @@ class Orchestrator:
             meta={"model": coder["model_label"], "files": [f["path"] for f in generated_files]},
         )
 
-        # 4) Reviewer (first pass)
+        # 4) Reviewer (first pass) — non-fatal: if the Reviewer returns invalid JSON and
+        #    repair also fails, record the event but continue to deterministic validation.
+        #    The project is only failed if the required files are actually missing.
         await self._check_cancel()
         current_files = await self.fs.list_full()
         review_input = json.dumps({
@@ -583,23 +649,32 @@ class Orchestrator:
                       if f["path"] not in _META_FILES],
             "shared_context": shared_ctx,
         }, indent=2)
-        rev = await self._run_agent("reviewer", REVIEWER_PROMPT, review_input)
-        await self._check_cancel()
-        rev_data = rev["data"]
-        for f in rev_data.get("patched_files", []):
-            await self.fs.write(f["path"], f["content"], f.get("language", "text"))
-            await self.emit({"type": "file_written", "data": {"path": f["path"]}})
-        await self._record_message(
-            "agent", "reviewer",
-            f"**Verdict:** {rev_data.get('verdict', 'pass')}\n\n"
-            + (("**Issues:**\n" + "\n".join(f"- {i}" for i in rev_data.get("issues", [])))
-               if rev_data.get("issues") else "_No issues found._"),
-            meta={"model": rev["model_label"], "patched": [f["path"] for f in rev_data.get("patched_files", [])]},
-        )
+        review_issues: list[str] = []
+        try:
+            rev = await self._run_agent("reviewer", REVIEWER_PROMPT, review_input)
+            await self._check_cancel()
+            rev_data = rev["data"]
+            for f in rev_data.get("patched_files", []):
+                await self.fs.write(f["path"], f["content"], f.get("language", "text"))
+                await self.emit({"type": "file_written", "data": {"path": f["path"]}})
+            await self._record_message(
+                "agent", "reviewer",
+                f"**Verdict:** {rev_data.get('verdict', 'pass')}\n\n"
+                + (("**Issues:**\n" + "\n".join(f"- {i}" for i in rev_data.get("issues", [])))
+                   if rev_data.get("issues") else "_No issues found._"),
+                meta={"model": rev["model_label"], "patched": [f["path"] for f in rev_data.get("patched_files", [])]},
+            )
+            review_issues = rev_data.get("issues", [])
+        except Exception as reviewer_err:
+            # Reviewer failure is non-fatal: record and proceed to deterministic validation.
+            err_detail = f"Reviewer returned invalid output; skipping reviewer patches. Proceeding to validation. Detail: {reviewer_err}"
+            await self._record_event("reviewer", "failed", err_detail,
+                                     meta={"reviewer_error": str(reviewer_err)})
+            await self._record_message("system", None, err_detail,
+                                       meta={"reviewer_nonfatal": True})
 
         # 5) Validation + bounded repair loop
         required = sd.get("required_files", [])
-        review_issues = rev_data.get("issues", [])
         max_repairs = await self._repair_limit()
 
         await self._emit_validation_event(
@@ -614,6 +689,15 @@ class Orchestrator:
             final_paths = {f["path"] for f in final_files}
             missing = [r for r in required if r not in final_paths]
             present = [r for r in required if r in final_paths]
+
+            # Run form accessibility check on HTML files (warnings only — added to review_issues)
+            if repair_pass == 0:
+                for ff in final_files:
+                    if ff["path"].endswith((".html", ".htm")):
+                        acc_issues = _validate_form_accessibility(ff["content"])
+                        for ai in acc_issues:
+                            if ai not in review_issues:
+                                review_issues.append(ai)
 
             validation_state = {
                 "status": "passed" if not missing else "failed",

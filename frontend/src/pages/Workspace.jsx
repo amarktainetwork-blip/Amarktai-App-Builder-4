@@ -33,6 +33,8 @@ export default function WorkspacePage() {
   const [cancelling, setCancelling] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [tab, setTab] = useState("preview");
+  // Tracks the current pipeline sub-phase for the preview panel ("validating" | "repairing" | null)
+  const [buildPhase, setBuildPhase] = useState(null);
 
   const wsRef = useRef(null);
 
@@ -80,6 +82,20 @@ export default function WorkspacePage() {
         error: evt.data.error ?? p.error,
         failed_agent: evt.data.failed_agent ?? p.failed_agent,
       } : p);
+      // Clear build phase when project finishes
+      if (["ready", "failed", "cancelled"].includes(evt.data.status)) {
+        setBuildPhase(null);
+        setCancelling(false);
+        if (evt.data.status === "cancelled") toast.success("Build cancelled.");
+      }
+    } else if (evt.type === "validation_started") {
+      setBuildPhase("validating");
+    } else if (evt.type === "validation_passed" || evt.type === "validation_failed" || evt.type === "validation_exhausted") {
+      setBuildPhase(null);
+    } else if (evt.type === "repair_started") {
+      setBuildPhase("repairing");
+    } else if (evt.type === "repair_applied" || evt.type === "repair_failed") {
+      setBuildPhase(null);
     } else if (evt.type === "build_complete") {
       Projects.get(projectId).then(setProject);
       Projects.files(projectId).then(setFiles);
@@ -123,10 +139,10 @@ export default function WorkspacePage() {
     setCancelling(true);
     try {
       await Projects.cancel(projectId);
-      toast.success("Build stopped.");
+      // Keep cancelling=true until a WebSocket status event confirms cancellation
+      // so the button stays disabled and shows "Cancelling…"
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to stop build");
-    } finally {
       setCancelling(false);
     }
   };
@@ -185,7 +201,7 @@ export default function WorkspacePage() {
                 className="inline-flex items-center gap-1.5 px-3 h-8 border border-red-700 hover:bg-red-900/30 font-mono text-[10px] uppercase tracking-wider text-red-400 hover:text-red-300 disabled:opacity-50"
               >
                 <Square className="w-3 h-3" strokeWidth={1.5} />
-                {cancelling ? "stopping..." : "Stop Build"}
+                {cancelling ? "Cancelling…" : "Stop Build"}
               </button>
             )}
             {failed && (
@@ -289,6 +305,7 @@ export default function WorkspacePage() {
                 failedAgent={project?.failed_agent}
                 projectMode={project?.mode}
                 previewStrategy={project?.preview_strategy}
+                buildPhase={buildPhase}
               />
             </TabsContent>
 

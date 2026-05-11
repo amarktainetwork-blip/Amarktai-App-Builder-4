@@ -848,3 +848,240 @@ def test_retry_repair_target_allowed():
     body = server.RetryBody(agent="repair")
     assert body.agent == "repair"
 
+
+# ---------- PART 1: preview sandbox ----------
+
+def test_preview_iframe_sandbox_no_allow_same_origin():
+    """Preview iframe sandbox must NOT include allow-same-origin."""
+    import pathlib
+    import re
+    live_preview = pathlib.Path(__file__).parent.parent.parent / "frontend" / "src" / "components" / "LivePreview.jsx"
+    content = live_preview.read_text()
+    # Find the actual sandbox attribute value (not comments)
+    sandbox_matches = re.findall(r'sandbox=["\']([^"\']*)["\']', content)
+    assert sandbox_matches, "No sandbox attribute found in LivePreview.jsx"
+    for sandbox_val in sandbox_matches:
+        assert "allow-same-origin" not in sandbox_val, (
+            f"LivePreview iframe sandbox must not include allow-same-origin "
+            f"(browser security warning). Found: {sandbox_val}"
+        )
+    assert any("allow-scripts" in v for v in sandbox_matches), \
+        "LivePreview iframe must still include allow-scripts"
+
+
+# ---------- PART 2: MIME types ----------
+
+def test_preview_mime_map_css():
+    """Preview MIME map must serve CSS as text/css."""
+    import server
+    assert "css" in server._PREVIEW_MIME
+    assert "text/css" in server._PREVIEW_MIME["css"]
+
+
+def test_preview_mime_map_js():
+    """Preview MIME map must serve JS as application/javascript."""
+    import server
+    assert "js" in server._PREVIEW_MIME
+    assert "application/javascript" in server._PREVIEW_MIME["js"]
+
+
+def test_preview_mime_map_html():
+    """Preview MIME map must serve HTML as text/html."""
+    import server
+    assert "html" in server._PREVIEW_MIME
+    assert "text/html" in server._PREVIEW_MIME["html"]
+
+
+def test_preview_mime_map_json():
+    """Preview MIME map must serve JSON as application/json."""
+    import server
+    assert "json" in server._PREVIEW_MIME
+    assert "application/json" in server._PREVIEW_MIME["json"]
+
+
+# ---------- PART 3: form accessibility validator ----------
+
+from agents.orchestrator import _validate_form_accessibility
+
+
+def test_form_accessibility_no_issues_no_forms():
+    """Pages without form fields should have no accessibility issues."""
+    html = "<html><body><h1>Hello</h1></body></html>"
+    issues = _validate_form_accessibility(html)
+    assert issues == [], f"Expected no issues for non-form page, got: {issues}"
+
+
+def test_form_accessibility_input_missing_id_and_name():
+    """Input without id and name must be flagged."""
+    html = '<html><body><form><input type="text"></form></body></html>'
+    issues = _validate_form_accessibility(html)
+    assert any("missing id" in i for i in issues), f"Expected missing id issue: {issues}"
+    assert any("missing name" in i for i in issues), f"Expected missing name issue: {issues}"
+
+
+def test_form_accessibility_input_missing_label():
+    """Input with id but no label must be flagged."""
+    html = '<html><body><form><input type="text" id="email" name="email"></form></body></html>'
+    issues = _validate_form_accessibility(html)
+    assert any('email' in i and 'label' in i for i in issues), \
+        f"Expected missing label issue for id=email: {issues}"
+
+
+def test_form_accessibility_input_with_aria_label_ok():
+    """Input with aria-label but no <label> tag should be accepted."""
+    html = '<html><body><form><input type="text" id="email" name="email" aria-label="Email address"></form></body></html>'
+    issues = _validate_form_accessibility(html)
+    label_issues = [i for i in issues if 'label' in i.lower() and 'email' in i]
+    assert not label_issues, f"aria-label should satisfy label requirement: {label_issues}"
+
+
+def test_form_accessibility_complete_accessible_form_no_issues():
+    """A form with proper id, name, and label should have no accessibility issues."""
+    html = '''<html><body><form>
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email">
+        <label for="msg">Message</label>
+        <textarea id="msg" name="msg"></textarea>
+        <input type="submit" value="Send">
+    </form></body></html>'''
+    issues = _validate_form_accessibility(html)
+    assert not issues, f"Fully accessible form should have no issues: {issues}"
+
+
+def test_form_accessibility_hidden_inputs_skipped():
+    """Hidden inputs do not need id/name/label."""
+    html = '<html><body><form><input type="hidden" value="csrf-token"></form></body></html>'
+    issues = _validate_form_accessibility(html)
+    assert not issues, f"Hidden inputs should be skipped: {issues}"
+
+
+# ---------- PART 4: reviewer non-fatal ----------
+
+@pytest.mark.asyncio
+async def test_reviewer_invalid_json_is_non_fatal_if_files_present():
+    """If Reviewer returns invalid JSON, project should still reach ready if files are present."""
+    db, proj, files, events, messages = _make_db()
+    call_count = [0]
+    # Scout, Architect, Coder succeed; Reviewer returns bad JSON
+    responses = [
+        # scout
+        {"summary": "App", "audience": "users", "core_features": ["home"], "requirements_md": "# Reqs"},
+        # architect
+        {"tech_stack": {"frontend": "HTML", "styling": "CSS"}, "file_plan": []},
+        # coder: produce all required files for landing_page
+        {"files": [
+            {"path": "index.html", "language": "html", "content": "<!DOCTYPE html><html><body>Hello</body></html>"},
+            {"path": "styles.css", "language": "css", "content": "body{}"},
+            {"path": "README.md", "language": "markdown", "content": "# App"},
+            {"path": "amarktai.project.json", "language": "json", "content": '{"name":"App"}'},
+        ], "summary": "Done"},
+        # reviewer: bad JSON (simulates model failure)
+        "NOT VALID JSON AT ALL !!!",
+        # repair JSON (also bad so the repair fails too)
+        "ALSO NOT VALID",
+    ]
+
+    async def complete_se(**kwargs):
+        idx = call_count[0]
+        call_count[0] += 1
+        r = responses[idx] if idx < len(responses) else responses[-1]
+        return {
+            "text": json.dumps(r) if not isinstance(r, str) else r,
+            "model_label": "test", "model": "test", "session_id": "s", "usage": {},
+        }
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(side_effect=complete_se)
+    events_received = []
+
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    written = []
+
+    async def fake_write(p, c, l="text"):
+        written.append({"path": p, "content": c, "language": l})
+
+    orch.fs.write = fake_write
+    orch.fs.list_full = AsyncMock(side_effect=lambda: list(written))
+    orch.fs.list = AsyncMock(return_value=[])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    from agents.stack_engine import decide_stack
+    sd = decide_stack(mode="landing_page")
+    await orch.run_full_build("Build a landing page", mode="landing_page", stack_decision=sd)
+
+    # Despite reviewer failure, project should be ready because all required files exist
+    status_events = [e for e in events_received if e.get("type") == "project_status"]
+    statuses = [e["data"]["status"] for e in status_events]
+    assert "ready" in statuses, (
+        f"Project should reach ready when reviewer fails but files are present. Got: {statuses}"
+    )
+    assert proj.get("status") == "ready", f"Expected ready, got {proj.get('status')}"
+
+
+# ---------- PART 5: Stop Build ----------
+
+@pytest.mark.asyncio
+async def test_cancel_before_scout_prevents_scout():
+    """cancel_requested=True before Scout must prevent Scout from running."""
+    db, proj, files, events, messages = _make_db()
+    proj["cancel_requested"] = True
+
+    provider = MagicMock()
+    provider.complete = AsyncMock()
+
+    events_received = []
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    orch.fs.write = AsyncMock()
+    orch.fs.list_full = AsyncMock(return_value=[])
+    orch.fs.list = AsyncMock(return_value=[])
+
+    await orch.run_full_build("Build an app")
+
+    # Scout should not have been called
+    provider.complete.assert_not_called()
+    assert proj.get("status") == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_project_never_becomes_ready():
+    """Once cancelled, no subsequent pipeline step must set status to ready."""
+    db, proj, files, events, messages = _make_db()
+
+    cancel_after_calls = [0]
+
+    async def complete_with_cancel(**kwargs):
+        cancel_after_calls[0] += 1
+        # Cancel after first model call
+        if cancel_after_calls[0] >= 1:
+            proj["cancel_requested"] = True
+        return {
+            "text": json.dumps({"summary": "x", "audience": "y", "core_features": [], "requirements_md": ""}),
+            "model_label": "test", "model": "test", "session_id": "s", "usage": {},
+        }
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(side_effect=complete_with_cancel)
+
+    events_received = []
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    orch.fs.write = AsyncMock()
+    orch.fs.list_full = AsyncMock(return_value=[])
+    orch.fs.list = AsyncMock(return_value=[])
+
+    await orch.run_full_build("Build an app")
+
+    status_events = [e for e in events_received if e.get("type") == "project_status"]
+    statuses = [e["data"]["status"] for e in status_events]
+    assert "ready" not in statuses, f"Cancelled project must never become ready. Got: {statuses}"
+    assert "cancelled" in statuses
+
+
