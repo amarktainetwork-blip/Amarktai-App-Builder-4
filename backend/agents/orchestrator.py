@@ -1058,29 +1058,32 @@ class Orchestrator:
 
         # ── For full app completion: use the full build pipeline ───────────────
         if intent in ("full_app_completion", "full_rebuild_inside_repo", "repo_migration"):
+            frameworks_str = ", ".join(repo_profile["frameworks"]) or "unknown"
+            languages_str = ", ".join(repo_profile["languages"][:3])
             await self._record_message(
                 "system", None,
                 f"**Intent detected:** `{intent}`\n\n"
                 f"Initiating full implementation pass. "
-                f"Detected stack: {', '.join(repo_profile['frameworks']) or 'unknown'}\n\n"
-                f"Repo profile: {len(app_files)} files · "
-                f"Languages: {', '.join(repo_profile['languages'][:3])}",
+                f"Detected stack: {frameworks_str}\n\n"
+                f"Repo profile: {len(app_files)} files · Languages: {languages_str}",
                 meta={"intent": intent, "repo_profile": repo_profile},
             )
             # Build an enriched prompt that includes the repo context
-            enriched_prompt = (
-                f"{user_prompt}\n\n"
-                f"[REPO CONTEXT]\n"
-                f"Detected type: {repo_profile['detectedType']}\n"
-                f"Frameworks: {', '.join(repo_profile['frameworks'])}\n"
-                f"Languages: {', '.join(repo_profile['languages'])}\n"
-                f"Databases: {', '.join(repo_profile['databases'])}\n"
-                f"Auth: {', '.join(repo_profile['authDetected'])}\n"
-                f"Frontend path: {repo_profile['frontendPath']}\n"
-                f"Backend path: {repo_profile['backendPath']}\n"
-                f"Env required: {', '.join(repo_profile['envRequired'][:8])}\n"
-                f"Existing routes: {', '.join(repo_profile['routeMap'][:10])}\n"
-            )
+            ctx_lines = [
+                user_prompt,
+                "",
+                "[REPO CONTEXT]",
+                f"Detected type: {repo_profile['detectedType']}",
+                f"Frameworks: {', '.join(repo_profile['frameworks'])}",
+                f"Languages: {', '.join(repo_profile['languages'])}",
+                f"Databases: {', '.join(repo_profile['databases'])}",
+                f"Auth: {', '.join(repo_profile['authDetected'])}",
+                f"Frontend path: {repo_profile['frontendPath']}",
+                f"Backend path: {repo_profile['backendPath']}",
+                f"Env required: {', '.join(repo_profile['envRequired'][:8])}",
+                f"Existing routes: {', '.join(repo_profile['routeMap'][:10])}",
+            ]
+            enriched_prompt = "\n".join(ctx_lines)
             # Determine appropriate build mode from repo profile
             repo_mode = {
                 "static": "landing_page",

@@ -241,7 +241,8 @@ def compute_coverage_score(
     if page_match:
         requested_pages = int(page_match.group(1))
         actual_pages = _count_html_pages(files)
-        pages_ok = actual_pages >= max(1, requested_pages - 1)  # allow 1 page short
+        # Allow 1 page short to account for combined/layout pages that serve multiple routes
+        pages_ok = actual_pages >= max(1, requested_pages - 1)
         check(
             f"{requested_pages} pages/views generated (found {actual_pages})",
             pages_ok,

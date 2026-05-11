@@ -1969,7 +1969,7 @@ def test_intent_defaults_to_small_patch():
     """detect_update_intent must default to small_patch for simple requests."""
     from agents.repo_analyzer import detect_update_intent
     files = [{"path": "index.html", "content": "<html/>"}]
-    intent = detect_update_intent("Change the button colour to blue", files)
+    intent = detect_update_intent("Change the button color to blue", files)
     assert intent == "small_patch"
 
 

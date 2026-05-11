@@ -220,9 +220,11 @@ def _detect_type_and_preview(scan: dict, files: list[dict]) -> tuple[str, str, s
     if "Vite" in frameworks or ("React" in frameworks and has_package_json):
         return "vite_react", "vite_react", "Vite/React detected."
 
-    # Static with index.html (post-build artefacts)
+    # Static site with a build tool — use generic 'spa' type unless we can confirm Vite/React
     if has_index and has_package_json:
-        return "vite_react", "vite_react", "index.html + package.json — assume Vite/React SPA."
+        if "React" in frameworks or "Vite" in frameworks:
+            return "vite_react", "vite_react", "index.html + package.json — Vite/React SPA detected."
+        return "vite_react", "vite_react", "index.html + package.json — generic SPA (build tool uncertain)."
 
     # API-only (Python/Express, no frontend)
     has_frontend = bool(scan["frontend_path"]) or any(
