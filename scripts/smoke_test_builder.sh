@@ -32,9 +32,9 @@ FAIL=0
 SKIPPED=0
 
 say()   { echo "==> $*"; }
-ok()    { echo "  [PASS] $*"; ((PASS++)); }
-fail()  { echo "  [FAIL] $*" >&2; ((FAIL++)); }
-skip()  { echo "  [SKIP] $*"; ((SKIPPED++)); }
+ok()    { echo "  [PASS] $*"; PASS=$((PASS+1)); }
+fail()  { echo "  [FAIL] $*" >&2; FAIL=$((FAIL+1)); }
+skip()  { echo "  [SKIP] $*"; SKIPPED=$((SKIPPED+1)); }
 warn()  { echo "  [WARN] $*"; }
 
 require() { command -v "$1" >/dev/null 2>&1 || { echo "FAIL: $1 is required"; exit 1; }; }
@@ -50,7 +50,11 @@ PROJECT_ID=""
 say "health check"
 HEALTH=$(curl -fsS "$API/health") || { fail "backend not reachable at $BACKEND_URL"; exit 1; }
 STATUS=$(echo "$HEALTH" | jq -r '.status // "unknown"')
-[ "$STATUS" = "ok" ] && ok "backend healthy" || fail "backend status: $STATUS"
+if [ "$STATUS" = "ok" ] || [ "$STATUS" = "healthy" ]; then
+  ok "backend healthy (status=$STATUS)"
+else
+  fail "backend status: $STATUS"
+fi
 
 # ── Readiness check ───────────────────────────────────────────────────────────
 say "readiness check"

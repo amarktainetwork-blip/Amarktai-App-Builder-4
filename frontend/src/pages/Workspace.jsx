@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
-import { LogOut, Square, RotateCcw, Zap, RefreshCw } from "lucide-react";
+import { useParams, useNavigate } from "react-router-dom";
+import { LogOut, Square, RotateCcw, Zap, RefreshCw, Home, PlusSquare } from "lucide-react";
 import { toast } from "sonner";
 
 import Header from "@/components/Header";
@@ -23,6 +23,7 @@ import { useAuth } from "@/lib/auth-context";
 export default function WorkspacePage() {
   const { projectId } = useParams();
   const { logout } = useAuth();
+  const nav = useNavigate();
   const [project, setProject] = useState(null);
   const [messages, setMessages] = useState([]);
   const [events, setEvents] = useState([]);
@@ -373,6 +374,23 @@ export default function WorkspacePage() {
         onOpenMediaLibrary={() => setMediaLibraryOpen(true)}
         rightExtra={
           <div className="flex items-center gap-1">
+            {/* Workspace navigation */}
+            <button
+              data-testid="back-to-projects-btn"
+              onClick={() => nav("/app")}
+              title="Back to Projects"
+              className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white"
+            >
+              <Home className="w-3 h-3" strokeWidth={1.5} /> Projects
+            </button>
+            <button
+              data-testid="new-build-btn"
+              onClick={() => nav("/app")}
+              title="Start a new build"
+              className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white"
+            >
+              <PlusSquare className="w-3 h-3" strokeWidth={1.5} /> New Build
+            </button>
             {busy && (
               <button
                 data-testid="stop-build-btn"
@@ -535,7 +553,12 @@ export default function WorkspacePage() {
                 className="border-y border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px]"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-agent-coder uppercase tracking-wider">Iteration complete</span>
+                  <span
+                    className="uppercase tracking-wider"
+                    style={{ color: unsatisfied.length > 0 ? "#FFC107" : "#00E676" }}
+                  >
+                    {unsatisfied.length > 0 ? "Iteration finished — changes still needed" : "Iteration complete"}
+                  </span>
                   <button
                     type="button"
                     onClick={() => setIterationResult(null)}
@@ -570,9 +593,19 @@ export default function WorkspacePage() {
                         </li>
                       ))}
                     </ul>
-                    <div className="mt-1.5 text-amk-fg3">
-                      Reply with details or ask agents to continue fixing remaining changes.
-                    </div>
+                    <button
+                      type="button"
+                      data-testid="continue-fixing-btn"
+                      disabled={busy}
+                      onClick={() => {
+                        const msg = `Continue fixing the remaining changes: ${unsatisfied.join("; ")}`;
+                        send(msg);
+                        setIterationResult(null);
+                      }}
+                      className="mt-2 px-2 py-0.5 border border-agent-scout text-[9px] uppercase tracking-wider text-agent-scout bg-agent-scout/10 hover:bg-agent-scout/20 disabled:opacity-50 transition-colors"
+                    >
+                      Continue fixing remaining changes
+                    </button>
                   </div>
                 )}
               </div>
