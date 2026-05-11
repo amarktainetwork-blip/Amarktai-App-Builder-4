@@ -8,9 +8,20 @@ import { Check, X, Trash2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 const FIELDS = [
-  { key: "GENX_API_KEY", label: "GenX API Key", hint: "Required for Amarktai Coding Agents and Amarktai Assistant." },
-  { key: "GITHUB_PAT", label: "GitHub PAT", hint: "Optional. Enables private repo import, PRs, and repo creation." },
-  { key: "BRAVE_SEARCH_API_KEY", label: "Brave Search Key", hint: "Optional. Enables web research for Scout." },
+  { key: "GENX_API_KEY", label: "GenX API Key", hint: "Required for Amarktai Coding Agents and Amarktai Assistant.", optional: false },
+  { key: "GITHUB_PAT", label: "GitHub PAT", hint: "Optional. Enables private repo import, PRs, and repo creation.", optional: true },
+  { key: "BRAVE_SEARCH_API_KEY", label: "Brave Search Key", hint: "Optional. Enables web research for Scout.", optional: true },
+  { key: "PIXABAY_API_KEY", label: "Pixabay API Key", hint: "Optional. Enables stock image/video insertion in generated projects.", optional: true },
+];
+
+const QWEN_FIELDS = [
+  { key: "QWEN_API_KEY", label: "Qwen API Key", hint: "Optional. Direct Qwen access for chat, coding, reasoning, and media tasks." },
+  { key: "QWEN_BASE_URL", label: "Qwen Base URL", hint: "Optional. Custom Qwen endpoint (e.g. https://dashscope.aliyuncs.com/compatible-mode/v1)." },
+  { key: "QWEN_MODEL_CHAT", label: "Qwen Chat Model", hint: "Optional. e.g. qwen-turbo" },
+  { key: "QWEN_MODEL_CODE", label: "Qwen Code Model", hint: "Optional. e.g. qwen-coder-turbo" },
+  { key: "QWEN_MODEL_IMAGE", label: "Qwen Image Model", hint: "Optional. e.g. wanx-v1" },
+  { key: "QWEN_MODEL_VIDEO", label: "Qwen Video Model", hint: "Optional. Configure if Qwen video generation is available." },
+  { key: "QWEN_MODEL_AUDIO", label: "Qwen Audio Model", hint: "Optional. Configure if Qwen voice/audio generation is available." },
 ];
 
 export default function SettingsDialog({ open, onOpenChange }) {
@@ -74,14 +85,17 @@ export default function SettingsDialog({ open, onOpenChange }) {
             return (
               <div key={f.key} className="space-y-1.5">
                 <div className="flex items-center justify-between gap-3">
-                  <Label className="font-mono text-xs tracking-tight">{f.label}</Label>
+                  <Label className="font-mono text-xs tracking-tight">
+                    {f.label}
+                    {f.optional && <span className="ml-1 text-amk-fg3 normal-case">(optional)</span>}
+                  </Label>
                   <span
                     data-testid={`setting-status-${f.key}`}
                     className="font-mono text-[10px] uppercase tracking-wider inline-flex items-center gap-1"
-                    style={{ color: isSet ? "#00E676" : "#FF5722" }}
+                    style={{ color: isSet ? "#00E676" : f.optional ? "#888888" : "#FF5722" }}
                   >
                     {isSet ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />}
-                    {isSet ? `${info.source || "set"} / ${info.preview}` : "not configured"}
+                    {isSet ? `${info.source || "set"} / ${info.preview}` : (f.optional ? "not configured" : "not configured")}
                   </span>
                 </div>
                 <div className="flex gap-2">
@@ -109,6 +123,57 @@ export default function SettingsDialog({ open, onOpenChange }) {
               </div>
             );
           })}
+
+          {/* Qwen optional section */}
+          <div className="border-t border-amk-line pt-4">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3 mb-3">
+              // Qwen (optional direct provider)
+            </div>
+            {QWEN_FIELDS.map((f) => {
+              const info = state[f.key] || {};
+              const isSet = !!info.configured;
+              return (
+                <div key={f.key} className="space-y-1.5 mb-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label className="font-mono text-xs tracking-tight">
+                      {f.label} <span className="text-amk-fg3 normal-case">(optional)</span>
+                    </Label>
+                    <span
+                      data-testid={`setting-status-${f.key}`}
+                      className="font-mono text-[10px] uppercase tracking-wider inline-flex items-center gap-1"
+                      style={{ color: isSet ? "#00E676" : "#555555" }}
+                    >
+                      {isSet ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />}
+                      {isSet ? `${info.source || "set"} / ${info.preview}` : "not configured"}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      data-testid={`setting-input-${f.key}`}
+                      type={f.key === "QWEN_BASE_URL" || f.key.startsWith("QWEN_MODEL_") ? "text" : "password"}
+                      placeholder={isSet ? "Replace value..." : f.key.startsWith("QWEN_MODEL_") ? "Model ID..." : "Paste value..."}
+                      value={values[f.key] || ""}
+                      onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+                      className="bg-amk-base border-amk-line text-amk-fg font-mono text-xs h-9 focus-visible:ring-0 focus-visible:border-white"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={!isSet || info.source === "env"}
+                      onClick={() => clear(f.key)}
+                      title={info.source === "env" ? "Environment values must be removed on the server" : "Clear saved value"}
+                      className="h-9 px-2 border border-amk-line"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                  <p className="font-mono text-[10px] text-amk-fg3">{f.hint}</p>
+                </div>
+              );
+            })}
+          </div>
+
           <div className="border border-amk-line bg-amk-base p-3">
             <div className="flex items-center justify-between">
               <div className="font-mono text-xs text-amk-fg">GitHub status</div>

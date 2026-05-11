@@ -14,6 +14,16 @@ from typing import Any
 
 from .quality_validator import score_project_quality
 
+
+def safe_dict(value: Any) -> dict:
+    """Return *value* if it is already a dict, otherwise return an empty dict.
+
+    Prevents ``AttributeError: 'NoneType' object has no attribute 'get'`` when
+    project sub-documents (selected_stack, media, deployment, etc.) are stored
+    as ``None`` rather than as a missing key.
+    """
+    return value if isinstance(value, dict) else {}
+
 PROJECT_STATUSES = (
     "queued", "classifying", "planning", "generating", "reviewing",
     "validating", "repairing", "preview_preparing", "ready",
@@ -410,7 +420,8 @@ def validate_project_files(project: dict, files: list[dict], prompt: str = "", p
     can_preview = bool(preview_entry and project_type not in {"fullstack-app", "api-service", "repo-upgrade", "automation-bot-scaffold", "trading-bot-scaffold"})
 
     # ── Quality / design / security scoring ──────────────────────────────────
-    auth_required = bool(project.get("auth_required") or project.get("selected_stack", {}).get("auth") not in (None, "none", ""))
+    selected_stack = safe_dict(project.get("selected_stack"))
+    auth_required = bool(project.get("auth_required") or selected_stack.get("auth") not in (None, "none", ""))
     quality_result = score_project_quality(
         files=files,
         project_type=project_type,

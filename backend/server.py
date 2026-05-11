@@ -80,7 +80,19 @@ client = AsyncIOMotorClient(os.environ["MONGO_URL"])
 db = client[os.environ["DB_NAME"]]
 PIPELINE_SEM = asyncio.Semaphore(2)
 LOGIN_ATTEMPTS: dict[str, deque[datetime]] = defaultdict(deque)
-SETTINGS_KEYS = ["GENX_API_KEY", "GITHUB_PAT", "BRAVE_SEARCH_API_KEY", "PIXABAY_API_KEY"]
+SETTINGS_KEYS = [
+    "GENX_API_KEY",
+    "GITHUB_PAT",
+    "BRAVE_SEARCH_API_KEY",
+    "PIXABAY_API_KEY",
+    "QWEN_API_KEY",
+    "QWEN_BASE_URL",
+    "QWEN_MODEL_CHAT",
+    "QWEN_MODEL_CODE",
+    "QWEN_MODEL_IMAGE",
+    "QWEN_MODEL_VIDEO",
+    "QWEN_MODEL_AUDIO",
+]
 
 
 @asynccontextmanager
@@ -251,6 +263,13 @@ class SettingsUpdate(BaseModel):
     GITHUB_PAT: Optional[str] = None
     BRAVE_SEARCH_API_KEY: Optional[str] = None
     PIXABAY_API_KEY: Optional[str] = None
+    QWEN_API_KEY: Optional[str] = None
+    QWEN_BASE_URL: Optional[str] = None
+    QWEN_MODEL_CHAT: Optional[str] = None
+    QWEN_MODEL_CODE: Optional[str] = None
+    QWEN_MODEL_IMAGE: Optional[str] = None
+    QWEN_MODEL_VIDEO: Optional[str] = None
+    QWEN_MODEL_AUDIO: Optional[str] = None
 
 
 class RetryBody(BaseModel):

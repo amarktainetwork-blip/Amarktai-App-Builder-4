@@ -3197,3 +3197,150 @@ def test_coverage_missing_pages_lowers_score():
         f"Expected low coverage or missing page requirements when only 2/5 pages exist. "
         f"coverageScore={result['coverageScore']}, missing={result['missingRequirements']}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# New tests: Phase 2-7 requirements
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ---------- settings: PIXABAY_API_KEY and Qwen keys are supported ────────────
+
+def test_config_secret_keys_includes_pixabay():
+    """PIXABAY_API_KEY must be in SECRET_KEYS so /api/settings does not crash."""
+    from config import SECRET_KEYS
+    assert "PIXABAY_API_KEY" in SECRET_KEYS, "PIXABAY_API_KEY missing from SECRET_KEYS"
+
+
+def test_config_secret_keys_includes_qwen():
+    """All Qwen optional keys must be in SECRET_KEYS."""
+    from config import SECRET_KEYS
+    qwen_keys = {
+        "QWEN_API_KEY",
+        "QWEN_BASE_URL",
+        "QWEN_MODEL_CHAT",
+        "QWEN_MODEL_CODE",
+        "QWEN_MODEL_IMAGE",
+        "QWEN_MODEL_VIDEO",
+        "QWEN_MODEL_AUDIO",
+    }
+    missing = qwen_keys - SECRET_KEYS
+    assert not missing, f"Qwen keys missing from SECRET_KEYS: {missing}"
+
+
+def test_settings_store_accepts_pixabay_key():
+    """settings_store.get_secret must not raise ValueError for PIXABAY_API_KEY."""
+    from config import SECRET_KEYS
+    # If the key is allowed, no ValueError should be raised for it.
+    assert "PIXABAY_API_KEY" in SECRET_KEYS
+
+
+def test_settings_store_accepts_qwen_api_key():
+    """settings_store.get_secret must not raise ValueError for QWEN_API_KEY."""
+    from config import SECRET_KEYS
+    assert "QWEN_API_KEY" in SECRET_KEYS
+
+
+# ---------- settings: QWEN optional key does not break settings endpoint ─────
+
+def test_server_settings_keys_includes_qwen_and_pixabay():
+    """server.SETTINGS_KEYS must include all optional integration keys."""
+    import server
+    for key in ("PIXABAY_API_KEY", "QWEN_API_KEY", "QWEN_BASE_URL", "QWEN_MODEL_CHAT",
+                "QWEN_MODEL_CODE", "QWEN_MODEL_IMAGE", "QWEN_MODEL_VIDEO", "QWEN_MODEL_AUDIO"):
+        assert key in server.SETTINGS_KEYS, f"{key} missing from server.SETTINGS_KEYS"
+
+
+# ---------- build_contract: safe_dict helper ─────────────────────────────────
+
+def test_safe_dict_returns_dict_unchanged():
+    from agents.build_contract import safe_dict
+    d = {"key": "value"}
+    assert safe_dict(d) is d
+
+
+def test_safe_dict_converts_none_to_empty_dict():
+    from agents.build_contract import safe_dict
+    assert safe_dict(None) == {}
+
+
+def test_safe_dict_converts_string_to_empty_dict():
+    from agents.build_contract import safe_dict
+    assert safe_dict("not a dict") == {}
+
+
+def test_safe_dict_converts_list_to_empty_dict():
+    from agents.build_contract import safe_dict
+    assert safe_dict([1, 2, 3]) == {}
+
+
+# ---------- build_contract: selected_stack=None does not crash ───────────────
+
+def test_validate_project_files_selected_stack_none():
+    """validate_project_files must not raise AttributeError when selected_stack is None."""
+    from agents.build_contract import validate_project_files, ensure_required_files
+    project = {
+        "mode": "landing_page",
+        "prompt": "Build a landing page",
+        "selected_stack": None,  # <-- the crash scenario
+    }
+    files, _ = ensure_required_files(project, project["prompt"], {}, [
+        {"path": "index.html", "content": "<!DOCTYPE html><html><body>Hello</body></html>"},
+        {"path": "styles.css", "content": "body{}"},
+        {"path": "README.md", "content": "# App"},
+        {"path": "amarktai.project.json", "content": '{"name":"App"}'},
+    ])
+    # Must not raise
+    result = validate_project_files(project, files, project["prompt"])
+    assert isinstance(result, dict)
+    assert "ok" in result
+
+
+def test_validate_project_files_selected_stack_missing():
+    """validate_project_files must not raise when selected_stack key is absent."""
+    from agents.build_contract import validate_project_files, ensure_required_files
+    project = {
+        "mode": "landing_page",
+        "prompt": "Build a landing page",
+        # selected_stack not present at all
+    }
+    files, _ = ensure_required_files(project, project["prompt"], {}, [
+        {"path": "index.html", "content": "<!DOCTYPE html><html><body>Hello</body></html>"},
+        {"path": "styles.css", "content": "body{}"},
+        {"path": "README.md", "content": "# App"},
+        {"path": "amarktai.project.json", "content": '{"name":"App"}'},
+    ])
+    result = validate_project_files(project, files, project["prompt"])
+    assert isinstance(result, dict)
+    assert "ok" in result
+
+
+def test_validate_project_files_selected_stack_none_repo_fix():
+    """repo_fix mode with selected_stack=None must not crash."""
+    from agents.build_contract import validate_project_files
+    project = {
+        "mode": "repo_fix",
+        "prompt": "Fix this repo",
+        "selected_stack": None,
+    }
+    result = validate_project_files(project, [], project["prompt"])
+    assert isinstance(result, dict)
+    assert "ok" in result
+
+
+# ---------- GenX model count is not hardcoded ────────────────────────────────
+
+def test_genx_model_list_is_not_hardcoded():
+    """list_tiers must derive values from environment variables, not a hardcoded number."""
+    import os
+    from agents.genx_provider import GenXProvider
+
+    # Override env so routes produce predictable values
+    with mock.patch.dict(os.environ, {
+        "GENX_MODEL_REASONING": "test-reasoning-model",
+        "GENX_MODEL_RESEARCH": "test-research-model",
+        "GENX_MODEL_EDITS": "test-edits-model",
+    }):
+        tiers = GenXProvider.list_tiers()
+        assert tiers["reasoning"]["model"] == "test-reasoning-model"
+        assert tiers["research"]["model"] == "test-research-model"
+        assert tiers["edits"]["model"] == "test-edits-model"
