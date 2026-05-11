@@ -39,7 +39,7 @@ function AssetCard({ asset, selected, onSelect, onDelete }) {
 
   return (
     <div
-      className={`relative rounded-lg border overflow-hidden cursor-pointer transition-all ${
+      className={`group relative rounded-lg border overflow-hidden cursor-pointer transition-all ${
         selected ? "ring-2 ring-blue-500 border-blue-500" : "border-white/10 hover:border-white/30"
       } bg-white/5`}
       onClick={() => onSelect(asset)}
@@ -294,7 +294,7 @@ export default function MediaLibraryDialog({
               </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 p-1 group">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 p-1">
               {assets.map((asset) => (
                 <AssetCard
                   key={asset.id}

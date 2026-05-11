@@ -68,7 +68,7 @@ _FRAMEWORK_KEYWORDS = re.compile(
 
 # Keywords that indicate media is relevant
 _MEDIA_KEYWORDS = re.compile(
-    r"\b(image|photo|video|music|audio|media|gallery|background image|hero image|pixabay|logo)\b",
+    r"\b(image|photo|video|music|audio|media|gallery|background|hero|pixabay|logo)\b",
     re.IGNORECASE,
 )
 

@@ -2063,7 +2063,11 @@ async def media_upload(
 
     validation = validate_upload(filename, content, media_type_override)
     if not validation["ok"]:
-        raise HTTPException(400, validation["error"])
+        # Use a safe, curated message — do not echo raw internal errors to client
+        safe_msg = validation.get("error", "Upload rejected")
+        if len(safe_msg) > 200:
+            safe_msg = safe_msg[:200]
+        raise HTTPException(400, safe_msg)
 
     asset_id = str(uuid.uuid4())
     safe_fn = safe_filename(filename)
@@ -2180,12 +2184,13 @@ async def media_serve_thumbnail(asset_id: str, claims: dict = Depends(require_us
     orig_path = Path(storage_path)
     # Try thumbnail first
     thumb_path = orig_path.parent / f"thumb_{orig_path.name}"
-    serve_path = thumb_path if thumb_path.exists() else orig_path
+    serving_thumb = thumb_path.exists()
+    serve_path = thumb_path if serving_thumb else orig_path
     if not serve_path.exists():
         raise HTTPException(404, "File not found on disk")
     content = serve_path.read_bytes()
-    _path_str = str(serve_path)
-    if _path_str.endswith("thumb_") or _path_str.endswith(".jpg"):
+    # Use JPEG MIME for thumbnail files (always JPEG), original MIME for original files
+    if serving_thumb and serve_path.suffix.lower() in (".jpg", ".jpeg"):
         mime = "image/jpeg"
     else:
         mime = doc.get("mime_type", "application/octet-stream")

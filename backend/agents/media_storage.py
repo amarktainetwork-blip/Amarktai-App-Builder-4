@@ -179,8 +179,8 @@ def build_storage_path(user_id: str, asset_id: str, filename: str) -> Path:
 
 
 def build_thumb_path(file_path: Path) -> Path:
-    """Return the thumbnail path for a given asset file path."""
-    return file_path.parent / f"thumb_{file_path.name}"
+    """Return the thumbnail path for a given asset file path (always .jpg extension)."""
+    return file_path.parent / f"thumb_{file_path.stem}.jpg"
 
 
 def save_file(
