@@ -828,7 +828,65 @@ async def models_router(tier: str = "balanced") -> dict:
 
 
 def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str | None) -> dict:
-    """Determine media_strategy for a new project based on mode, tier, and media_requirements."""
+    """Determine media_strategy for a new project based on mode, tier, and media_requirements.
+
+    Explicit media source choices take priority over automatic selection:
+      "pixabay"  → Pixabay stock images/videos (requires PIXABAY_API_KEY)
+      "ai"       → GenX/Qwen AI image generation (requires balanced/premium tier)
+      "css_svg"  → CSS + SVG visual compositions only; no external image URLs
+      "auto"     → best available option (original auto-selection logic)
+    """
+    req = (media_requirements or "auto").lower().strip()
+
+    # ── Explicit "pixabay" choice ──────────────────────────────────────────────
+    if req == "pixabay":
+        return {
+            "mode": "pixabay",
+            "confirmed": True,
+            "models_used": [],
+            "source": "pixabay",
+            "notes": (
+                "Pixabay stock images/videos will be fetched and embedded in the project. "
+                "Requires PIXABAY_API_KEY configured in Settings. "
+                "If the key is missing, a setup warning will be shown instead of images."
+            ),
+        }
+
+    # ── Explicit "ai" choice ───────────────────────────────────────────────────
+    if req == "ai":
+        if quality_tier in ("balanced", "premium"):
+            return {
+                "mode": "ai_generated",
+                "confirmed": False,
+                "models_used": [],
+                "notes": (
+                    "AI image generation will be used if a GenX or Qwen media model is available. "
+                    "Falls back to CSS/SVG visuals if no media model is configured."
+                ),
+            }
+        return {
+            "mode": "placeholder",
+            "confirmed": False,
+            "models_used": [],
+            "notes": (
+                "AI image generation requires balanced or premium tier. "
+                "Upgrade your quality tier to enable AI media."
+            ),
+        }
+
+    # ── Explicit "css_svg" choice ─────────────────────────────────────────────
+    if req == "css_svg":
+        return {
+            "mode": "css_svg",
+            "confirmed": True,
+            "models_used": [],
+            "notes": (
+                "CSS gradients and inline SVG visual compositions only. "
+                "No external image URLs or API calls will be made."
+            ),
+        }
+
+    # ── Auto mode (original logic) ─────────────────────────────────────────────
     wants_media = media_requirements and any(
         kw in media_requirements.lower()
         for kw in ("generat", "image", "video", "audio", "music", "photo", "ai image")
@@ -868,7 +926,63 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
     }
 
 
-# ── Clarification endpoint ────────────────────────────────────────────────────
+@api.get("/qwen/status")
+async def qwen_status() -> dict:
+    """Return optional Qwen direct-provider availability status.
+
+    Checks which Qwen capability keys are configured.
+    Returns honest status for each capability.
+    Never blocks normal builds — Qwen is entirely optional.
+    """
+    qwen_key = await _runtime_secret("QWEN_API_KEY")
+
+    if not qwen_key:
+        return {
+            "configured": False,
+            "api_key_set": False,
+            "capabilities": {
+                "chat":  {"available": False, "status": "not configured"},
+                "code":  {"available": False, "status": "not configured"},
+                "image": {"available": False, "status": "not configured"},
+                "video": {"available": False, "status": "not configured"},
+                "audio": {"available": False, "status": "not configured"},
+            },
+            "note": "Qwen is optional. Add QWEN_API_KEY in Settings to enable.",
+        }
+
+    async def _check_cap(key: str, label: str) -> dict:
+        model = await _runtime_secret(key)
+        if model:
+            return {"available": True, "model": model, "status": "configured"}
+        return {"available": False, "status": "not configured / unavailable"}
+
+    chat  = await _check_cap("QWEN_MODEL_CHAT",  "Chat")
+    code  = await _check_cap("QWEN_MODEL_CODE",  "Code")
+    image = await _check_cap("QWEN_MODEL_IMAGE", "Image generation")
+    video = await _check_cap("QWEN_MODEL_VIDEO", "Video generation")
+    audio = await _check_cap("QWEN_MODEL_AUDIO", "Audio/voice generation")
+
+    base_url = await _runtime_secret("QWEN_BASE_URL")
+
+    return {
+        "configured": True,
+        "api_key_set": True,
+        "base_url": base_url or os.environ.get("QWEN_BASE_URL") or "default",
+        "capabilities": {
+            "chat":  chat,
+            "code":  code,
+            "image": image,
+            "video": video,
+            "audio": audio,
+        },
+        "note": (
+            "Qwen is optional. GenX is the primary provider. "
+            "Qwen is only used for tasks where a specific Qwen model is configured."
+        ),
+    }
+
+
+
 
 class ClarificationRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=12000)

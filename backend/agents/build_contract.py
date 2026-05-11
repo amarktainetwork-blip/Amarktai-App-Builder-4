@@ -428,6 +428,7 @@ def validate_project_files(project: dict, files: list[dict], prompt: str = "", p
         build_mode=build_mode,
         prompt=prompt,
         auth_required=auth_required,
+        media_strategy=project.get("media_strategy"),
     )
 
     # Quality / design / security: contribute to warnings and canFinalize only.
