@@ -19,6 +19,14 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from .genx_provider import GenXProvider
+from .build_contract import (
+    ensure_required_files,
+    extract_files_from_model_output,
+    get_required_files,
+    infer_build_mode,
+    infer_project_type,
+    validate_project_files,
+)
 from .mcp_tools import ProjectFS
 from .prompts import (
     ARCHITECT_PROMPT,
@@ -345,8 +353,10 @@ class Orchestrator:
         await self.db.projects.update_one(
             {"id": self.project_id},
             {"$inc": {"usage.tokens": tokens, "usage.cost_usd": cost_usd},
-             "$set": {"usage.last_model": model_label, "updated_at": _now()}},
+             "$set": {"usage.last_model": model_label, "updated_at": _now()},
+             "$push": {"actual_models_used": {"model": model_label, "estimated_tokens": tokens, "at": _now()}}},
         )
+        await self.db.projects.update_one({"id": self.project_id}, {"$inc": {"model_calls_used": 1}})
         await self.emit({"type": "usage", "data": {
             "delta_tokens": tokens, "delta_cost": cost_usd, "model": model_label,
         }})
@@ -448,6 +458,15 @@ class Orchestrator:
             )
             return {"data": data, "model_label": result["model_label"]}
 
+        extracted_files, extract_warnings, extract_summary = extract_files_from_model_output(raw)
+        if extracted_files:
+            await self._record_event(
+                agent, "completed",
+                f"{agent.title()} done (defensive file extraction).",
+                meta={"model": result["model_label"], "warnings": extract_warnings},
+            )
+            return {"data": {"files": extracted_files, "summary": extract_summary, "warnings": extract_warnings}, "model_label": result["model_label"]}
+
         # Fallback: JSON parsing (backward-compat / model did not follow new format)
         await self._record_event(
             agent, "thinking",
@@ -543,6 +562,54 @@ class Orchestrator:
         await self.emit({"type": "agent_event", "data": evt})
         await self.emit({"type": event_type, "data": {"detail": detail, **(meta or {})}})
 
+    async def _ensure_contract_files(self, prompt: str, plan: dict | None) -> tuple[list[dict], list[str]]:
+        """Run deterministic required-file repair and persist changed files."""
+        project = await self._load_project()
+        current_files = await self.fs.list_full()
+        ensured, changed = ensure_required_files(project, prompt, plan, current_files)
+        await self._emit_validation_event(
+            "required_files_checked",
+            "Required file policy checked.",
+            {"changed": changed},
+        )
+        if changed:
+            by_path = {f["path"]: f for f in ensured}
+            for path in changed:
+                f = by_path[path]
+                await self.fs.write(f["path"], f["content"], f.get("language", "text"))
+                await self.emit({"type": "file_written", "data": {"path": f["path"]}})
+            await self._emit_validation_event(
+                "required_files_repaired",
+                f"Deterministic repair created or updated {len(changed)} required file(s).",
+                {"changed": changed},
+            )
+            ensured = await self.fs.list_full()
+        return ensured, changed
+
+    async def _validate_contract(self, prompt: str, plan: dict | None, repair_pass: int, warnings: list[str]) -> dict:
+        project = await self._load_project()
+        files = await self.fs.list_full()
+        validation = validate_project_files(project, files, prompt=prompt, plan=plan)
+        validation_state = {
+            "status": "passed" if validation["ok"] else "failed",
+            "required_files_present": [p for p in get_required_files(validation["projectType"], None, prompt, plan)
+                                       if any(f["path"] == p for f in files)],
+            "required_files_missing": validation["missingFiles"],
+            "warnings": list(dict.fromkeys(warnings + validation["warnings"])),
+            "errors": validation["errors"],
+            "repair_pass": repair_pass,
+            "preview_entry": validation["previewEntry"],
+            "can_preview": validation["canPreview"],
+            "can_finalize": validation["canFinalize"],
+            "project_type": validation["projectType"],
+        }
+        await self.db.projects.update_one(
+            {"id": self.project_id},
+            {"$set": {"validation_state": validation_state, "repair_attempts": repair_pass}},
+        )
+        await self.emit({"type": "validation_state", "data": validation_state})
+        return validation_state
+
     async def _run_build_pipeline(self, user_prompt: str, mode: str,
                                    stack_decision: dict | None) -> None:
         """Standard Scout → Architect → Coder → Reviewer → Validate → Repair loop pipeline."""
@@ -636,6 +703,7 @@ class Orchestrator:
             coder_data.get("summary", "Files generated."),
             meta={"model": coder["model_label"], "files": [f["path"] for f in generated_files]},
         )
+        await self._ensure_contract_files(user_prompt, arch_data)
 
         # 4) Reviewer (first pass) — non-fatal: if the Reviewer returns invalid JSON and
         #    repair also fails, record the event but continue to deterministic validation.
@@ -665,6 +733,7 @@ class Orchestrator:
                 meta={"model": rev["model_label"], "patched": [f["path"] for f in rev_data.get("patched_files", [])]},
             )
             review_issues = rev_data.get("issues", [])
+            await self._ensure_contract_files(user_prompt, arch_data)
         except Exception as reviewer_err:
             # Reviewer failure is non-fatal: record and proceed to deterministic validation.
             err_detail = f"Reviewer returned invalid output; skipping reviewer patches. Proceeding to validation. Detail: {reviewer_err}"
@@ -672,9 +741,13 @@ class Orchestrator:
                                      meta={"reviewer_error": str(reviewer_err)})
             await self._record_message("system", None, err_detail,
                                        meta={"reviewer_nonfatal": True})
+            await self._ensure_contract_files(user_prompt, arch_data)
 
         # 5) Validation + bounded repair loop
-        required = sd.get("required_files", [])
+        project = await self._load_project()
+        required = get_required_files(infer_project_type(project.get("mode"), project.get("project_type")), infer_build_mode(project.get("mode")), user_prompt, arch_data)
+        if not required:
+            required = sd.get("required_files", [])
         max_repairs = await self._repair_limit()
 
         await self._emit_validation_event(
@@ -685,10 +758,7 @@ class Orchestrator:
 
         for repair_pass in range(max_repairs + 1):
             await self._check_cancel()
-            final_files = await self.fs.list_full()
-            final_paths = {f["path"] for f in final_files}
-            missing = [r for r in required if r not in final_paths]
-            present = [r for r in required if r in final_paths]
+            final_files, _changed = await self._ensure_contract_files(user_prompt, arch_data)
 
             # Run form accessibility check on HTML files (warnings only — added to review_issues)
             if repair_pass == 0:
@@ -699,34 +769,24 @@ class Orchestrator:
                             if ai not in review_issues:
                                 review_issues.append(ai)
 
-            validation_state = {
-                "status": "passed" if not missing else "failed",
-                "required_files_present": present,
-                "required_files_missing": missing,
-                "warnings": review_issues,
-                "errors": [f"Missing required file: {m}" for m in missing] if missing else [],
-                "repair_pass": repair_pass,
-            }
-            await self.db.projects.update_one(
-                {"id": self.project_id},
-                {"$set": {"validation_state": validation_state, "repair_attempts": repair_pass}},
-            )
-            await self.emit({"type": "validation_state", "data": validation_state})
+            validation_state = await self._validate_contract(user_prompt, arch_data, repair_pass, review_issues)
+            missing = validation_state["required_files_missing"]
+            errors = validation_state["errors"]
 
-            if not missing:
+            if validation_state["status"] == "passed":
                 await self._emit_validation_event(
                     "validation_passed",
-                    "All required files present. Validation passed." if repair_pass == 0
+                    "Build contract validation passed." if repair_pass == 0
                     else f"Validation passed after {repair_pass} repair attempt(s).",
-                    {"repair_pass": repair_pass},
+                    {"repair_pass": repair_pass, "preview_entry": validation_state.get("preview_entry")},
                 )
                 break
 
             # Validation failed — attempt repair if within limit
             await self._emit_validation_event(
                 "validation_failed",
-                f"Missing required files: {', '.join(missing)}",
-                {"missing": missing, "repair_pass": repair_pass},
+                "; ".join(errors[:5]) or f"Missing required files: {', '.join(missing)}",
+                {"missing": missing, "errors": errors, "repair_pass": repair_pass},
             )
 
             if repair_pass >= max_repairs:
@@ -738,8 +798,8 @@ class Orchestrator:
                     {"missing": missing, "max_repairs": max_repairs},
                 )
                 err = (
-                    f"Build completed but required files are still missing after {repair_pass} "
-                    f"repair attempt(s): {', '.join(missing)}"
+                    f"Build contract validation failed after {repair_pass} "
+                    f"repair attempt(s): {'; '.join(errors or missing)}"
                 )
                 await self._fail_project("validator", err)
                 await self._record_message("system", None, err, meta={"error": err})
@@ -750,8 +810,8 @@ class Orchestrator:
             await self._emit_validation_event(
                 "repair_started",
                 f"Repair attempt {repair_pass + 1}/{max_repairs}: "
-                f"asking Reviewer to add missing files: {', '.join(missing)}",
-                {"missing": missing, "attempt": repair_pass + 1},
+                f"asking Reviewer to fix validation errors.",
+                {"missing": missing, "errors": errors, "attempt": repair_pass + 1},
             )
             await self._check_cancel()
             repair_files = await self.fs.list_full()
@@ -759,6 +819,7 @@ class Orchestrator:
                 "mode": mode,
                 "required_files": required,
                 "missing_files": missing,
+                "validation_errors": errors,
                 "repair_attempt": repair_pass + 1,
                 "files": [{"path": f["path"], "content": f["content"]} for f in repair_files
                           if f["path"] not in _META_FILES],
@@ -766,9 +827,9 @@ class Orchestrator:
             }, indent=2)
             repair_prompt = (
                 REVIEWER_PROMPT
-                + f"\n\nCRITICAL: The following required files are MISSING and MUST be generated now: "
-                + json.dumps(missing)
-                + "\nYou MUST include all missing files in patched_files with complete content."
+                + "\n\nCRITICAL: Fix these validation errors without removing existing working files: "
+                + json.dumps(errors or missing)
+                + "\nReturn patched_files with complete content for only the files that must change."
             )
             try:
                 repair_res = await self._run_agent("reviewer", repair_prompt, repair_input)
@@ -783,6 +844,7 @@ class Orchestrator:
                     {"patched": [f["path"] for f in patched]},
                 )
                 review_issues = repair_data.get("issues", review_issues)
+                await self._ensure_contract_files(user_prompt, arch_data)
             except Exception as repair_err:
                 await self._emit_validation_event(
                     "repair_failed",
@@ -898,6 +960,13 @@ class Orchestrator:
                   "changes": fix_data.get("changes_made", []),
                   "files": [f["path"] for f in fix_data.get("files", [])]},
         )
+        await self._ensure_contract_files(user_prompt, stack_decision)
+        validation_state = await self._validate_contract(user_prompt, stack_decision, 0, [])
+        if validation_state["status"] != "passed":
+            err = "Repo update validation failed: " + "; ".join(validation_state["errors"])
+            await self._fail_project("validator", err)
+            await self._record_message("system", None, err, meta={"error": err})
+            return
         await self._set_status("ready", {
             "completed_at": _now(),
             "preview_strategy": "repo_structure",
@@ -930,9 +999,19 @@ class Orchestrator:
             }
             iter_res = await self._run_agent_blocks("iteration", ITERATION_PROMPT, json.dumps(payload, indent=2))
             data = iter_res["data"]
+            if not data.get("files"):
+                raise ValueError("Iteration returned no editable file changes.")
             for f in data.get("files", []):
                 await self.fs.write(f["path"], f["content"], f.get("language", "text"))
                 await self.emit({"type": "file_written", "data": {"path": f["path"]}})
+            project = await self._load_project()
+            await self._ensure_contract_files(project.get("prompt", ""), None)
+            validation_state = await self._validate_contract(project.get("prompt", ""), None, 0, [])
+            if validation_state["status"] != "passed":
+                err = "Iteration validation failed: " + "; ".join(validation_state["errors"])
+                await self._fail_project("validator", err)
+                await self._record_message("system", None, err, meta={"error": err})
+                return
             await self._record_message(
                 "agent", "iteration",
                 data.get("summary", "Updated."),
@@ -997,6 +1076,14 @@ class Orchestrator:
                 for f in generated_files:
                     await self.fs.write(f["path"], f["content"], f.get("language", "text"))
                     await self.emit({"type": "file_written", "data": {"path": f["path"]}})
+                project = await self._load_project()
+                await self._ensure_contract_files(project.get("prompt", ""), arch_data)
+                validation_state = await self._validate_contract(project.get("prompt", ""), arch_data, 0, [])
+                if validation_state["status"] != "passed":
+                    err = "Coder retry validation failed: " + "; ".join(validation_state["errors"])
+                    await self._fail_project("validator", err)
+                    await self._record_message("system", None, err, meta={"error": err})
+                    return
                 await self._record_message(
                     "agent", "coder",
                     coder_data.get("summary", "Files regenerated."),
@@ -1027,6 +1114,14 @@ class Orchestrator:
                 for f in rev_data.get("patched_files", []):
                     await self.fs.write(f["path"], f["content"], f.get("language", "text"))
                     await self.emit({"type": "file_written", "data": {"path": f["path"]}})
+                project = await self._load_project()
+                await self._ensure_contract_files(project.get("prompt", ""), None)
+                validation_state = await self._validate_contract(project.get("prompt", ""), None, 0, [])
+                if validation_state["status"] != "passed":
+                    err = f"{label} retry validation failed: " + "; ".join(validation_state["errors"])
+                    await self._fail_project("validator", err)
+                    await self._record_message("system", None, err, meta={"error": err})
+                    return
                 await self._record_message(
                     "agent", "reviewer",
                     f"**Verdict:** {rev_data.get('verdict', 'pass')}\n\n"
