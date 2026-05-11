@@ -23,6 +23,8 @@ export default function RepoWorkbenchPanel({
   repoAnalysis: analysisOverride,
   coverage: coverageOverride,
   onRunPreview,
+  onContinueMissing,
+  busy,
 }) {
   const [analysis, setAnalysis] = useState(analysisOverride || null);
   const [coverage, setCoverage] = useState(coverageOverride || null);
@@ -172,6 +174,17 @@ export default function RepoWorkbenchPanel({
                       <span className="shrink-0">·</span><span>{m}</span>
                     </div>
                   ))}
+                  {onContinueMissing && coverage.missingRequirements.length > 0 && (
+                    <button
+                      type="button"
+                      data-testid="continue-missing-requirements-btn"
+                      disabled={busy}
+                      onClick={() => onContinueMissing(coverage.missingRequirements)}
+                      className="mt-1 px-2 py-0.5 border border-agent-coder text-[9px] uppercase tracking-wider text-agent-coder bg-agent-coder/10 hover:bg-agent-coder/20 disabled:opacity-50 transition-colors"
+                    >
+                      Continue building missing requirements
+                    </button>
+                  )}
                 </div>
               )}
             </div>

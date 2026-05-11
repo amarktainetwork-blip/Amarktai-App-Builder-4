@@ -48,6 +48,8 @@ export default function WorkspacePage() {
   const [coverageResult, setCoverageResult] = useState(null);
   // Phase 3: Preview fallback object
   const [previewFallback, setPreviewFallback] = useState(null);
+  // Iteration result: changedFiles, addedFiles
+  const [iterationResult, setIterationResult] = useState(null);
 
   const wsRef = useRef(null);
 
@@ -187,6 +189,10 @@ export default function WorkspacePage() {
       setRefreshKey((k) => k + 1);
     } else if (evt.type === "job_cancel_requested") {
       setCancelling(true);
+    } else if (evt.type === "iteration_complete") {
+      if (evt.data) {
+        setIterationResult(evt.data);
+      }
     }
   }, [projectId]);
 
@@ -313,6 +319,20 @@ export default function WorkspacePage() {
     }
   };
 
+  // Continue building missing requirements (coverage < 80)
+  const continueMissingRequirements = async (missingReqs) => {
+    const msg = `Continue building the missing requirements: ${missingReqs.join(", ")}`;
+    try {
+      if (project?.mode === "repo_fix" || project?.github) {
+        await Projects.iterate(projectId, msg);
+      } else {
+        await Projects.send(projectId, msg);
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to continue building");
+    }
+  };
+
   // Determine if this is a repo-imported project
   const isRepoProject = !!(project?.mode === "repo_fix" || project?.github);
 
@@ -431,8 +451,44 @@ export default function WorkspacePage() {
               repoAnalysis={repoAnalysis}
               coverage={coverageResult}
               onRunPreview={runPreviewFallback}
+              onContinueMissing={continueMissingRequirements}
+              busy={busy}
             />
           )}
+          {/* Iteration result: show changed/added files after a successful iteration */}
+          {(() => {
+            const hasIterationResult = iterationResult && !busy && (
+              iterationResult.changedFiles?.length > 0 || iterationResult.addedFiles?.length > 0
+            );
+            if (!hasIterationResult) return null;
+            return (
+              <div
+                data-testid="iteration-result-panel"
+                className="border-y border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px]"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-agent-coder uppercase tracking-wider">Iteration complete</span>
+                  <button
+                    type="button"
+                    onClick={() => setIterationResult(null)}
+                    className="text-amk-fg3 hover:text-white text-[9px] uppercase tracking-wider"
+                  >
+                    dismiss
+                  </button>
+                </div>
+                {iterationResult.changedFiles?.length > 0 && (
+                  <div className="mt-1 text-amk-fg2">
+                    Changed: {iterationResult.changedFiles.join(", ")}
+                  </div>
+                )}
+                {iterationResult.addedFiles?.length > 0 && (
+                  <div className="mt-0.5 text-amk-fg2">
+                    Added: {iterationResult.addedFiles.join(", ")}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <ChatPanel messages={messages} onSend={send} disabled={busy} busy={busy} />
         </aside>
 

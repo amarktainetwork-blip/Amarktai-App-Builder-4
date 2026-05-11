@@ -219,6 +219,42 @@ def _score_static_landing(
             f"CSS is very thin ({len(css_content)} chars). Expected substantial styling."
         )
 
+    # Multi-page: verify that every HTML page links a stylesheet
+    # Collect all HTML pages in the files_by_path dict
+    html_pages = [
+        (path, f)
+        for path, f in files_by_path.items()
+        if isinstance(path, str) and path.endswith((".html", ".htm"))
+    ]
+    if len(html_pages) > 1:
+        pages_without_css: list[str] = []
+        for pg_path, pg_f in html_pages:
+            pg_content = pg_f.get("content", "")
+            has_styling = bool(
+                re.search(r'<link[^>]+rel=["\']stylesheet["\']', pg_content, re.IGNORECASE)
+                or re.search(r'<link[^>]+href=["\'][^"\']*\.css["\']', pg_content, re.IGNORECASE)
+                or re.search(r'<style[\s>]', pg_content, re.IGNORECASE)
+            )
+            if not has_styling:
+                pages_without_css.append(pg_path)
+        if pages_without_css:
+            penalty = min(30, len(pages_without_css) * 10)
+            design -= penalty
+            design_errors.append(
+                f"{len(pages_without_css)} page(s) have no linked stylesheet: "
+                f"{', '.join(pages_without_css[:3])}"
+            )
+        # If there are no CSS files at all and multiple pages, apply a severe design penalty
+        has_any_css = any(
+            path.endswith(".css") for path in files_by_path
+        )
+        if not has_any_css and len(html_pages) >= 2:
+            design -= 50
+            design_errors.append(
+                "Multi-page site has no CSS file at all. "
+                "All pages require a shared stylesheet."
+            )
+
     return max(0, quality), max(0, design), quality_errors, design_errors
 
 

@@ -58,6 +58,8 @@ export const Projects = {
   fileContent: (id, path) =>
     api.get(`/projects/${id}/files/content`, { params: { path } }).then((r) => r.data),
   send: (id, content) => api.post(`/projects/${id}/messages`, { content }).then((r) => r.data),
+  iterate: (id, message, opts = {}) =>
+    api.post(`/projects/${id}/iterate`, { message, ...opts }).then((r) => r.data),
   cancel: (id) => api.post(`/projects/${id}/cancel`).then((r) => r.data),
   retry: (id, agent, quality_tier) =>
     api.post(`/projects/${id}/retry`, { agent, quality_tier }).then((r) => r.data),

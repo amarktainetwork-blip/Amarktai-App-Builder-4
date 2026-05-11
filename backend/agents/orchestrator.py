@@ -1023,7 +1023,10 @@ class Orchestrator:
         """
         await self._check_cancel()
         current_files = await self.fs.list_full()
-        app_files = [f for f in current_files if f["path"] not in _META_FILES]
+        # Defensive: current_files may be None if DB returns None
+        if not isinstance(current_files, list):
+            current_files = []
+        app_files = [f for f in current_files if isinstance(f, dict) and f.get("path") not in _META_FILES]
         if not app_files:
             err = "No imported repo files found. Import a GitHub repo before requesting fixes."
             await self._fail_project("scout", err)
@@ -1031,7 +1034,7 @@ class Orchestrator:
             return
 
         # ── Phase 4: Detect update intent ─────────────────────────────────────
-        intent = detect_update_intent(user_prompt, app_files)
+        intent = detect_update_intent(user_prompt or "", app_files)
         await self.emit({"type": "repo_import_started", "data": {"intent": intent}})
         await self._record_event(
             "coder", "started",
@@ -1041,19 +1044,41 @@ class Orchestrator:
 
         # ── Analyse repo profile ───────────────────────────────────────────────
         project = await self._load_project()
-        repo_full_name = (project.get("github") or {}).get("html_url", "")
-        repo_profile = analyze_repo_profile(app_files, repo_full_name)
+        # Defensive: project may be None or partial
+        if not isinstance(project, dict):
+            project = {}
+        repo_full_name = (project.get("github") or {}).get("html_url", "") or ""
+        try:
+            repo_profile = analyze_repo_profile(app_files, repo_full_name)
+        except Exception as exc:
+            # If repo analysis fails, use a minimal safe fallback
+            await self._record_event("coder", "warn",
+                                     f"Repo analysis failed ({exc}); using fallback profile.",
+                                     meta={"error": str(exc)})
+            repo_profile = {
+                "detectedType": "unknown", "frameworks": [], "languages": [],
+                "databases": [], "authDetected": [], "frontendPath": "",
+                "backendPath": "", "packageManager": "unknown",
+                "installCommands": [], "buildCommands": [], "devCommands": [],
+                "testCommands": [], "previewStrategy": "unknown",
+                "previewStrategyNote": "Analysis failed — using fallback.",
+                "envRequired": [], "dockerAvailable": False, "canPreview": False,
+                "previewBlockers": ["Repo analysis failed."], "routeMap": [],
+                "riskNotes": [], "recommendedPlan": [], "fileCount": len(app_files),
+                "fileTree": [f.get("path", "") for f in app_files[:50]],
+                "readmeContent": "", "repoFullName": repo_full_name,
+            }
         await self.db.projects.update_one(
             {"id": self.project_id},
             {"$set": {"repo_profile": repo_profile, "update_intent": intent, "updated_at": _now()}},
         )
         await self.emit({"type": "repo_analysis_complete", "data": {
-            "detectedType": repo_profile["detectedType"],
-            "frameworks": repo_profile["frameworks"],
-            "languages": repo_profile["languages"],
+            "detectedType": repo_profile.get("detectedType", "unknown"),
+            "frameworks": repo_profile.get("frameworks", []),
+            "languages": repo_profile.get("languages", []),
             "intent": intent,
-            "canPreview": repo_profile["canPreview"],
-            "previewBlockers": repo_profile["previewBlockers"],
+            "canPreview": repo_profile.get("canPreview", False),
+            "previewBlockers": repo_profile.get("previewBlockers", []),
         }})
 
         # ── For full app completion: use the full build pipeline ───────────────
@@ -1073,15 +1098,15 @@ class Orchestrator:
                 user_prompt,
                 "",
                 "[REPO CONTEXT]",
-                f"Detected type: {repo_profile['detectedType']}",
-                f"Frameworks: {', '.join(repo_profile['frameworks'])}",
-                f"Languages: {', '.join(repo_profile['languages'])}",
-                f"Databases: {', '.join(repo_profile['databases'])}",
-                f"Auth: {', '.join(repo_profile['authDetected'])}",
-                f"Frontend path: {repo_profile['frontendPath']}",
-                f"Backend path: {repo_profile['backendPath']}",
-                f"Env required: {', '.join(repo_profile['envRequired'][:8])}",
-                f"Existing routes: {', '.join(repo_profile['routeMap'][:10])}",
+                f"Detected type: {repo_profile.get('detectedType', 'unknown')}",
+                f"Frameworks: {', '.join(repo_profile.get('frameworks', []))}",
+                f"Languages: {', '.join(repo_profile.get('languages', []))}",
+                f"Databases: {', '.join(repo_profile.get('databases', []))}",
+                f"Auth: {', '.join(repo_profile.get('authDetected', []))}",
+                f"Frontend path: {repo_profile.get('frontendPath', '')}",
+                f"Backend path: {repo_profile.get('backendPath', '')}",
+                f"Env required: {', '.join(repo_profile.get('envRequired', [])[:8])}",
+                f"Existing routes: {', '.join(repo_profile.get('routeMap', [])[:10])}",
             ]
             enriched_prompt = "\n".join(ctx_lines)
             # Determine appropriate build mode from repo profile
@@ -1091,7 +1116,7 @@ class Orchestrator:
                 "next": "web_app",
                 "fullstack": "full_stack",
                 "api_service": "api_service",
-            }.get(repo_profile["detectedType"], "web_app")
+            }.get(repo_profile.get("detectedType", "unknown"), "web_app")
             await self._run_build_pipeline(enriched_prompt, repo_mode, stack_decision)
             return
 
@@ -1100,21 +1125,30 @@ class Orchestrator:
             "request": user_prompt,
             "intent": intent,
             "repo_profile": {
-                "detectedType": repo_profile["detectedType"],
-                "frameworks": repo_profile["frameworks"],
-                "databases": repo_profile["databases"],
-                "envRequired": repo_profile["envRequired"],
+                "detectedType": repo_profile.get("detectedType", "unknown"),
+                "frameworks": repo_profile.get("frameworks", []),
+                "databases": repo_profile.get("databases", []),
+                "envRequired": repo_profile.get("envRequired", []),
             },
             "files": [{"path": f["path"], "content": f["content"]} for f in app_files],
         }, indent=2)
         fix = await self._run_agent_blocks("repo_fix", REPO_FIX_PROMPT, fix_input)
         await self._check_cancel()
-        fix_data = fix["data"] or {}
+        # Defensive: fix["data"] may be None or non-dict if model returned unexpected output
+        fix_data = fix.get("data") if isinstance(fix.get("data"), dict) else {}
         changed: list[str] = []
         added: list[str] = []
         existing_paths = {f["path"] for f in app_files}
-        for f in fix_data.get("files", []):
-            await self.fs.write(f["path"], f["content"], f.get("language", "text"))
+        for f in (fix_data.get("files") or []):
+            if not isinstance(f, dict) or not f.get("path"):
+                # Log malformed entries from model output to aid debugging
+                await self._record_event(
+                    "coder", "warn",
+                    f"Skipping malformed file entry in fix_data: {f!r:.200}",
+                    meta={"malformed_entry": True},
+                )
+                continue
+            await self.fs.write(f["path"], f.get("content", ""), f.get("language", "text"))
             await self.emit({"type": "file_written", "data": {"path": f["path"]}})
             if f["path"] in existing_paths:
                 changed.append(f["path"])
@@ -1123,10 +1157,10 @@ class Orchestrator:
         await self._record_message(
             "agent", "coder",
             fix_data.get("summary", "Repo updated."),
-            meta={"model": fix["model_label"],
+            meta={"model": fix.get("model_label", "unknown"),
                   "intent": intent,
                   "changes": fix_data.get("changes_made", []),
-                  "files": [f["path"] for f in fix_data.get("files", [])]},
+                  "files": [f["path"] for f in (fix_data.get("files") or []) if isinstance(f, dict)]},
         )
         await self._ensure_contract_files(user_prompt, stack_decision)
         validation_state = await self._validate_contract(user_prompt, stack_decision, 0, [])
@@ -1138,6 +1172,8 @@ class Orchestrator:
 
         # ── Phase 5: Coverage score ────────────────────────────────────────────
         final_files = await self.fs.list_full()
+        if not isinstance(final_files, list):
+            final_files = []
         coverage = compute_coverage_score(
             prompt=user_prompt,
             files=final_files,
@@ -1169,6 +1205,16 @@ class Orchestrator:
         await self._set_status("running")
         await self._record_message("user", None, user_prompt)
         try:
+            # ── Route repo_fix projects through _run_repo_fix ─────────────────
+            # Imported repos must iterate through the repo-fix pipeline so that:
+            #   - repo_profile context is preserved
+            #   - full_app_completion intent is detected and escalated correctly
+            #   - NoneType crashes from missing repo context are avoided
+            project_meta = await self._load_project()
+            if project_meta.get("mode") == "repo_fix" or project_meta.get("github"):
+                await self._run_repo_fix(user_prompt, None)
+                return
+
             current_files = await self.fs.list_full()
             app_files = [f for f in current_files if f["path"] not in _META_FILES]
 
@@ -1182,20 +1228,27 @@ class Orchestrator:
                 await self._record_message("system", None, msg, meta={"iteration_blocked": True})
                 return
 
+            existing_paths = {f["path"] for f in app_files}
             payload: dict[str, Any] = {
                 "request": user_prompt,
                 "files": [{"path": f["path"], "content": f["content"]} for f in app_files],
             }
             iter_res = await self._run_agent_blocks("iteration", ITERATION_PROMPT, json.dumps(payload, indent=2))
             # Guard: model may return null/non-dict JSON — treat as empty rather than crash
-            data = iter_res["data"] if isinstance(iter_res["data"], dict) else {}
+            data = iter_res["data"] if isinstance(iter_res.get("data"), dict) else {}
             if not data.get("files"):
                 raise ValueError("Iteration returned no editable file changes.")
-            changed_paths: list[str] = []
+
+            changed: list[str] = []
+            added: list[str] = []
             for f in data.get("files", []):
                 await self.fs.write(f["path"], f["content"], f.get("language", "text"))
                 await self.emit({"type": "file_written", "data": {"path": f["path"]}})
-                changed_paths.append(f["path"])
+                if f["path"] in existing_paths:
+                    changed.append(f["path"])
+                else:
+                    added.append(f["path"])
+
             project = await self._load_project()
             await self._ensure_contract_files(project.get("prompt", ""), None)
             validation_state = await self._validate_contract(project.get("prompt", ""), None, 0, [])
@@ -1204,14 +1257,38 @@ class Orchestrator:
                 await self._fail_project("validator", err)
                 await self._record_message("system", None, err, meta={"error": err})
                 return
+
+            # Update coverage score after iteration
+            final_files = await self.fs.list_full()
+            coverage = compute_coverage_score(
+                prompt=project.get("prompt", user_prompt),
+                files=final_files,
+                mode=project.get("mode", "web_app"),
+                intent="small_patch",
+                changed_files=changed,
+                added_files=added,
+            )
+            await self.db.projects.update_one(
+                {"id": self.project_id},
+                {"$set": {"coverage_score": coverage, "updated_at": _now()}},
+            )
+            await self.emit({"type": "coverage_score", "data": coverage})
+
             await self._record_message(
                 "agent", "iteration",
                 data.get("summary", "Updated."),
                 meta={"model": iter_res["model_label"],
-                      "files": changed_paths},
+                      "files": [f["path"] for f in data.get("files", [])],
+                      "changedFiles": changed,
+                      "addedFiles": added},
             )
             await self._set_status("ready")
-            await self.emit({"type": "build_complete", "data": {"changedFiles": changed_paths}})
+            await self.emit({"type": "iteration_complete", "data": {
+                "changedFiles": changed,
+                "addedFiles": added,
+                "summary": data.get("summary", "Updated."),
+            }})
+            await self.emit({"type": "build_complete", "data": {"changedFiles": changed}})
         except Exception as e:
             err = str(e)
             await self._fail_project("iteration", err)

@@ -142,6 +142,36 @@ def _has_media(files: list[dict]) -> bool:
     )
 
 
+def _has_css_file(files: list[dict]) -> bool:
+    """Check if a standalone CSS file exists."""
+    return any(f["path"].endswith(".css") for f in files)
+
+
+def _css_linked_in_pages(files: list[dict]) -> tuple[int, int]:
+    """Return (total_html_pages, pages_with_linked_css_or_styling).
+
+    A page is considered styled if it has:
+    - A <link rel="stylesheet"> or <link href="*.css"> tag
+    - Inline <style> block
+    - Tailwind/framework utility classes (heuristic)
+    """
+    html_files = [f for f in files if f["path"].endswith((".html", ".htm"))]
+    if not html_files:
+        return 0, 0
+    linked = 0
+    for f in html_files:
+        content = f.get("content", "")
+        if (
+            re.search(r'<link[^>]+rel=["\']stylesheet["\']', content, re.IGNORECASE)
+            or re.search(r'<link[^>]+href=["\'][^"\']*\.css["\']', content, re.IGNORECASE)
+            or re.search(r'<style[\s>]', content, re.IGNORECASE)
+            # Tailwind / utility-class heuristic
+            or re.search(r'class=["\'][^"\']*(?:flex|grid|p-\d|m-\d|text-\w|bg-\w|border)[^"\']*["\']', content)
+        ):
+            linked += 1
+    return len(html_files), linked
+
+
 # ── Main coverage scorer ──────────────────────────────────────────────────────
 
 def compute_coverage_score(
@@ -278,6 +308,29 @@ def compute_coverage_score(
         substantial = len(app_files) >= 5
         check("substantial file set for full app completion (>=5 files)", substantial, 12)
         check("README.md present", _has_readme(files), 5)
+
+    # ── CSS / Stylesheet checks for websites / landing pages ─────────────
+    _WEBSITE_MODES = ("website", "landing_page", "media_page",
+                      "multi-page-website", "multi_page_website")
+    is_website_mode = mode in _WEBSITE_MODES
+    total_html, linked_html = _css_linked_in_pages(files)
+    css_check_required = is_website_mode or total_html >= 2
+    if css_check_required:
+        has_css = _has_css_file(files)
+        check("stylesheet (CSS file) present", has_css, 12)
+        if total_html > 1:
+            all_linked = (linked_html == total_html and total_html > 0)
+            check(
+                f"all HTML pages link a stylesheet ({linked_html}/{total_html})",
+                all_linked,
+                10,
+            )
+        elif total_html == 1:
+            check(
+                "HTML page links a stylesheet",
+                linked_html >= 1,
+                8,
+            )
 
     # ── Compute score ─────────────────────────────────────────────────────
     if total_points == 0:
