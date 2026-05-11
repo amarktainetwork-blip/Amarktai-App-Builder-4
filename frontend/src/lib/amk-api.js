@@ -61,9 +61,24 @@ export const Projects = {
   cancel: (id) => api.post(`/projects/${id}/cancel`).then((r) => r.data),
   retry: (id, agent, quality_tier) =>
     api.post(`/projects/${id}/retry`, { agent, quality_tier }).then((r) => r.data),
-  finalize: (id) => api.post(`/projects/${id}/finalize`).then((r) => r.data),
+  finalize: (id, opts = {}) => api.post(`/projects/${id}/finalize`, opts).then((r) => r.data),
+  finalizeAsBranch: (id) => api.post(`/projects/${id}/finalize/branch-pr`).then((r) => r.data),
   openPR: (id, body) => api.post(`/projects/${id}/pr`, body).then((r) => r.data),
   previewUrl: (id) => `${API}/projects/${id}/preview?token=${encodeURIComponent(getToken() || "")}`,
+};
+
+export const Clarify = {
+  check: (prompt, mode) => api.post("/clarify", { prompt, mode }).then((r) => r.data),
+  apply: (original_prompt, answers) =>
+    api.post("/clarify/apply", { original_prompt, answers }).then((r) => r.data),
+};
+
+export const Media = {
+  images: (query, opts = {}) =>
+    api.get("/media/images", { params: { query, ...opts } }).then((r) => r.data),
+  videos: (query, opts = {}) =>
+    api.get("/media/videos", { params: { query, ...opts } }).then((r) => r.data),
+  styles: () => api.get("/design/styles").then((r) => r.data),
 };
 
 export const Settings = {
@@ -74,6 +89,7 @@ export const Settings = {
 
 export const Models = {
   list: () => api.get("/models").then((r) => r.data),
+  audioStatus: () => api.get("/models/audio").then((r) => r.data),
 };
 
 export const System = {

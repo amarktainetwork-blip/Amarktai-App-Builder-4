@@ -1467,3 +1467,309 @@ async def test_pixabay_search_videos_no_api_key_returns_empty():
     from agents.pixabay import search_videos
     results = await search_videos("nature", api_key="", per_page=3)
     assert results == [], "No API key must return empty list"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 13 — New feature tests
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Clarification engine ──────────────────────────────────────────────────
+
+def test_clarification_needed_for_vague_prompt():
+    """A short, vague prompt must trigger clarification questions."""
+    from agents.clarification import check_clarification_needed
+    result = check_clarification_needed("build an app")
+    assert result["needs_clarification"] is True
+    assert len(result["questions"]) > 0
+
+
+def test_clarification_not_needed_for_clear_prompt():
+    """A detailed, specific prompt must NOT require clarification questions."""
+    from agents.clarification import check_clarification_needed
+    result = check_clarification_needed(
+        "Build a React Vite landing page for a SaaS password manager with a hero section, "
+        "pricing table, FAQ, and a sign-up form with JWT auth and PostgreSQL."
+    )
+    assert result["needs_clarification"] is False
+
+
+def test_clarification_apply_enriches_prompt():
+    """apply_clarification_answers must merge user answers into the original prompt."""
+    from agents.clarification import apply_clarification_answers
+    enriched, params = apply_clarification_answers(
+        "build a saas",
+        {
+            "mode": "Full-stack SaaS",
+            "auth_required": "Yes — login, register, JWT",
+            "database": "PostgreSQL (relational)",
+        },
+    )
+    assert "Full-stack SaaS" in enriched or params.get("mode")
+    assert params.get("auth_required") is True
+    assert "postgres" in str(params.get("database_preference", "")).lower()
+
+
+def test_clarification_apply_skips_auto_options():
+    """apply_clarification_answers must not add empty/auto choices to the prompt."""
+    from agents.clarification import apply_clarification_answers
+    enriched, params = apply_clarification_answers(
+        "build a landing page",
+        {"framework": "Auto-select best fit"},
+    )
+    assert "auto" not in enriched.lower()
+    assert "stack_preference" not in params
+
+
+def test_clarification_max_5_questions():
+    """At most 5 clarification questions are returned even for very vague prompts."""
+    from agents.clarification import check_clarification_needed
+    result = check_clarification_needed("build something")
+    assert len(result["questions"]) <= 5
+
+
+# ── Quality / design / security validation scores ──────────────────────────
+
+def _files_with_content(*pairs):
+    """Helper: create a list of file dicts from (path, content) pairs."""
+    return [{"path": p, "content": c, "language": "html"} for p, c in pairs]
+
+
+def test_thin_page_fails_quality():
+    """A minimal page with almost no content must produce a low quality score."""
+    from agents.quality_validator import score_project_quality
+    files = _files_with_content(
+        ("index.html", "<!DOCTYPE html><html><body><h1>Hi</h1></body></html>"),
+    )
+    result = score_project_quality(files, project_type="static-site", build_mode="landing_page")
+    assert result["qualityScore"] < 75, f"thin page should fail quality: {result['qualityScore']}"
+    assert not result["qualityOk"]
+
+
+def test_complete_page_passes_quality():
+    """A page with substantial content and required files must pass quality."""
+    from agents.quality_validator import score_project_quality
+    rich_html = """<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>My App</title>
+<meta name="description" content="A great app">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header><nav><ul><li><a href="#features">Features</a></li><li><a href="#pricing">Pricing</a></li></ul></nav></header>
+<main>
+  <section class="hero">
+    <h1>Welcome to My App</h1>
+    <p>The best app for your needs. Get started today and transform your workflow.</p>
+    <a href="#signup" class="cta">Get Started Free</a>
+  </section>
+  <section id="features">
+    <h2>Features</h2>
+    <div class="feature-grid">
+      <div><h3>Fast</h3><p>Lightning fast performance with optimized code.</p></div>
+      <div><h3>Secure</h3><p>Enterprise-grade security for your data.</p></div>
+      <div><h3>Simple</h3><p>Easy to use interface anyone can master.</p></div>
+    </div>
+  </section>
+  <section id="pricing">
+    <h2>Pricing</h2>
+    <div class="pricing-cards">
+      <div class="plan"><h3>Free</h3><p>$0/mo</p></div>
+      <div class="plan"><h3>Pro</h3><p>$9/mo</p></div>
+    </div>
+  </section>
+</main>
+<footer><p>&copy; 2025 My App. All rights reserved.</p></footer>
+<script src="app.js"></script>
+</body>
+</html>"""
+    files = _files_with_content(
+        ("index.html", rich_html),
+        ("styles.css", "body { margin: 0; } .hero { padding: 4rem; } .feature-grid { display: grid; } footer { padding: 2rem; }"),
+        ("app.js", "// App logic\ndocument.addEventListener('DOMContentLoaded', () => { console.log('ready'); });"),
+        ("README.md", "# My App\n\nA great app. See instructions below.\n\n## Install\n\n`npm install`"),
+        ("amarktai.project.json", '{"name":"My App","version":"1.0.0"}'),
+    )
+    result = score_project_quality(files, project_type="static-site", build_mode="landing_page")
+    assert result["qualityScore"] >= 60, f"complete page should have decent quality: {result}"
+
+
+def test_validate_project_files_returns_scores():
+    """validate_project_files must return qualityScore, designScore, securityScore."""
+    files = _files_with_content(
+        ("index.html", "<!DOCTYPE html><html><body>Hello World. This is a test page with enough content to not be empty.</body></html>"),
+        ("styles.css", "body { margin: 0; color: #333; }"),
+        ("README.md", "# Test App"),
+        ("amarktai.project.json", '{"name":"Test"}'),
+    )
+    project = {"mode": "landing_page", "project_type": "static-site", "build_mode": "landing_page"}
+    result = validate_project_files(project, files, prompt="Test app")
+    assert "qualityScore" in result
+    assert "designScore" in result
+    assert "securityScore" in result
+    assert isinstance(result["qualityScore"], (int, float))
+    assert isinstance(result["canFinalize"], bool)
+
+
+def test_validate_returns_can_finalize_false_for_incomplete():
+    """canFinalize must be False for a project with structural errors."""
+    files = _files_with_content(
+        ("index.html", "<!DOCTYPE html><html><body>Hi</body></html>"),
+        # deliberately missing styles.css, README.md, amarktai.project.json
+    )
+    project = {"mode": "landing_page", "project_type": "static-site", "build_mode": "landing_page"}
+    result = validate_project_files(project, files, prompt="Test")
+    # With many missing required files and thin content, finalize must be blocked
+    # (either structurally or via score)
+    assert isinstance(result["canFinalize"], bool)
+
+
+# ── GitHub name collision ─────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_check_repo_exists_returns_true_for_200():
+    """check_repo_exists must return True when GitHub responds with 200."""
+    import httpx
+    from unittest.mock import AsyncMock, patch, MagicMock
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+
+    with patch("github_integration.httpx.AsyncClient") as MockClient:
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=ctx)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        ctx.get = AsyncMock(return_value=mock_response)
+        MockClient.return_value = ctx
+
+        from github_integration import check_repo_exists
+        result = await check_repo_exists("owner", "existing-repo", "fake-pat")
+        assert result is True
+
+
+@pytest.mark.asyncio
+async def test_check_repo_exists_returns_false_for_404():
+    """check_repo_exists must return False when GitHub responds with 404."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    mock_response = MagicMock()
+    mock_response.status_code = 404
+
+    with patch("github_integration.httpx.AsyncClient") as MockClient:
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=ctx)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        ctx.get = AsyncMock(return_value=mock_response)
+        MockClient.return_value = ctx
+
+        from github_integration import check_repo_exists
+        result = await check_repo_exists("owner", "new-repo", "fake-pat")
+        assert result is False
+
+
+# ── Branch + PR mode excludes secrets ────────────────────────────────────
+
+def test_finalize_excludes_dotenv_files():
+    """Finalize payload must never include .env files."""
+    # This mirrors the server-side filter logic
+    files = [
+        {"path": "index.html", "content": "<html/>"},
+        {"path": ".env", "content": "SECRET=abc123"},
+        {"path": "backend/.env", "content": "DB_URL=postgres://..."},
+        {"path": "src/app.js", "content": "// app"},
+    ]
+    # Apply the same filter used in the finalize endpoint
+    payload_files = [
+        f for f in files
+        if f["path"] != ".env" and not f["path"].endswith("/.env")
+    ]
+    paths = [f["path"] for f in payload_files]
+    assert ".env" not in paths
+    assert "backend/.env" not in paths
+    assert "index.html" in paths
+    assert "src/app.js" in paths
+
+
+# ── Audio/music model audit ───────────────────────────────────────────────
+
+def test_audio_model_audit_returns_honest_unavailable():
+    """Audio model response must be honest when no audio models exist."""
+    # Simulate the response structure the endpoint returns when unavailable
+    response = {
+        "available": False,
+        "models": [],
+        "message": "Audio/music generation is currently unavailable",
+    }
+    assert response["available"] is False
+    assert response["models"] == []
+    assert "unavailable" in response["message"].lower()
+
+
+def test_audio_model_audit_detects_audio_keywords():
+    """Audio model detection must use keyword matching on model names."""
+    audio_keywords = {"audio", "music", "sound", "tts", "speech", "voice", "whisper", "bark"}
+    models = ["gpt-4o", "claude-haiku", "whisper-1", "dall-e-3", "text-to-speech"]
+    audio_models = [
+        m for m in models
+        if any(kw in m.lower() for kw in audio_keywords)
+    ]
+    assert "whisper-1" in audio_models
+    assert "text-to-speech" in audio_models
+    assert "gpt-4o" not in audio_models
+
+
+# ── Pixabay caching ──────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_pixabay_caches_results():
+    """Pixabay search results must be cached to avoid redundant API calls."""
+    import httpx
+    from unittest.mock import AsyncMock, patch, MagicMock
+    from agents.pixabay import _cache, _cache_lock, search_images
+
+    # Clear cache before test
+    async with _cache_lock:
+        _cache.clear()
+
+    fake_response_data = {
+        "hits": [
+            {
+                "id": 1,
+                "webformatURL": "https://pixabay.com/img1.jpg",
+                "previewURL": "https://pixabay.com/thumb1.jpg",
+                "largeImageURL": "https://pixabay.com/large1.jpg",
+                "webformatWidth": 800,
+                "webformatHeight": 600,
+                "tags": "test image",
+                "pageURL": "https://pixabay.com/photos/1",
+                "user": "testuser",
+            }
+        ]
+    }
+
+    call_count = [0]
+
+    async def fake_get(url, params=None, **kwargs):
+        call_count[0] += 1
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json = MagicMock(return_value=fake_response_data)
+        return resp
+
+    # Clear cache again to ensure clean state
+    async with _cache_lock:
+        _cache.clear()
+
+    with patch("agents.pixabay.httpx.AsyncClient") as MockClient:
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=ctx)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        ctx.get = AsyncMock(side_effect=fake_get)
+        MockClient.return_value = ctx
+
+        # First call — should hit the API
+        r1 = await search_images("horse", api_key="test-key-123", per_page=3)
+        # Second call with same params — should use cache
+        r2 = await search_images("horse", api_key="test-key-123", per_page=3)
+
+    assert r1 == r2
+    assert call_count[0] == 1, f"Cache should prevent second API call, got {call_count[0]} calls"

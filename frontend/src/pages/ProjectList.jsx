@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Trash2, Sparkles, ArrowRight, Github, LogOut, Activity, ShieldCheck, Users } from "lucide-react";
+import { Trash2, Sparkles, ArrowRight, Github, LogOut, Activity, ShieldCheck, Users, Image, Video, Palette, Cpu } from "lucide-react";
 import { toast } from "sonner";
 
 import Header from "@/components/Header";
 import SettingsDialog from "@/components/SettingsDialog";
+import ClarificationModal from "@/components/ClarificationModal";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Projects, System } from "@/lib/amk-api";
+import { Projects, System, Clarify } from "@/lib/amk-api";
 import { useAuth } from "@/lib/auth-context";
 
 const PROMPT_TEMPLATES = [
@@ -26,8 +27,11 @@ export default function ProjectListPage() {
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState("web_app");
   const [qualityTier, setQualityTier] = useState("balanced");
+  const [mediaChoice, setMediaChoice] = useState("auto");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [upgradeModal, setUpgradeModal] = useState(null);
+  const [clarification, setClarification] = useState(null); // { questions, assumptions }
+  const [pendingCreate, setPendingCreate] = useState(null); // { upgradeAcknowledged }
   const [repoUrl, setRepoUrl] = useState("");
   const [branch, setBranch] = useState("");
   const [creating, setCreating] = useState(false);
@@ -39,28 +43,31 @@ export default function ProjectListPage() {
 
   useEffect(() => { refresh(); refreshReadiness(); }, []);
 
-  const doCreate = async (upgradeAcknowledged = false) => {
+  const doCreate = async (enrichedPrompt, upgradeAcknowledged = false, extraParams = {}) => {
     if (readiness?.overall !== "PASS") {
       toast.error("GenX readiness must pass before starting Amarktai Coding Agents.");
       return;
     }
-    if (!name.trim() || !prompt.trim()) {
+    if (!name.trim() || !enrichedPrompt.trim()) {
       toast.error("Name and prompt are required.");
       return;
     }
     setCreating(true);
     try {
-      const proj = await Projects.create(name.trim(), prompt.trim(), {
+      const mediaRequirements = mediaChoice !== "auto" ? mediaChoice : undefined;
+      const proj = await Projects.create(name.trim(), enrichedPrompt.trim(), {
         mode,
         quality_tier: qualityTier,
         upgrade_confirmation_acknowledged: upgradeAcknowledged,
+        media_requirements: mediaRequirements,
+        ...extraParams,
       });
       toast.success("Agents launched.");
       nav(`/workspace/${proj.id}`);
     } catch (e) {
       const detail = e.response?.data?.detail;
       if (e.response?.status === 402 && detail?.requires_upgrade_confirmation) {
-        setUpgradeModal(detail);
+        setUpgradeModal({ ...detail, enrichedPrompt, extraParams });
         setCreating(false);
         return;
       }
@@ -72,19 +79,59 @@ export default function ProjectListPage() {
 
   const create = async (e) => {
     e?.preventDefault();
-    await doCreate(false);
+    if (!name.trim() || !prompt.trim()) {
+      toast.error("Name and prompt are required.");
+      return;
+    }
+    if (readiness?.overall !== "PASS") {
+      toast.error("GenX readiness must pass before starting Amarktai Coding Agents.");
+      return;
+    }
+    // Phase 1: Check if clarification is needed before launching the build
+    try {
+      const clarifyResult = await Clarify.check(prompt.trim(), mode);
+      if (clarifyResult.needs_clarification && clarifyResult.questions?.length > 0) {
+        setClarification({ questions: clarifyResult.questions, assumptions: clarifyResult.assumptions || [] });
+        setPendingCreate({ upgradeAcknowledged: false });
+        return;
+      }
+    } catch {
+      // If clarification check fails, proceed without it
+    }
+    await doCreate(prompt.trim(), false);
+  };
+
+  const handleClarificationConfirm = async (answers) => {
+    setClarification(null);
+    try {
+      const res = await Clarify.apply(prompt.trim(), answers);
+      await doCreate(res.enriched_prompt, pendingCreate?.upgradeAcknowledged || false, res.params || {});
+    } catch {
+      await doCreate(prompt.trim(), pendingCreate?.upgradeAcknowledged || false);
+    }
+    setPendingCreate(null);
+  };
+
+  const handleClarificationSkip = async () => {
+    setClarification(null);
+    await doCreate(prompt.trim(), pendingCreate?.upgradeAcknowledged || false);
+    setPendingCreate(null);
   };
 
   const handleUpgradeAndCreate = () => {
     const tier = upgradeModal?.recommended_tier;
+    const ep = upgradeModal?.enrichedPrompt || prompt;
+    const params = upgradeModal?.extraParams || {};
     setUpgradeModal(null);
     if (tier) setQualityTier(tier);
-    doCreate(true);
+    doCreate(ep, true, params);
   };
 
   const handleContinueAnyway = () => {
+    const ep = upgradeModal?.enrichedPrompt || prompt;
+    const params = upgradeModal?.extraParams || {};
     setUpgradeModal(null);
-    doCreate(true);
+    doCreate(ep, true, params);
   };
 
   const importRepo = async (e) => {
@@ -114,6 +161,16 @@ export default function ProjectListPage() {
 
   return (
     <div className="min-h-screen flex flex-col">
+      {/* Clarification modal — shown before starting a build when prompt is vague */}
+      {clarification && (
+        <ClarificationModal
+          questions={clarification.questions}
+          assumptions={clarification.assumptions}
+          onConfirm={handleClarificationConfirm}
+          onSkip={handleClarificationSkip}
+        />
+      )}
+
       <Header
         onOpenSettings={() => setSettingsOpen(true)}
         rightExtra={
@@ -232,6 +289,9 @@ export default function ProjectListPage() {
                       </button>
                     ))}
                   </div>
+
+                  {/* Phase 3: Media source choice */}
+                  <MediaChoiceSelect value={mediaChoice} onChange={setMediaChoice} />
 
                   <div>
                     <FieldLabel>Or pick a starter</FieldLabel>
@@ -423,4 +483,72 @@ function ReadinessStrip({ readiness, onRefresh }) {
 function StatusDot({ status }) {
   const colors = { running: "#FFC107", ready: "#00E676", failed: "#FF5722", queued: "#A1A1AA" };
   return <span title={status} className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: colors[status] || "#71717A" }} />;
+}
+
+const MEDIA_OPTIONS = [
+  {
+    id: "auto",
+    label: "Auto",
+    desc: "Agents pick the best option",
+    icon: <Cpu className="w-3.5 h-3.5" strokeWidth={1.5} />,
+  },
+  {
+    id: "AI-generated images (GenX)",
+    label: "AI Images",
+    desc: "GenX image models",
+    icon: <Sparkles className="w-3.5 h-3.5" strokeWidth={1.5} />,
+  },
+  {
+    id: "Stock images from Pixabay",
+    label: "Pixabay",
+    desc: "Free stock photos/video",
+    icon: <Image className="w-3.5 h-3.5" strokeWidth={1.5} />,
+  },
+  {
+    id: "SVG / CSS visuals only (no external images)",
+    label: "CSS/SVG only",
+    desc: "No external images",
+    icon: <Palette className="w-3.5 h-3.5" strokeWidth={1.5} />,
+  },
+];
+
+function MediaChoiceSelect({ value, onChange }) {
+  return (
+    <div data-testid="media-choice-selector">
+      <label className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3 block mb-1.5">
+        Media source
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        {MEDIA_OPTIONS.map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            data-testid={`media-choice-${opt.id.replace(/[^a-z0-9]/gi, "-").toLowerCase().slice(0, 20)}`}
+            onClick={() => onChange(opt.id)}
+            className={`p-2.5 border text-left flex items-start gap-2 transition-colors duration-100 ${
+              value === opt.id
+                ? "border-amk-accent bg-amk-surface text-white"
+                : "border-amk-line bg-amk-panel text-amk-fg2 hover:bg-amk-surface"
+            }`}
+          >
+            <span className="mt-0.5 shrink-0">{opt.icon}</span>
+            <div>
+              <div className="font-mono text-xs font-medium">{opt.label}</div>
+              <div className="text-[10px] text-amk-fg3 mt-0.5">{opt.desc}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+      {value === "Stock images from Pixabay" && (
+        <p className="font-mono text-[10px] text-amk-fg3 mt-1.5">
+          Requires <span className="text-amk-fg">PIXABAY_API_KEY</span> in Settings. Attribution is shown on all Pixabay assets.
+        </p>
+      )}
+      {value === "AI-generated images (GenX)" && (
+        <p className="font-mono text-[10px] text-amk-fg3 mt-1.5">
+          Uses GenX image models. Requires balanced/premium tier and explicit confirmation before generating.
+        </p>
+      )}
+    </div>
+  );
 }

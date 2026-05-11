@@ -226,6 +226,7 @@ class Project(BaseModel):
         "errors": [],
     })
     repair_attempts: int = 0
+    last_validation: dict | None = None
 
 
 class AssistantMessage(BaseModel):
@@ -259,8 +260,9 @@ class PasswordReset(BaseModel):
     password: str = Field(min_length=12)
 
 
-class StatusPatch(BaseModel):
-    status: str = Field(pattern="^(active|disabled)$")
+class FinalizeOptions(BaseModel):
+    repo_name_override: Optional[str] = None
+
 
 
 def _login_allowed(key: str) -> bool:
@@ -647,6 +649,46 @@ async def list_models() -> dict:
     except Exception as exc:
         raise HTTPException(503, str(exc))
     return {"tiers": GenXProvider.list_tiers(), "agents": AGENT_TIER, "tools": TOOL_SCHEMAS, "available": models}
+
+
+@api.get("/models/audio")
+async def audio_models_status() -> dict:
+    """Phase 4: Audit GenX live model metadata for audio/music models.
+
+    Returns availability and an honest message if unavailable.
+    Does NOT block normal builds.
+    """
+    try:
+        genx_key = await _runtime_secret("GENX_API_KEY") or os.environ.get("GENX_API_KEY", "")
+        if not genx_key:
+            return {
+                "available": False,
+                "models": [],
+                "message": "Audio/music generation is unavailable: GENX_API_KEY not configured.",
+            }
+        models = await GenXProvider(api_key=genx_key).list_models()
+        audio_keywords = {"audio", "music", "sound", "tts", "speech", "voice", "whisper", "bark"}
+        audio_models = [
+            m for m in models
+            if any(kw in str(m).lower() for kw in audio_keywords)
+        ]
+        if audio_models:
+            return {
+                "available": True,
+                "models": audio_models,
+                "message": f"{len(audio_models)} audio/music model(s) available through Amarktai AI Infrastructure.",
+            }
+        return {
+            "available": False,
+            "models": [],
+            "message": "Audio/music generation is currently unavailable: no audio/music models found in Amarktai AI Infrastructure. Normal builds are unaffected.",
+        }
+    except Exception:
+        return {
+            "available": False,
+            "models": [],
+            "message": "Audio/music generation status could not be determined. Normal builds are unaffected.",
+        }
 
 
 def _coder_tier(tier: str, tiers: dict) -> str | None:
@@ -1333,7 +1375,7 @@ async def project_preview_file(
 
 
 @secured.post("/projects/{project_id}/finalize")
-async def finalize(project_id: str, claims: dict = Depends(require_user)) -> dict:
+async def finalize(project_id: str, body: FinalizeOptions = FinalizeOptions(), claims: dict = Depends(require_user)) -> dict:
     await _own(project_id, claims)
     pat = await _runtime_secret("GITHUB_PAT")
     if not pat:
@@ -1346,8 +1388,29 @@ async def finalize(project_id: str, claims: dict = Depends(require_user)) -> dic
         raise HTTPException(409, "Project must be ready before finalize/push.")
     files = await ProjectFS(db, project_id).list_full()
     payload_files = [{"path": f["path"], "content": f["content"]} for f in files if f["path"] != ".env" and not f["path"].endswith("/.env")]
-    repo_name = re.sub(r"[^a-z0-9-]+", "-", proj["name"].lower()).strip("-")[:60] or "amarktai-app"
+    # Phase 9: Use override name if provided, otherwise derive from project name
+    if body and body.repo_name_override:
+        repo_name = re.sub(r"[^a-z0-9-]+", "-", body.repo_name_override.lower()).strip("-")[:60] or "amarktai-app"
+    else:
+        repo_name = re.sub(r"[^a-z0-9-]+", "-", proj["name"].lower()).strip("-")[:60] or "amarktai-app"
     private = (proj.get("repo_visibility", "public") == "private")
+
+    # Phase 9: Check for repo name collision before attempting creation
+    try:
+        gh_user = await gh.validate_pat(pat)
+        owner = gh_user.get("login", "")
+    except Exception:
+        owner = ""
+    if owner:
+        exists = await gh.check_repo_exists(owner, repo_name, pat)
+        if exists:
+            raise HTTPException(409, detail={
+                "repo_exists": True,
+                "repo_name": repo_name,
+                "owner": owner,
+                "message": f"Repository {owner}/{repo_name} already exists. Choose branch+PR or a different name.",
+            })
+
     try:
         repo = await gh.create_repo_with_files(
             name=repo_name, description=proj["prompt"][:120],
@@ -1360,6 +1423,52 @@ async def finalize(project_id: str, claims: dict = Depends(require_user)) -> dic
     }})
     await hub.broadcast(project_id, {"type": "finalized", "data": repo})
     return repo
+
+
+@secured.post("/projects/{project_id}/finalize/branch-pr")
+async def finalize_as_branch_pr(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Phase 10: When a repo name already exists, commit generated files as a branch + PR.
+
+    Creates branch: amarktai-builder/{project_id[:8]}
+    Opens a PR against the existing repo's default branch.
+    """
+    await _own(project_id, claims)
+    pat = await _runtime_secret("GITHUB_PAT")
+    if not pat:
+        raise HTTPException(403, "Connect GitHub PAT in Settings to open pull requests.")
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found.")
+    if proj.get("status") not in ("ready", "finalized"):
+        raise HTTPException(409, "Project must be ready before pushing.")
+    files = await ProjectFS(db, project_id).list_full()
+    payload_files = [{"path": f["path"], "content": f["content"]} for f in files if f["path"] != ".env" and not f["path"].endswith("/.env")]
+    repo_name = re.sub(r"[^a-z0-9-]+", "-", proj["name"].lower()).strip("-")[:60] or "amarktai-app"
+
+    try:
+        gh_user = await gh.validate_pat(pat)
+        owner = gh_user.get("login", "")
+    except Exception as exc:
+        raise HTTPException(400, f"Could not verify GitHub PAT: {exc}")
+
+    job_slug = f"{repo_name[:20]}-{project_id[:8]}"
+    try:
+        result = await gh.create_branch_pr_from_files(
+            owner=owner,
+            repo=repo_name,
+            files=payload_files,
+            prompt=proj.get("prompt", "")[:120],
+            job_slug=job_slug,
+            pat=pat,
+        )
+    except Exception as exc:
+        raise HTTPException(400, f"Failed to create branch PR: {exc}")
+
+    await db.projects.update_one({"id": project_id}, {"$set": {
+        "pr_url": result.get("pr_url"), "manifest_status": "pr_opened", "updated_at": _now(),
+    }})
+    await hub.broadcast(project_id, {"type": "github_pr_created", "data": result})
+    return result
 
 
 @secured.post("/projects/{project_id}/pr")
