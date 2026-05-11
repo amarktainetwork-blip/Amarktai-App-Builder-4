@@ -114,7 +114,8 @@ def detect_mime(filename: str, content: bytes) -> str:
         return "image/gif"
     if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
         return "image/webp"
-    if content[:4] == b"\x00\x00\x00\x18" or content[:4] == b"\x00\x00\x00\x20":
+    # MP4/MPEG-4 file signatures: box size (0x18 or 0x20 bytes) followed by 'ftyp' brand marker
+    if content[:4] in (b"\x00\x00\x00\x18", b"\x00\x00\x00\x20"):
         if b"ftyp" in content[:16]:
             return "video/mp4"
     if guessed:

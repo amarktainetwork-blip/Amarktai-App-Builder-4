@@ -2067,7 +2067,11 @@ async def media_upload(
 
     asset_id = str(uuid.uuid4())
     safe_fn = safe_filename(filename)
-    file_path, thumb_path = save_file(user_id, asset_id, safe_fn, content)
+    try:
+        file_path, thumb_path = save_file(user_id, asset_id, safe_fn, content)
+    except Exception:
+        logger.exception("Failed to save uploaded file for user %s", user_id)
+        raise HTTPException(500, "Failed to save uploaded file")
 
     public_url = public_url_for(asset_id, safe_fn)
     thumb_url = public_url_for(asset_id, safe_fn, thumb=True) if thumb_path else public_url
@@ -2180,7 +2184,11 @@ async def media_serve_thumbnail(asset_id: str, claims: dict = Depends(require_us
     if not serve_path.exists():
         raise HTTPException(404, "File not found on disk")
     content = serve_path.read_bytes()
-    mime = "image/jpeg" if str(serve_path).endswith("thumb_") or str(serve_path).endswith(".jpg") else doc.get("mime_type", "application/octet-stream")
+    _path_str = str(serve_path)
+    if _path_str.endswith("thumb_") or _path_str.endswith(".jpg"):
+        mime = "image/jpeg"
+    else:
+        mime = doc.get("mime_type", "application/octet-stream")
     return Response(content=content, media_type=mime)
 
 

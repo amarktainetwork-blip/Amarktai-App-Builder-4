@@ -54,12 +54,13 @@ except ImportError:
 _FONT_FAMILY_RE = re.compile(r"font-family\s*:", re.IGNORECASE)
 _MEDIA_QUERY_RE = re.compile(r"@media\s*\(", re.IGNORECASE)
 _FONT_SIZE_PX_RE = re.compile(r"font-size\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*px", re.IGNORECASE)
+# Use simple non-backtracking patterns for CSS checks applied to user-provided content
 _LOW_OPACITY_RE = re.compile(
-    r"color\s*:[^;]*rgba?\([^)]*,\s*0\.0[0-9]*\s*\)", re.IGNORECASE
+    r"color\s*:\s*rgba\([^)]{0,100},\s*0\.0[0-9]\s*\)", re.IGNORECASE
 )
 _HIDDEN_BODY_RE = re.compile(
-    r"(body|main)\s*\{[^}]*(?:display\s*:\s*none|visibility\s*:\s*hidden)[^}]*\}",
-    re.IGNORECASE | re.DOTALL,
+    r"(?:body|main)\s*\{[^}]{0,500}(?:display\s*:\s*none|visibility\s*:\s*hidden)",
+    re.IGNORECASE,
 )
 
 
@@ -144,13 +145,14 @@ def _validate_html_regex(html_content: str, filename: str) -> dict[str, Any]:
     """Fallback regex-based HTML checks when BS4 is not available."""
     issues: list[str] = []
     warnings: list[str] = []
-    if not re.search(r"<title[^>]*>[^<]+</title>", html_content, re.I):
+    # Use non-backtracking patterns (bounded quantifiers to avoid ReDoS)
+    if not re.search(r"<title[^>]{0,200}>[^<]{1,500}</title>", html_content, re.I):
         issues.append(f"{filename}: Missing or empty <title>")
-    if not re.search(r'<link[^>]+stylesheet|<style\b', html_content, re.I):
+    if not re.search(r'<link[^>]{0,500}stylesheet|<style\b', html_content, re.I):
         warnings.append(f"{filename}: No stylesheet link or style tag found")
     if not re.search(r"<h1\b", html_content, re.I):
         warnings.append(f"{filename}: No <h1> found")
-    imgs = re.findall(r"<img\b[^>]*>", html_content, re.I)
+    imgs = re.findall(r"<img\b[^>]{0,500}>", html_content, re.I)
     for img in imgs:
         if "alt=" not in img.lower():
             issues.append(f"{filename}: <img> missing alt attribute")
@@ -195,7 +197,7 @@ def validate_css(css_content: str, filename: str = "styles.css") -> dict[str, An
     # tinycss2 parse errors
     if _TINYCSS2_AVAILABLE:
         try:
-            rules, err = tinycss2.parse_stylesheet_bytes(css_content.encode())
+            rules, _ = tinycss2.parse_stylesheet_bytes(css_content.encode())
             parse_errors = [r for r in rules if getattr(r, "type", "") == "error"]
             if parse_errors:
                 warnings.append(f"{filename}: {len(parse_errors)} CSS parse error(s)")
@@ -237,7 +239,7 @@ def validate_media_references(
         # Look for attribution text (not just URLs) like "Photo by X on Pixabay", "via Pixabay"
         has_attribution = bool(
             re.search(
-                r"Photo by .+ on Pixabay|via Pixabay|pixabay\.com/users/|pixabay license",
+                r"Photo by [A-Za-z0-9 ]{1,50} on Pixabay|via Pixabay|pixabay\.com/users/|pixabay license",
                 html_content, re.I,
             )
         )
