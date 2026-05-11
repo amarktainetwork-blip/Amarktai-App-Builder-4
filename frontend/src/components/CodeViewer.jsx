@@ -46,11 +46,11 @@ export default function CodeViewer({ projectId, path }) {
           {copied ? "copied" : "copy"}
         </button>
       </div>
-      <div className="flex-1 overflow-auto scroll-thin bg-amk-panel">
+      <div className="flex-1 overflow-auto scroll-thin bg-amk-panel min-h-0">
         {loading ? (
           <div className="p-4 font-mono text-[11px] text-amk-fg3">[ loading... ]</div>
         ) : (
-          <pre className="p-4 font-mono text-[12px] leading-relaxed text-amk-fg whitespace-pre">
+          <pre className="p-4 font-mono text-[12px] leading-relaxed text-amk-fg whitespace-pre overflow-x-auto">
             {content}
           </pre>
         )}
