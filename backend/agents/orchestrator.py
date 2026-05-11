@@ -1141,6 +1141,12 @@ class Orchestrator:
         existing_paths = {f["path"] for f in app_files}
         for f in (fix_data.get("files") or []):
             if not isinstance(f, dict) or not f.get("path"):
+                # Log malformed entries from model output to aid debugging
+                await self._record_event(
+                    "coder", "warn",
+                    f"Skipping malformed file entry in fix_data: {f!r:.200}",
+                    meta={"malformed_entry": True},
+                )
                 continue
             await self.fs.write(f["path"], f.get("content", ""), f.get("language", "text"))
             await self.emit({"type": "file_written", "data": {"path": f["path"]}})

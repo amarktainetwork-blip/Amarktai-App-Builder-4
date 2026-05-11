@@ -223,12 +223,12 @@ def _score_static_landing(
                 f"{len(pages_without_css)} page(s) have no linked stylesheet: "
                 f"{', '.join(pages_without_css[:3])}"
             )
-        # If there are no CSS files at all and multiple pages, zero the design score
+        # If there are no CSS files at all and multiple pages, apply a severe design penalty
         has_any_css = any(
             path.endswith(".css") for path in files_by_path
         )
         if not has_any_css and len(html_pages) >= 2:
-            design = 0
+            design -= 50
             design_errors.append(
                 "Multi-page site has no CSS file at all. "
                 "All pages require a shared stylesheet."

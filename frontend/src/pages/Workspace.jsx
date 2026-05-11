@@ -456,33 +456,39 @@ export default function WorkspacePage() {
             />
           )}
           {/* Iteration result: show changed/added files after a successful iteration */}
-          {iterationResult && !busy && (iterationResult.changedFiles?.length > 0 || iterationResult.addedFiles?.length > 0) && (
-            <div
-              data-testid="iteration-result-panel"
-              className="border-y border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px]"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-agent-coder uppercase tracking-wider">Iteration complete</span>
-                <button
-                  type="button"
-                  onClick={() => setIterationResult(null)}
-                  className="text-amk-fg3 hover:text-white text-[9px] uppercase tracking-wider"
-                >
-                  dismiss
-                </button>
+          {(() => {
+            const hasIterationResult = iterationResult && !busy && (
+              iterationResult.changedFiles?.length > 0 || iterationResult.addedFiles?.length > 0
+            );
+            if (!hasIterationResult) return null;
+            return (
+              <div
+                data-testid="iteration-result-panel"
+                className="border-y border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px]"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-agent-coder uppercase tracking-wider">Iteration complete</span>
+                  <button
+                    type="button"
+                    onClick={() => setIterationResult(null)}
+                    className="text-amk-fg3 hover:text-white text-[9px] uppercase tracking-wider"
+                  >
+                    dismiss
+                  </button>
+                </div>
+                {iterationResult.changedFiles?.length > 0 && (
+                  <div className="mt-1 text-amk-fg2">
+                    Changed: {iterationResult.changedFiles.join(", ")}
+                  </div>
+                )}
+                {iterationResult.addedFiles?.length > 0 && (
+                  <div className="mt-0.5 text-amk-fg2">
+                    Added: {iterationResult.addedFiles.join(", ")}
+                  </div>
+                )}
               </div>
-              {iterationResult.changedFiles?.length > 0 && (
-                <div className="mt-1 text-amk-fg2">
-                  Changed: {iterationResult.changedFiles.join(", ")}
-                </div>
-              )}
-              {iterationResult.addedFiles?.length > 0 && (
-                <div className="mt-0.5 text-amk-fg2">
-                  Added: {iterationResult.addedFiles.join(", ")}
-                </div>
-              )}
-            </div>
-          )}
+            );
+          })()}
           <ChatPanel messages={messages} onSend={send} disabled={busy} busy={busy} />
         </aside>
 
