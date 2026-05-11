@@ -3243,11 +3243,17 @@ def test_settings_store_accepts_qwen_api_key():
 # ---------- settings: QWEN optional key does not break settings endpoint ─────
 
 def test_server_settings_keys_includes_qwen_and_pixabay():
-    """server.SETTINGS_KEYS must include all optional integration keys."""
+    """server.SETTINGS_KEYS must include all optional integration keys.
+
+    The required keys are derived from config.SECRET_KEYS so this test stays
+    in sync automatically when new keys are added to either list.
+    """
     import server
-    for key in ("PIXABAY_API_KEY", "QWEN_API_KEY", "QWEN_BASE_URL", "QWEN_MODEL_CHAT",
-                "QWEN_MODEL_CODE", "QWEN_MODEL_IMAGE", "QWEN_MODEL_VIDEO", "QWEN_MODEL_AUDIO"):
-        assert key in server.SETTINGS_KEYS, f"{key} missing from server.SETTINGS_KEYS"
+    from config import SECRET_KEYS
+    # Every key in SECRET_KEYS that isn't a core required key must appear in SETTINGS_KEYS
+    optional_keys = SECRET_KEYS - {"GENX_API_KEY", "GITHUB_PAT", "BRAVE_SEARCH_API_KEY"}
+    for key in optional_keys:
+        assert key in server.SETTINGS_KEYS, f"{key} in SECRET_KEYS but missing from server.SETTINGS_KEYS"
 
 
 # ---------- build_contract: safe_dict helper ─────────────────────────────────

@@ -15,13 +15,13 @@ const FIELDS = [
 ];
 
 const QWEN_FIELDS = [
-  { key: "QWEN_API_KEY", label: "Qwen API Key", hint: "Optional. Direct Qwen access for chat, coding, reasoning, and media tasks." },
-  { key: "QWEN_BASE_URL", label: "Qwen Base URL", hint: "Optional. Custom Qwen endpoint (e.g. https://dashscope.aliyuncs.com/compatible-mode/v1)." },
-  { key: "QWEN_MODEL_CHAT", label: "Qwen Chat Model", hint: "Optional. e.g. qwen-turbo" },
-  { key: "QWEN_MODEL_CODE", label: "Qwen Code Model", hint: "Optional. e.g. qwen-coder-turbo" },
-  { key: "QWEN_MODEL_IMAGE", label: "Qwen Image Model", hint: "Optional. e.g. wanx-v1" },
-  { key: "QWEN_MODEL_VIDEO", label: "Qwen Video Model", hint: "Optional. Configure if Qwen video generation is available." },
-  { key: "QWEN_MODEL_AUDIO", label: "Qwen Audio Model", hint: "Optional. Configure if Qwen voice/audio generation is available." },
+  { key: "QWEN_API_KEY", label: "Qwen API Key", hint: "Optional. Direct Qwen access for chat, coding, reasoning, and media tasks.", inputType: "password", inputPlaceholder: "Paste key..." },
+  { key: "QWEN_BASE_URL", label: "Qwen Base URL", hint: "Optional. Custom Qwen endpoint (e.g. https://dashscope.aliyuncs.com/compatible-mode/v1).", inputType: "text", inputPlaceholder: "https://..." },
+  { key: "QWEN_MODEL_CHAT", label: "Qwen Chat Model", hint: "Optional. e.g. qwen-turbo", inputType: "text", inputPlaceholder: "Model ID..." },
+  { key: "QWEN_MODEL_CODE", label: "Qwen Code Model", hint: "Optional. e.g. qwen-coder-turbo", inputType: "text", inputPlaceholder: "Model ID..." },
+  { key: "QWEN_MODEL_IMAGE", label: "Qwen Image Model", hint: "Optional. e.g. wanx-v1", inputType: "text", inputPlaceholder: "Model ID..." },
+  { key: "QWEN_MODEL_VIDEO", label: "Qwen Video Model", hint: "Optional. Configure if Qwen video generation is available.", inputType: "text", inputPlaceholder: "Model ID..." },
+  { key: "QWEN_MODEL_AUDIO", label: "Qwen Audio Model", hint: "Optional. Configure if Qwen voice/audio generation is available.", inputType: "text", inputPlaceholder: "Model ID..." },
 ];
 
 export default function SettingsDialog({ open, onOpenChange }) {
@@ -95,7 +95,7 @@ export default function SettingsDialog({ open, onOpenChange }) {
                     style={{ color: isSet ? "#00E676" : f.optional ? "#888888" : "#FF5722" }}
                   >
                     {isSet ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />}
-                    {isSet ? `${info.source || "set"} / ${info.preview}` : (f.optional ? "not configured" : "not configured")}
+                    {isSet ? `${info.source || "set"} / ${info.preview}` : "not configured"}
                   </span>
                 </div>
                 <div className="flex gap-2">
@@ -150,8 +150,8 @@ export default function SettingsDialog({ open, onOpenChange }) {
                   <div className="flex gap-2">
                     <Input
                       data-testid={`setting-input-${f.key}`}
-                      type={f.key === "QWEN_BASE_URL" || f.key.startsWith("QWEN_MODEL_") ? "text" : "password"}
-                      placeholder={isSet ? "Replace value..." : f.key.startsWith("QWEN_MODEL_") ? "Model ID..." : "Paste value..."}
+                      type={f.inputType || "password"}
+                      placeholder={isSet ? "Replace value..." : (f.inputPlaceholder || "Paste value...")}
                       value={values[f.key] || ""}
                       onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
                       className="bg-amk-base border-amk-line text-amk-fg font-mono text-xs h-9 focus-visible:ring-0 focus-visible:border-white"
