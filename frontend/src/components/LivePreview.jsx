@@ -158,8 +158,14 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
 }
 
 /**
- * Phase 3: Preview Fallback Panel
- * Shows structured information when live preview is not available.
+ * PreviewFallbackPanel
+ *
+ * Phase 3: Shows structured information when a live preview is not available.
+ * Displayed instead of a blank panel whenever previewFallback.canPreview is false.
+ *
+ * Props:
+ *   fallback – preview fallback contract object from GET /projects/{id}/preview-fallback
+ *              or from the preview_fallback_ready WebSocket event.
  */
 function PreviewFallbackPanel({ fallback }) {
   return (

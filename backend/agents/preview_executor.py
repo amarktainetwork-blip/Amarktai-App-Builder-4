@@ -19,6 +19,12 @@ from typing import Any
 
 from .preview import render_preview
 
+# Valid JavaScript/Node package managers for command generation
+_JS_PACKAGE_MANAGERS = frozenset({"npm", "yarn", "pnpm"})
+
+# Max characters to truncate the prompt when generating PR titles
+PR_PROMPT_TRUNCATE = 400
+
 
 # ── Fallback object schema ────────────────────────────────────────────────────
 
@@ -61,14 +67,14 @@ def _next_actions(profile: dict) -> list[str]:
     env = profile.get("envRequired", [])
 
     if detected in ("vite_react", "next", "vue", "svelte"):
-        install_cmd = f"{pkg} install" if pkg in ("npm", "yarn", "pnpm") else "npm install"
+        install_cmd = f"{pkg} install" if pkg in _JS_PACKAGE_MANAGERS else "npm install"
         build_cmd = {
-            "vite_react": f"{pkg} run build",
-            "next": f"{pkg} run build",
-            "vue": f"{pkg} run build",
-            "svelte": f"{pkg} run build",
-        }.get(detected, f"{pkg} run build")
-        dev_cmd = f"{pkg} run dev"
+            "vite_react": f"{pkg} run build" if pkg in _JS_PACKAGE_MANAGERS else "npm run build",
+            "next": f"{pkg} run build" if pkg in _JS_PACKAGE_MANAGERS else "npm run build",
+            "vue": f"{pkg} run build" if pkg in _JS_PACKAGE_MANAGERS else "npm run build",
+            "svelte": f"{pkg} run build" if pkg in _JS_PACKAGE_MANAGERS else "npm run build",
+        }.get(detected, "npm run build")
+        dev_cmd = f"{pkg} run dev" if pkg in _JS_PACKAGE_MANAGERS else "npm run dev"
         actions += [
             f"Run `{install_cmd}` to install dependencies",
             f"Run `{build_cmd}` to build the app",

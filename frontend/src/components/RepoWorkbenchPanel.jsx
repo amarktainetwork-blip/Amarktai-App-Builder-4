@@ -88,7 +88,7 @@ export default function RepoWorkbenchPanel({
             style={{ color: covOk ? "#00E676" : covScore >= 64 ? "#FFC107" : "#FF5722" }}
           >
             <BarChart2 className="w-2.5 h-2.5" strokeWidth={1.5} />
-            Coverage {covScore}
+            Coverage {covScore}/100
           </span>
         )}
         <span className="text-amk-fg3 ml-1">
