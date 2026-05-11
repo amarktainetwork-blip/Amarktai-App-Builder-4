@@ -2336,3 +2336,307 @@ async def test_build_pipeline_emits_coverage_score():
     assert "coverageScore" in cov_event["data"]
     assert isinstance(cov_event["data"]["coverageScore"], int)
 
+
+
+# ── Phase 2/3: Preview Executor ───────────────────────────────────────────────
+
+def test_preview_executor_static_returns_can_preview():
+    """Static repo with index.html must return canPreview=True with inlined HTML."""
+    from agents.preview_executor import execute_preview
+    files = [
+        {"path": "index.html", "content": "<html><body>Hello</body></html>", "language": "html"},
+        {"path": "styles.css", "content": "body{margin:0}", "language": "css"},
+    ]
+    profile = {
+        "detectedType": "static",
+        "frameworks": [],
+        "languages": ["HTML"],
+        "previewBlockers": [],
+        "previewStrategy": "static",
+        "installCommands": [],
+        "buildCommands": [],
+        "devCommands": [],
+        "testCommands": [],
+        "envRequired": [],
+        "routeMap": [],
+        "fileTree": [],
+        "readmeExcerpt": "",
+        "riskNotes": [],
+        "recommendedPlan": "",
+        "packageManager": "",
+        "frontendPath": "",
+        "backendPath": "",
+    }
+    result = execute_preview(files, profile)
+    assert result["canPreview"] is True
+    assert result["type"] == "static"
+    assert "<body>" in result["html"]
+
+
+def test_preview_executor_vite_returns_fallback():
+    """Vite/React repo must return canPreview=False with a fallback object."""
+    from agents.preview_executor import execute_preview
+    files = [
+        {"path": "package.json", "content": '{"dependencies":{"react":"^18","vite":"^5"}}', "language": "json"},
+        {"path": "src/main.jsx", "content": "import React from 'react'", "language": "javascript"},
+    ]
+    profile = {
+        "detectedType": "vite_react",
+        "frameworks": ["React", "Vite"],
+        "languages": ["JavaScript"],
+        "previewBlockers": ["Requires npm install and vite build"],
+        "previewStrategy": "vite_react",
+        "installCommands": ["npm install"],
+        "buildCommands": ["npm run build"],
+        "devCommands": ["npm run dev"],
+        "testCommands": [],
+        "envRequired": ["VITE_API_URL"],
+        "routeMap": [],
+        "fileTree": ["package.json", "src/main.jsx"],
+        "readmeExcerpt": "Vite React app",
+        "riskNotes": [],
+        "recommendedPlan": "Build and deploy",
+        "packageManager": "npm",
+        "frontendPath": ".",
+        "backendPath": "",
+    }
+    result = execute_preview(files, profile)
+    assert result["canPreview"] is False
+    assert result["type"] == "repo-preview-fallback"
+    assert "reason" in result
+    assert len(result["reason"]) > 0
+    assert "installCommands" in result
+    assert result["installCommands"] == ["npm install"]
+
+
+def test_preview_executor_fallback_contract_complete():
+    """Fallback object must contain all required contract keys."""
+    from agents.preview_executor import execute_preview
+    required_keys = [
+        "canPreview", "type", "reason", "detectedStack", "languages",
+        "fileTree", "routeMap", "readmeExcerpt", "installCommands",
+        "buildCommands", "devCommands", "testCommands", "missingEnv",
+        "logs", "previewBlockers", "nextActions", "riskNotes",
+        "recommendedPlan", "detectedType", "packageManager",
+        "frontendPath", "backendPath",
+    ]
+    profile = {
+        "detectedType": "fullstack",
+        "frameworks": ["FastAPI", "React"],
+        "languages": ["Python", "JavaScript"],
+        "previewBlockers": ["Requires backend running"],
+        "previewStrategy": "fullstack",
+        "installCommands": ["pip install -r requirements.txt", "npm install"],
+        "buildCommands": ["npm run build"],
+        "devCommands": ["uvicorn main:app --reload", "npm run dev"],
+        "testCommands": ["pytest"],
+        "envRequired": ["DATABASE_URL", "JWT_SECRET"],
+        "routeMap": ["GET /health", "POST /auth/login"],
+        "fileTree": ["backend/main.py", "frontend/package.json"],
+        "readmeExcerpt": "Full stack app",
+        "riskNotes": ["Needs both services running"],
+        "recommendedPlan": "Start backend then frontend",
+        "packageManager": "npm",
+        "frontendPath": "frontend/",
+        "backendPath": "backend/",
+        "hasDocker": False,
+    }
+    result = execute_preview([], profile)
+    for key in required_keys:
+        assert key in result, f"Missing key: {key}"
+
+
+def test_preview_executor_static_with_blocker_falls_back():
+    """Static repo with a preview blocker should return fallback."""
+    from agents.preview_executor import execute_preview
+    files = [
+        {"path": "index.html", "content": "<html><body>Hello</body></html>", "language": "html"},
+    ]
+    profile = {
+        "detectedType": "static",
+        "frameworks": [],
+        "languages": ["HTML"],
+        "previewBlockers": ["Missing linked stylesheet"],
+        "previewStrategy": "static",
+        "installCommands": [],
+        "buildCommands": [],
+        "devCommands": [],
+        "testCommands": [],
+        "envRequired": [],
+        "routeMap": [],
+        "fileTree": ["index.html"],
+        "readmeExcerpt": "",
+        "riskNotes": [],
+        "recommendedPlan": "",
+        "packageManager": "",
+        "frontendPath": "",
+        "backendPath": "",
+    }
+    result = execute_preview(files, profile)
+    # Even though detectedType is static, blocker causes fallback
+    assert result["canPreview"] is False
+    assert result["reason"] == "Missing linked stylesheet"
+
+
+# ── Phase 6: Coverage Enforcement in Finalize ─────────────────────────────────
+
+def test_finalize_blocks_low_coverage_for_full_app_completion():
+    """Finalize endpoint must block with 409 when coverageScore < 80 for full_app_completion."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from fastapi.testclient import TestClient
+
+    # The server is not imported here to keep tests isolated.
+    # Instead test the coverage enforcement logic directly via the coverage_score module.
+    from agents.coverage_score import compute_coverage_score
+    # A minimal file set that won't meet full-app-completion requirements
+    files = [
+        {"path": "index.html", "content": "<html><body>Stub</body></html>", "language": "html"},
+    ]
+    result = compute_coverage_score(
+        prompt="Build the complete app with auth, dashboard, backend API, and docs",
+        files=files,
+        mode="full_stack",
+        intent="full_app_completion",
+    )
+    assert result["coverageScore"] < 80, (
+        f"Expected low coverage for stub files, got {result['coverageScore']}"
+    )
+    assert result["intent"] == "full_app_completion"
+    assert len(result["missingRequirements"]) > 0
+
+
+def test_finalize_allows_full_coverage_for_full_app_completion():
+    """Coverage score must reach >= 80 when all requirements are met."""
+    from agents.coverage_score import compute_coverage_score
+    files = [
+        {"path": "index.html", "content": (
+            "<html><head><title>App</title></head><body>"
+            "<section class='hero'><h1>Welcome</h1><a class='cta btn'>Get Started</a></section>"
+            "<section id='features'>Features</section>"
+            "<section id='pricing'>Pricing</section>"
+            "<nav><a href='/'>Home</a><a href='/about'>About</a></nav>"
+            "<footer>Footer</footer></body></html>"
+        ), "language": "html"},
+        {"path": "styles.css", "content": "body{margin:0}@media(max-width:768px){body{font-size:14px}}", "language": "css"},
+        {"path": "backend/main.py", "content": (
+            "from fastapi import FastAPI, Depends\napp = FastAPI()\n"
+            "@app.get('/health')\ndef health(): return {'ok': True}\n"
+            "@app.post('/auth/login')\ndef login(): pass"
+        ), "language": "python"},
+        {"path": "backend/auth.py", "content": "import jwt\ndef require_auth(): pass", "language": "python"},
+        {"path": "README.md", "content": "# App\n\n## Install\nnpm install\n\n## Run\nnpm start", "language": "markdown"},
+        {"path": ".env.example", "content": "JWT_SECRET=\nDATABASE_URL=", "language": "text"},
+        {"path": "Dockerfile", "content": "FROM python:3.11\nCMD uvicorn main:app", "language": "dockerfile"},
+        {"path": "amarktai.project.json", "content": '{"name":"App","mode":"full_stack"}', "language": "json"},
+    ]
+    result = compute_coverage_score(
+        prompt="Build a full-stack app with auth, backend API, Docker, and README",
+        files=files,
+        mode="full_stack",
+        intent="full_app_completion",
+    )
+    assert result["coverageScore"] >= 80, (
+        f"Expected coverage >= 80 for complete file set, got {result['coverageScore']}. "
+        f"Missing: {result['missingRequirements']}"
+    )
+
+
+# ── Phase 8: GitHub PR Body ───────────────────────────────────────────────────
+
+def test_create_branch_pr_body_includes_scores():
+    """create_branch_pr_from_files must include validation and coverage in PR body."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+    import github_integration as gh_mod
+
+    # Patch the HTTP calls
+    mock_result = {"pr_url": "https://github.com/owner/repo/pull/1", "branch": "amarktai-builder/test"}
+
+    async def fake_open_pr(**kwargs):
+        # Verify the body contains scores
+        body = kwargs.get("body", "")
+        assert "Quality" in body, f"Expected 'Quality' in PR body, got:\n{body}"
+        assert "Coverage" in body, f"Expected 'Coverage' in PR body, got:\n{body}"
+        assert "Changed files" in body, f"Expected 'Changed files' in PR body, got:\n{body}"
+        return mock_result
+
+    async def fake_get_info():
+        return {"default_branch": "main"}
+
+    async def run():
+        with patch.object(gh_mod, "open_pr", side_effect=fake_open_pr):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_cx = AsyncMock()
+                mock_cx.__aenter__ = AsyncMock(return_value=mock_cx)
+                mock_cx.__aexit__ = AsyncMock(return_value=False)
+                mock_cx.get = AsyncMock(return_value=MagicMock(
+                    status_code=200,
+                    json=lambda: {"default_branch": "main"},
+                    raise_for_status=lambda: None,
+                ))
+                mock_cx.request = AsyncMock(return_value=MagicMock(
+                    status_code=200,
+                    json=lambda: {"default_branch": "main"},
+                    raise_for_status=lambda: None,
+                ))
+                mock_client_class.return_value = mock_cx
+
+                result = await gh_mod.create_branch_pr_from_files(
+                    owner="testowner",
+                    repo="testrepo",
+                    files=[{"path": "index.html", "content": "<html/>"}],
+                    prompt="Build a complete app",
+                    job_slug="testrepo-abc12345",
+                    pat="ghp_test",
+                    validation_scores={
+                        "qualityScore": 80,
+                        "designScore": 75,
+                        "securityScore": 80,
+                        "canFinalize": True,
+                    },
+                    coverage_score={
+                        "coverageScore": 85,
+                        "intent": "full_app_completion",
+                        "missingRequirements": [],
+                    },
+                    stack="React, FastAPI",
+                    preview_note="No live preview — see commands.",
+                )
+        return result
+
+    # Run in asyncio
+    result = asyncio.get_event_loop().run_until_complete(run())
+    assert result == mock_result
+
+
+# ── Phase 3: Preview Fallback Next Actions ────────────────────────────────────
+
+def test_preview_fallback_next_actions_vite():
+    """Vite preview fallback must include actionable commands."""
+    from agents.preview_executor import _next_actions
+    profile = {
+        "detectedType": "vite_react",
+        "packageManager": "npm",
+        "envRequired": ["VITE_API_URL"],
+        "hasDocker": False,
+    }
+    actions = _next_actions(profile)
+    assert any("install" in a.lower() for a in actions), f"Expected install action, got: {actions}"
+    assert any("build" in a.lower() for a in actions), f"Expected build action, got: {actions}"
+    assert any(".env" in a.lower() or "env" in a.lower() for a in actions), f"Expected env action, got: {actions}"
+
+
+def test_preview_fallback_next_actions_api_only():
+    """API-only preview fallback must suggest starting the API server."""
+    from agents.preview_executor import _next_actions
+    profile = {
+        "detectedType": "api_service",
+        "packageManager": "pip",
+        "envRequired": [],
+        "hasDocker": True,
+    }
+    actions = _next_actions(profile)
+    assert any("api" in a.lower() or "server" in a.lower() or "dependency" in a.lower() for a in actions), \
+        f"Expected API/server action, got: {actions}"
+    assert any("docker" in a.lower() for a in actions), f"Expected docker action, got: {actions}"

@@ -12,6 +12,7 @@ import LivePreview from "@/components/LivePreview";
 import StatusBar from "@/components/StatusBar";
 import ValidationPanel from "@/components/ValidationPanel";
 import RepoCollisionModal from "@/components/RepoCollisionModal";
+import RepoWorkbenchPanel from "@/components/RepoWorkbenchPanel";
 import SettingsDialog from "@/components/SettingsDialog";
 import PRDialog from "@/components/PRDialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -42,6 +43,11 @@ export default function WorkspacePage() {
   // GitHub name collision state
   const [collisionModal, setCollisionModal] = useState(null); // { repoName, owner }
   const [collisionBusy, setCollisionBusy] = useState(false);
+  // Phase 4/5/7: Repo workbench + coverage state (live-updated via WS events)
+  const [repoAnalysis, setRepoAnalysis] = useState(null);
+  const [coverageResult, setCoverageResult] = useState(null);
+  // Phase 3: Preview fallback object
+  const [previewFallback, setPreviewFallback] = useState(null);
 
   const wsRef = useRef(null);
 
@@ -153,6 +159,34 @@ export default function WorkspacePage() {
       toast.info("Build agents need clarification — see conversation panel.");
     } else if (evt.type === "media_choice_needed") {
       toast.info("Media: agents are choosing the best source for your project.");
+    } else if (evt.type === "repo_import_started") {
+      // Repo import/fix started — clear stale fallback
+      setPreviewFallback(null);
+    } else if (evt.type === "repo_analysis_complete") {
+      // Live repo analysis result from orchestrator
+      if (evt.data) setRepoAnalysis((prev) => ({ ...(prev || {}), ...evt.data }));
+    } else if (evt.type === "coverage_score") {
+      // Live coverage score from orchestrator
+      if (evt.data) setCoverageResult(evt.data);
+    } else if (evt.type === "request_coverage_passed") {
+      if (evt.data) setCoverageResult(evt.data);
+      toast.success("Coverage check passed.");
+    } else if (evt.type === "request_coverage_failed") {
+      if (evt.data) setCoverageResult(evt.data);
+      toast.warning("Coverage below 80 — finalize is locked until requirements are met.");
+    } else if (evt.type === "preview_ready") {
+      if (evt.data) setPreviewFallback(null); // live preview available, clear fallback
+    } else if (evt.type === "preview_fallback_ready") {
+      if (evt.data) setPreviewFallback(evt.data);
+    } else if (evt.type === "preview_failed") {
+      toast.warning("Preview failed — see fallback panel for commands and blockers.");
+    } else if (evt.type === "repo_update_plan_complete") {
+      toast.info("Repo update plan complete — see agent timeline.");
+    } else if (evt.type === "repo_patch_complete") {
+      Projects.files(projectId).then(setFiles);
+      setRefreshKey((k) => k + 1);
+    } else if (evt.type === "job_cancel_requested") {
+      setCancelling(true);
     }
   }, [projectId]);
 
@@ -262,7 +296,25 @@ export default function WorkspacePage() {
   const ready = project?.status === "ready";
   // Phase 2: Gate finalize on validation scores
   const validation = lastValidation || project?.last_validation;
-  const canFinalize = ready && (!validation || validation.canFinalize !== false);
+  // Phase 6: Also gate on coverage for repo-update intents
+  const _COVERAGE_INTENTS = new Set(["full_app_completion", "repo_migration", "full_rebuild_inside_repo"]);
+  const updateIntent = project?.update_intent || coverageResult?.intent;
+  const coverageOk = !updateIntent || !_COVERAGE_INTENTS.has(updateIntent)
+    || (coverageResult?.coverageScore ?? 100) >= 80;
+  const canFinalize = ready && (!validation || validation.canFinalize !== false) && coverageOk;
+
+  // Phase 3: action to fetch preview fallback on demand
+  const runPreviewFallback = async () => {
+    try {
+      const fb = await Projects.previewFallback(projectId);
+      setPreviewFallback(fb);
+    } catch {
+      toast.error("Could not fetch preview info.");
+    }
+  };
+
+  // Determine if this is a repo-imported project
+  const isRepoProject = !!(project?.mode === "repo_fix" || project?.github);
 
   return (
     <div className="h-screen flex flex-col bg-amk-base">
@@ -371,6 +423,16 @@ export default function WorkspacePage() {
           )}
           {/* Phase 2: Quality/design/security validation scores */}
           <ValidationPanel validation={validation} />
+          {/* Phase 4: Repo workbench (shown for imported repos) */}
+          {isRepoProject && (
+            <RepoWorkbenchPanel
+              projectId={projectId}
+              project={project}
+              repoAnalysis={repoAnalysis}
+              coverage={coverageResult}
+              onRunPreview={runPreviewFallback}
+            />
+          )}
           <ChatPanel messages={messages} onSend={send} disabled={busy} busy={busy} />
         </aside>
 
@@ -406,6 +468,7 @@ export default function WorkspacePage() {
                 projectMode={project?.mode}
                 previewStrategy={project?.preview_strategy}
                 buildPhase={buildPhase}
+                previewFallback={previewFallback}
               />
             </TabsContent>
 
