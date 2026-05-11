@@ -495,17 +495,15 @@ export default function WorkspacePage() {
                             <span className="shrink-0">·</span><span>{m}</span>
                           </div>
                         ))}
-                        {missing.length > 0 && (
-                          <button
-                            type="button"
-                            data-testid="continue-missing-requirements-btn"
-                            disabled={busy}
-                            onClick={() => continueMissingRequirements(missing)}
-                            className="mt-1 px-2 py-0.5 border border-agent-coder text-[9px] uppercase tracking-wider text-agent-coder bg-agent-coder/10 hover:bg-agent-coder/20 disabled:opacity-50 transition-colors"
-                          >
-                            Continue building missing requirements
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          data-testid="continue-missing-requirements-btn"
+                          disabled={busy}
+                          onClick={() => continueMissingRequirements(missing)}
+                          className="mt-1 px-2 py-0.5 border border-agent-coder text-[9px] uppercase tracking-wider text-agent-coder bg-agent-coder/10 hover:bg-agent-coder/20 disabled:opacity-50 transition-colors"
+                        >
+                          Continue building missing requirements
+                        </button>
                       </div>
                     )}
                   </>
