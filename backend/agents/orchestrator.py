@@ -52,6 +52,9 @@ AGENT_TIMEOUTS = {
     "repo_fix": 480,
 }
 
+# Maximum number of iteration history entries to keep in project_memory
+_MAX_ITERATION_HISTORY = 20
+
 # App files that indicate the project has a previewable entry point
 _PREVIEW_ENTRY_FILES = {"index.html", "index.htm"}
 # Files that are metadata, not app output
@@ -1353,8 +1356,8 @@ class Orchestrator:
             existing_memory = project.get("project_memory") or {}
             iteration_history = existing_memory.get("iterationHistory", [])
             iteration_history.append(iteration_entry)
-            if len(iteration_history) > 20:
-                iteration_history = iteration_history[-20:]
+            if len(iteration_history) > _MAX_ITERATION_HISTORY:
+                iteration_history = iteration_history[-_MAX_ITERATION_HISTORY:]
 
             await self.db.projects.update_one(
                 {"id": self.project_id},

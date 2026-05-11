@@ -478,7 +478,7 @@ function StatusDot({ status }) {
 const BUILD_MODE_HINTS = {
   landing_page: "A single polished page for a business, product, event, or idea. Fast to build, easy to deploy.",
   website: "A complete website with separate pages like Home, About, Services, Pricing, and Contact.",
-  media_page: "A visual-first page optimised for image galleries, video showcases, or music portfolios.",
+  media_page: "A visual-first page optimized for image galleries, video showcases, or music portfolios.",
   web_app: "An interactive browser app with forms, state, local data, or custom workflows.",
   pwa: "An installable app with mobile-friendly layout, home screen icon, and optional offline support.",
   full_stack: "Frontend, backend, secure login, dashboard, database notes, Docker deployment, and README.",
