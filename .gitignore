@@ -33,6 +33,7 @@ mongo_data/
 # Environment and credential files
 .env
 .env.*
+!.env.example
 *.env
 credentials.json
 *.pem

@@ -570,7 +570,7 @@ function MediaChoiceSelect({ value, onChange }) {
   );
 }
 
-const MULTI_PAGE_PATTERN = /\b(\d\s*pages?|multi[-\s]?page|complete\s+website|full\s+website)\b/i;
+const MULTI_PAGE_PATTERN = /\b(?:\d\s*pages?|multi[-\s]?page|complete\s+website|full\s+website)\b/i;
 
 function MultiPageWarning({ prompt, mode }) {
   const needsWarning = MULTI_PAGE_PATTERN.test(prompt) && mode !== "website";

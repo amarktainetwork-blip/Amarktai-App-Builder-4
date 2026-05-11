@@ -554,8 +554,7 @@ export default function WorkspacePage() {
               >
                 <div className="flex items-center justify-between">
                   <span
-                    className="uppercase tracking-wider"
-                    style={{ color: unsatisfied.length > 0 ? "#FFC107" : "#00E676" }}
+                    className={unsatisfied.length > 0 ? "text-amber-400 uppercase tracking-wider" : "text-agent-coder uppercase tracking-wider"}
                   >
                     {unsatisfied.length > 0 ? "Iteration finished — changes still needed" : "Iteration complete"}
                   </span>
