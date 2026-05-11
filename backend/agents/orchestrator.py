@@ -665,7 +665,7 @@ class Orchestrator:
                 meta={"model": rev["model_label"], "patched": [f["path"] for f in rev_data.get("patched_files", [])]},
             )
             review_issues = rev_data.get("issues", [])
-        except (ValueError, json.JSONDecodeError, Exception) as reviewer_err:
+        except Exception as reviewer_err:
             # Reviewer failure is non-fatal: record and proceed to deterministic validation.
             err_detail = f"Reviewer returned invalid output; skipping reviewer patches. Proceeding to validation. Detail: {reviewer_err}"
             await self._record_event("reviewer", "failed", err_detail,

@@ -1146,10 +1146,19 @@ async def project_preview_file(
     MIME types are set explicitly so browsers validate and apply the resources correctly.
     """
     from fastapi.responses import Response
+    from pathlib import PurePosixPath
     await _own(project_id, claims)
-    # Prevent path traversal
-    safe = file_path.lstrip("/").replace("..", "")
-    if not safe or safe != file_path.lstrip("/"):
+    # Reject any path that contains traversal components after normalization.
+    # PurePosixPath handles URL-decoded values; reject absolute paths and any
+    # path that resolves outside the root (indicated by '..' in its parts).
+    try:
+        safe_path = PurePosixPath(file_path)
+        if safe_path.is_absolute() or ".." in safe_path.parts:
+            raise ValueError("path traversal")
+        safe = str(safe_path)
+        if not safe or safe == ".":
+            raise ValueError("empty path")
+    except (ValueError, TypeError):
         raise HTTPException(400, "Invalid file path")
     fs = ProjectFS(db, project_id)
     file_doc = await fs.read(safe)

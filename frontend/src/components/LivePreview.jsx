@@ -61,12 +61,15 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
       ? "Repo structure will appear when agents finish generating files."
       : "Preview will appear when files are generated.";
     let PhaseIcon = Loader2;
+    let spinning = true;
     if (isValidating) {
       phaseMsg = "Validating generated app…";
       PhaseIcon = CheckCircle;
+      spinning = false;
     } else if (isRepairing) {
       phaseMsg = "Repairing generated app…";
       PhaseIcon = Wrench;
+      spinning = false;
     }
     return (
       <div data-testid="live-preview" className="h-full flex flex-col">
@@ -78,7 +81,7 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
         </div>
         <div className="flex-1 bg-amk-panel flex items-center justify-center">
           <div className="border border-amk-line rounded-md bg-amk-base p-6 max-w-md text-center space-y-3">
-            <PhaseIcon className="w-7 h-7 text-amk-fg3 mx-auto animate-spin" />
+            <PhaseIcon className={`w-7 h-7 text-amk-fg3 mx-auto${spinning ? " animate-spin" : ""}`} />
             <p className="font-mono text-[12px] text-amk-fg2">{phaseMsg}</p>
           </div>
         </div>
