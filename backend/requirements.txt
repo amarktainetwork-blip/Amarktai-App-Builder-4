@@ -1,4 +1,8 @@
 aiohappyeyeballs==2.6.1
+beautifulsoup4==4.12.3
+lxml==6.1.0
+tinycss2==1.4.0
+python-slugify==8.0.4
 aiohttp==3.13.5
 aiosignal==1.4.0
 annotated-doc==0.0.4

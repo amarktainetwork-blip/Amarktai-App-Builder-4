@@ -15,6 +15,7 @@ import RepoCollisionModal from "@/components/RepoCollisionModal";
 import RepoWorkbenchPanel from "@/components/RepoWorkbenchPanel";
 import SettingsDialog from "@/components/SettingsDialog";
 import PRDialog from "@/components/PRDialog";
+import MediaLibraryDialog from "@/components/MediaLibraryDialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Projects, openProjectSocket } from "@/lib/amk-api";
 import { useAuth } from "@/lib/auth-context";
@@ -32,6 +33,7 @@ export default function WorkspacePage() {
   const [lastModel, setLastModel] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prOpen, setPrOpen] = useState(false);
+  const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -360,6 +362,7 @@ export default function WorkspacePage() {
         canFinalize={canFinalize}
         onFinalize={finalize}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenMediaLibrary={() => setMediaLibraryOpen(true)}
         rightExtra={
           <div className="flex items-center gap-1">
             {busy && (
@@ -455,6 +458,62 @@ export default function WorkspacePage() {
               busy={busy}
             />
           )}
+          {/* Coverage panel for regular (non-repo) projects */}
+          {!isRepoProject && coverageResult && (
+            <div
+              data-testid="coverage-panel"
+              className="border-y border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px]"
+            >
+              {(() => {
+                const covScore = coverageResult.coverageScore ?? null;
+                const covOk = covScore === null || covScore >= 80;
+                const missing = coverageResult.missingRequirements || [];
+                return (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="uppercase tracking-wider"
+                        style={{ color: covOk ? "#00E676" : covScore >= 64 ? "#FFC107" : "#FF5722" }}
+                      >
+                        Coverage {covScore}/100
+                      </span>
+                      {!covOk && (
+                        <span className="text-agent-scout text-[9px]">— finalize locked</span>
+                      )}
+                    </div>
+                    <div className="mt-1 h-1 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${Math.min(covScore ?? 0, 100)}%`,
+                          background: covOk ? "#00E676" : covScore >= 64 ? "#FFC107" : "#FF5722",
+                        }}
+                      />
+                    </div>
+                    {missing.length > 0 && (
+                      <div className="mt-1 space-y-0.5">
+                        <span className="text-amk-fg3">Missing requirements:</span>
+                        {missing.slice(0, 4).map((m, i) => (
+                          <div key={i} className="flex items-start gap-1 text-amk-fg2">
+                            <span className="shrink-0">·</span><span>{m}</span>
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          data-testid="continue-missing-requirements-btn"
+                          disabled={busy}
+                          onClick={() => continueMissingRequirements(missing)}
+                          className="mt-1 px-2 py-0.5 border border-agent-coder text-[9px] uppercase tracking-wider text-agent-coder bg-agent-coder/10 hover:bg-agent-coder/20 disabled:opacity-50 transition-colors"
+                        >
+                          Continue building missing requirements
+                        </button>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          )}
           {/* Iteration result: show changed/added files after a successful iteration */}
           {(() => {
             const hasIterationResult = iterationResult && !busy && (
@@ -541,6 +600,11 @@ export default function WorkspacePage() {
       <StatusBar project={project} lastModel={lastModel} connected={connected} />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <PRDialog open={prOpen} onOpenChange={setPrOpen} project={project} onSubmit={submitPR} />
+      <MediaLibraryDialog
+        open={mediaLibraryOpen}
+        onOpenChange={setMediaLibraryOpen}
+        projectId={projectId}
+      />
     </div>
   );
 }

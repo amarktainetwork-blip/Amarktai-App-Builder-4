@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import Header from "@/components/Header";
 import SettingsDialog from "@/components/SettingsDialog";
 import ClarificationModal from "@/components/ClarificationModal";
+import MediaLibraryDialog from "@/components/MediaLibraryDialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Projects, System, Clarify } from "@/lib/amk-api";
@@ -36,6 +37,7 @@ export default function ProjectListPage() {
   const [branch, setBranch] = useState("");
   const [creating, setCreating] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
   const [readiness, setReadiness] = useState(null);
 
   const refresh = () => Projects.list().then(setProjects).catch(() => setProjects([]));
@@ -175,6 +177,7 @@ export default function ProjectListPage() {
 
       <Header
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenMediaLibrary={() => setMediaLibraryOpen(true)}
         rightExtra={
           <button
             data-testid="header-logout-btn"
@@ -192,13 +195,13 @@ export default function ProjectListPage() {
           <div className="max-w-xl">
             <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3 mb-3">[ new build ]</div>
             <h1 className="font-display font-semibold text-3xl lg:text-5xl tracking-tight leading-[1.05] mb-3">
-              Describe.<br />
-              <span className="text-amk-fg2">Or import.</span><br />
-              <span className="text-amk-accent">Watch agents ship.<span className="blink ml-1" /></span>
+              Describe what<br />
+              <span className="text-amk-fg2">you want to build.</span><br />
+              <span className="text-amk-accent">Watch agents ship it.<span className="blink ml-1" /></span>
             </h1>
             <p className="text-sm text-amk-fg2 mb-8 leading-relaxed">
-              Start from a prompt or pull in a GitHub repo. Amarktai Coding Agents collaborate,
-              files appear in real time, and Amarktai Assistant keeps iteration moving.
+              Describe a landing page, multi-page website, PWA, dashboard, API, or SaaS app.
+              Four AI agents plan, code, review, and validate — files stream live.
             </p>
             <ReadinessStrip readiness={readiness} onRefresh={refreshReadiness} />
 
@@ -295,23 +298,6 @@ export default function ProjectListPage() {
                   {/* Phase 3: Media source choice */}
                   <MediaChoiceSelect value={mediaChoice} onChange={setMediaChoice} />
 
-                  <div>
-                    <FieldLabel>Or pick a starter</FieldLabel>
-                    <div className="grid grid-cols-2 gap-2">
-                      {PROMPT_TEMPLATES.map((t) => (
-                        <button
-                          type="button"
-                          key={t.name}
-                          data-testid={`template-${t.name.replace(/\s+/g, "-").toLowerCase()}`}
-                          onClick={() => applyTemplate(t)}
-                          className="text-left p-3 border border-amk-line bg-amk-panel hover:bg-amk-surface transition-colors duration-150"
-                        >
-                          <div className="font-mono text-xs text-white mb-1">{t.name}</div>
-                          <div className="text-[11px] text-amk-fg3 leading-relaxed line-clamp-2">{t.prompt}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                   <Button data-testid="create-project-btn" type="submit" disabled={creating}
                     className="w-full bg-amk-accent text-black hover:bg-emerald-300 font-mono text-xs h-11 mt-4">
                     {creating ? "STARTING AGENTS..." : "BEGIN BUILD"}
@@ -445,6 +431,7 @@ export default function ProjectListPage() {
       </main>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <MediaLibraryDialog open={mediaLibraryOpen} onOpenChange={setMediaLibraryOpen} />
     </div>
   );
 }

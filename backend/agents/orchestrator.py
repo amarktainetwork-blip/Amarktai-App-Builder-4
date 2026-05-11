@@ -720,16 +720,35 @@ class Orchestrator:
         await self._check_cancel()
         project_for_design = await self._load_project()
         project_type_for_design = infer_project_type(mode, project_for_design.get("project_type"))
+        # Load recent design signatures from project memory for diversity penalty
+        project_memory = project_for_design.get("project_memory") or {}
+        recent_signatures = project_memory.get("designSignatures", [])
         design_direction = create_design_direction(
             prompt=user_prompt,
             project_type=project_type_for_design,
             audience=scout_data.get("audience", ""),
             tier=project_for_design.get("quality_tier", "balanced"),
+            recent_signatures=recent_signatures if recent_signatures else None,
         )
-        await self.db.projects.update_one(
-            {"id": self.project_id},
-            {"$set": {"design_direction": design_direction, "updated_at": _now()}},
-        )
+        # Store design signature in project memory for future diversity tracking
+        sig = design_direction.get("design_signature", {})
+        if sig:
+            updated_signatures = (recent_signatures + [sig])[-20:]  # keep last 20
+            await self.db.projects.update_one(
+                {"id": self.project_id},
+                {"$set": {
+                    "design_direction": design_direction,
+                    "updated_at": _now(),
+                    "project_memory.designSignatures": updated_signatures,
+                    "project_memory.designTokens": design_direction.get("palette", {}),
+                    "project_memory.fontPair": design_direction.get("typography", {}),
+                }},
+            )
+        else:
+            await self.db.projects.update_one(
+                {"id": self.project_id},
+                {"$set": {"design_direction": design_direction, "updated_at": _now()}},
+            )
         await self.emit({"type": "design_direction", "data": {
             "name": design_direction["name"],
             "label": design_direction["label"],

@@ -39,10 +39,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#000c14",
         },
         "typography": {
-            "heading": "Inter, system-ui, sans-serif",
-            "body": "Inter, system-ui, sans-serif",
+            "heading": "'Space Grotesk', system-ui, sans-serif",
+            "body": "'DM Sans', system-ui, sans-serif",
             "weight_heading": "900",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=space-grotesk:700,900|dm-sans:400,500&display=swap",
+            "css_vars": "--font-heading: 'Space Grotesk', system-ui, sans-serif; --font-body: 'DM Sans', system-ui, sans-serif;",
         },
         "spacing": "generous",
         "layout_rhythm": "asymmetric_hero_left",
@@ -66,10 +70,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#f9f6f0",
         },
         "typography": {
-            "heading": "Playfair Display, Georgia, serif",
-            "body": "Source Serif 4, Georgia, serif",
+            "heading": "'Cormorant Garamond', Georgia, serif",
+            "body": "'Lora', Georgia, serif",
             "weight_heading": "700",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=cormorant-garamond:400,600,700|lora:400,500&display=swap",
+            "css_vars": "--font-heading: 'Cormorant Garamond', Georgia, serif; --font-body: 'Lora', Georgia, serif;",
         },
         "spacing": "spacious",
         "layout_rhythm": "magazine_columns",
@@ -93,10 +101,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#ffffff",
         },
         "typography": {
-            "heading": "JetBrains Mono, monospace",
-            "body": "IBM Plex Sans, system-ui, sans-serif",
+            "heading": "'IBM Plex Sans', system-ui, sans-serif",
+            "body": "'DM Sans', system-ui, sans-serif",
             "weight_heading": "700",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=ibm-plex-sans:400,500,700|dm-sans:400,500&display=swap",
+            "css_vars": "--font-heading: 'IBM Plex Sans', system-ui, sans-serif; --font-body: 'DM Sans', system-ui, sans-serif;",
         },
         "spacing": "compact",
         "layout_rhythm": "dashboard_grid",
@@ -120,10 +132,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#ffffff",
         },
         "typography": {
-            "heading": "Space Grotesk, Impact, Arial Black, sans-serif",
-            "body": "Space Grotesk, Arial, sans-serif",
+            "heading": "'Space Grotesk', Impact, Arial Black, sans-serif",
+            "body": "'Space Grotesk', Arial, sans-serif",
             "weight_heading": "900",
             "weight_body": "500",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=space-grotesk:500,700,900&display=swap",
+            "css_vars": "--font-heading: 'Space Grotesk', Impact, Arial Black, sans-serif; --font-body: 'Space Grotesk', Arial, sans-serif;",
         },
         "spacing": "tight",
         "layout_rhythm": "chunky_blocks",
@@ -147,10 +163,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#ffffff",
         },
         "typography": {
-            "heading": "Outfit, system-ui, sans-serif",
-            "body": "Outfit, system-ui, sans-serif",
+            "heading": "'Outfit', system-ui, sans-serif",
+            "body": "'Outfit', system-ui, sans-serif",
             "weight_heading": "800",
             "weight_body": "300",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=outfit:300,400,700,800&display=swap",
+            "css_vars": "--font-heading: 'Outfit', system-ui, sans-serif; --font-body: 'Outfit', system-ui, sans-serif;",
         },
         "spacing": "generous",
         "layout_rhythm": "centered_hero_gradient",
@@ -174,10 +194,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#000000",
         },
         "typography": {
-            "heading": "Helvetica Neue, Arial, sans-serif",
-            "body": "Helvetica Neue, Arial, sans-serif",
+            "heading": "'Manrope', Helvetica Neue, Arial, sans-serif",
+            "body": "'Manrope', Helvetica Neue, Arial, sans-serif",
             "weight_heading": "800",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=manrope:400,500,700,800&display=swap",
+            "css_vars": "--font-heading: 'Manrope', Helvetica Neue, Arial, sans-serif; --font-body: 'Manrope', Helvetica Neue, Arial, sans-serif;",
         },
         "spacing": "generous",
         "layout_rhythm": "minimal_centered",
@@ -201,10 +225,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#001233",
         },
         "typography": {
-            "heading": "JetBrains Mono, Consolas, monospace",
-            "body": "JetBrains Mono, Consolas, monospace",
+            "heading": "'JetBrains Mono', Consolas, monospace",
+            "body": "'IBM Plex Mono', Consolas, monospace",
             "weight_heading": "700",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=jetbrains-mono:400,700|ibm-plex-mono:400&display=swap",
+            "css_vars": "--font-heading: 'JetBrains Mono', Consolas, monospace; --font-body: 'IBM Plex Mono', Consolas, monospace;",
         },
         "spacing": "compact",
         "layout_rhythm": "technical_grid",
@@ -228,10 +256,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#ffffff",
         },
         "typography": {
-            "heading": "Lora, Georgia, serif",
-            "body": "Nunito, system-ui, sans-serif",
+            "heading": "'Lora', Georgia, serif",
+            "body": "'Nunito Sans', system-ui, sans-serif",
             "weight_heading": "600",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=lora:400,500,600|nunito-sans:400,600&display=swap",
+            "css_vars": "--font-heading: 'Lora', Georgia, serif; --font-body: 'Nunito Sans', system-ui, sans-serif;",
         },
         "spacing": "generous",
         "layout_rhythm": "flowing_sections",
@@ -255,10 +287,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#0a0800",
         },
         "typography": {
-            "heading": "Cinzel, Didot, Georgia, serif",
-            "body": "Cormorant Garamond, Georgia, serif",
+            "heading": "'Playfair Display', Didot, Georgia, serif",
+            "body": "'Cormorant Garamond', Georgia, serif",
             "weight_heading": "600",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=playfair-display:400,600,700|cormorant-garamond:400,500&display=swap",
+            "css_vars": "--font-heading: 'Playfair Display', Didot, Georgia, serif; --font-body: 'Cormorant Garamond', Georgia, serif;",
         },
         "spacing": "spacious",
         "layout_rhythm": "centered_luxury",
@@ -282,10 +318,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#000000",
         },
         "typography": {
-            "heading": "Syne, system-ui, sans-serif",
-            "body": "DM Sans, system-ui, sans-serif",
+            "heading": "'Syne', system-ui, sans-serif",
+            "body": "'DM Sans', system-ui, sans-serif",
             "weight_heading": "800",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=syne:400,700,800|dm-sans:400,500&display=swap",
+            "css_vars": "--font-heading: 'Syne', system-ui, sans-serif; --font-body: 'DM Sans', system-ui, sans-serif;",
         },
         "spacing": "generous",
         "layout_rhythm": "full_bleed_sections",
@@ -309,10 +349,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#ffffff",
         },
         "typography": {
-            "heading": "Inter, system-ui, sans-serif",
-            "body": "Inter, system-ui, sans-serif",
+            "heading": "'Inter', system-ui, sans-serif",
+            "body": "'Inter', system-ui, sans-serif",
             "weight_heading": "700",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap",
+            "css_vars": "--font-heading: 'Inter', system-ui, sans-serif; --font-body: 'Inter', system-ui, sans-serif;",
         },
         "spacing": "spacious",
         "layout_rhythm": "centered_minimal",
@@ -336,10 +380,14 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
             "cta_text": "#000000",
         },
         "typography": {
-            "heading": "Barlow Condensed, Impact, Arial, sans-serif",
-            "body": "Barlow, system-ui, sans-serif",
+            "heading": "'Barlow Condensed', Impact, Arial, sans-serif",
+            "body": "'Barlow', system-ui, sans-serif",
             "weight_heading": "700",
             "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=barlow-condensed:400,700|barlow:400,500&display=swap",
+            "css_vars": "--font-heading: 'Barlow Condensed', Impact, Arial, sans-serif; --font-body: 'Barlow', system-ui, sans-serif;",
         },
         "spacing": "compact",
         "layout_rhythm": "dense_grid",
@@ -374,23 +422,68 @@ def _select_style_name(
     project_type: str,
     audience: str,
     tier: str,
+    recent_signatures: list[dict] | None = None,
 ) -> str:
     """Select a design style name based on project context.
 
     Uses a deterministic hash so the same prompt always gets the same style,
     but the style varies meaningfully across different prompts.
+
+    Applies a design diversity penalty: if the candidate style was used in any
+    of the recent_signatures, it falls back to the next-best alternative.
     """
     combined = f"{prompt} {project_type} {audience}".lower()
 
-    # Try keyword-based selection first
+    # Collect recently used style names to penalize
+    recent_style_names: set[str] = set()
+    if recent_signatures:
+        for sig in recent_signatures:
+            sn = sig.get("styleName", "")
+            if sn:
+                recent_style_names.add(sn)
+
+    # Build candidate from keyword hints
+    keyword_candidate: str | None = None
     for keywords, style_name in _STYLE_HINTS:
         if any(kw in combined for kw in keywords):
-            return style_name
+            keyword_candidate = style_name
+            break
 
-    # Deterministic fallback based on hash of combined text
+    # If keyword candidate not recently used, use it
+    if keyword_candidate and keyword_candidate not in recent_style_names:
+        return keyword_candidate
+
+    # Deterministic hash-based selection with diversity fallback
     h = int(hashlib.sha256(combined.encode()).hexdigest(), 16)
-    style = _DESIGN_STYLES[h % len(_DESIGN_STYLES)]
-    return style["name"]
+    n = len(_DESIGN_STYLES)
+
+    # Try up to n alternatives to find one not recently used
+    for offset in range(n):
+        style = _DESIGN_STYLES[(h + offset) % n]
+        if style["name"] not in recent_style_names:
+            return style["name"]
+
+    # All styles recently used (very unlikely) — just use hash fallback
+    return _DESIGN_STYLES[h % n]["name"]
+
+
+def make_design_signature(style: dict) -> dict:
+    """Create a compact design signature for diversity tracking."""
+    palette = style.get("palette", {})
+    # Create a stable hash of the palette
+    palette_str = "|".join(
+        f"{k}={v}" for k, v in sorted(palette.items())
+    )
+    palette_hash = hashlib.sha256(palette_str.encode()).hexdigest()[:8]
+    typo = style.get("typography", {})
+    font_pair = f"{typo.get('heading', '')}|{typo.get('body', '')}"
+
+    return {
+        "styleName": style.get("name", ""),
+        "paletteHash": palette_hash,
+        "fontPair": font_pair,
+        "layoutArchetype": style.get("layout_rhythm", ""),
+    }
 
 
 def create_design_direction(
@@ -398,6 +491,7 @@ def create_design_direction(
     project_type: str = "static-site",
     audience: str = "",
     tier: str = "balanced",
+    recent_signatures: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Generate a unique design direction for the given project context.
 
@@ -410,13 +504,16 @@ def create_design_direction(
         project_type: Amarktai project type string.
         audience: Audience description from Scout (if available).
         tier: Quality tier ("cheap" | "balanced" | "premium").
+        recent_signatures: Optional list of recent design signatures for
+            diversity penalty (from project memory or user history).
 
     Returns:
         dict with: name, label, palette, typography, spacing, layout_rhythm,
         visual_motifs, media_direction, motion, mobile, tailwind_config,
-        coder_instructions (a human-readable directive for the Coder agent).
+        coder_instructions (a human-readable directive for the Coder agent),
+        design_signature (compact signature for diversity tracking).
     """
-    style_name = _select_style_name(prompt, project_type, audience, tier)
+    style_name = _select_style_name(prompt, project_type, audience, tier, recent_signatures)
     style = next(
         (s for s in _DESIGN_STYLES if s["name"] == style_name),
         _DESIGN_STYLES[0],
@@ -429,6 +526,11 @@ def create_design_direction(
         f"text={style['palette']['text_primary']}. "
         f"Typography: heading font = {style['typography']['heading']}, "
         f"body font = {style['typography']['body']}. "
+        f"IMPORTANT — Load the web fonts using this <link> tag in every HTML <head>: "
+        f'<link rel="stylesheet" href="{style["font_import"]["link_href"]}">. '
+        f"Set CSS custom properties: {style['font_import']['css_vars']}. "
+        f"Use font-family: var(--font-heading) for all headings and var(--font-body) for body text. "
+        f"Body font-size must be at least 16px; heading font-size at least 2rem. "
         f"Visual motifs: {style['visual_motifs']}. "
         f"Layout rhythm: {style['layout_rhythm']}. "
         f"Media direction: {style['media_direction']}. "
@@ -438,14 +540,18 @@ def create_design_direction(
         f"Make the site feel custom and distinctive."
     )
 
+    signature = make_design_signature(style)
+
     return {
         **style,
         "coder_instructions": coder_instructions,
         "tier": tier,
         "project_type": project_type,
+        "design_signature": signature,
     }
 
 
 def get_available_styles() -> list[dict[str, str]]:
     """Return the list of available design styles (name + label only)."""
     return [{"name": s["name"], "label": s["label"]} for s in _DESIGN_STYLES]
+

@@ -9,12 +9,12 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Query
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -28,10 +28,17 @@ from agents.build_contract import infer_build_mode, infer_project_type
 from agents.prompts import ASSISTANT_PROMPT
 from agents.clarification import check_clarification_needed, apply_clarification_answers
 from agents.pixabay import search_images, search_videos, build_media_manifest
-from agents.design_engine import get_available_styles
+from agents.design_engine import get_available_styles, make_design_signature
 from agents.repo_analyzer import analyze_repo_profile
 from agents.coverage_score import compute_coverage_score
 from agents.preview_executor import execute_preview
+from agents.media_storage import (
+    validate_upload, save_file, delete_asset_files, public_url_for,
+    get_storage_root, storage_path_is_safe, safe_filename, media_type_from_mime,
+)
+from agents.logo_agent import run_logo_agent, logo_agent_prompt_block
+from agents.agent_contracts import get_all_contracts, get_contract
+from agents.html_validator import validate_project_files_enhanced
 from auth import (
     decode_token,
     hash_password,
@@ -80,7 +87,19 @@ client = AsyncIOMotorClient(os.environ["MONGO_URL"])
 db = client[os.environ["DB_NAME"]]
 PIPELINE_SEM = asyncio.Semaphore(2)
 LOGIN_ATTEMPTS: dict[str, deque[datetime]] = defaultdict(deque)
-SETTINGS_KEYS = ["GENX_API_KEY", "GITHUB_PAT", "BRAVE_SEARCH_API_KEY", "PIXABAY_API_KEY"]
+SETTINGS_KEYS = [
+    "GENX_API_KEY",
+    "GITHUB_PAT",
+    "BRAVE_SEARCH_API_KEY",
+    "PIXABAY_API_KEY",
+    "QWEN_API_KEY",
+    "QWEN_BASE_URL",
+    "QWEN_MODEL_CHAT",
+    "QWEN_MODEL_CODE",
+    "QWEN_MODEL_IMAGE",
+    "QWEN_MODEL_VIDEO",
+    "QWEN_MODEL_AUDIO",
+]
 
 
 @asynccontextmanager
@@ -88,6 +107,21 @@ async def lifespan(app: FastAPI):
     assert_startup_config()
     app.state.db = db
     await seed_admin(db)
+    # Ensure media storage directory exists
+    try:
+        get_storage_root()
+        logger.info("Media storage ready at %s", os.environ.get("MEDIA_STORAGE_PATH", "/app/storage/media"))
+    except Exception as e:
+        logger.warning("Media storage init warning: %s", e)
+    # Ensure MongoDB indexes for media_assets
+    try:
+        await db.media_assets.create_index("user_id")
+        await db.media_assets.create_index("project_id")
+        await db.media_assets.create_index("media_type")
+        await db.media_assets.create_index("source")
+        await db.media_assets.create_index("created_at")
+    except Exception as e:
+        logger.warning("Media asset index creation warning: %s", e)
     logger.info("%s backend ready", APP_NAME)
     yield
     client.close()
@@ -256,6 +290,8 @@ class Project(BaseModel):
     })
     repair_attempts: int = 0
     last_validation: dict | None = None
+    # Phase 8: Project memory for brand/design/media/stack persistence
+    project_memory: dict | None = None
 
 
 class AssistantMessage(BaseModel):
@@ -277,6 +313,13 @@ class SettingsUpdate(BaseModel):
     GITHUB_PAT: Optional[str] = None
     BRAVE_SEARCH_API_KEY: Optional[str] = None
     PIXABAY_API_KEY: Optional[str] = None
+    QWEN_API_KEY: Optional[str] = None
+    QWEN_BASE_URL: Optional[str] = None
+    QWEN_MODEL_CHAT: Optional[str] = None
+    QWEN_MODEL_CODE: Optional[str] = None
+    QWEN_MODEL_IMAGE: Optional[str] = None
+    QWEN_MODEL_VIDEO: Optional[str] = None
+    QWEN_MODEL_AUDIO: Optional[str] = None
 
 
 class RetryBody(BaseModel):
@@ -298,6 +341,46 @@ class PasswordReset(BaseModel):
 class FinalizeOptions(BaseModel):
     repo_name_override: Optional[str] = None
 
+
+class SavePixabayBody(BaseModel):
+    asset_id: Optional[str] = None
+    project_id: Optional[str] = None
+    url: str
+    thumbnail_url: Optional[str] = None
+    query: str = ""
+    attribution: dict = Field(default_factory=dict)
+    tags: List[str] = Field(default_factory=list)
+    media_type: str = "image"
+    width: int = 0
+    height: int = 0
+
+
+class SaveGeneratedBody(BaseModel):
+    project_id: Optional[str] = None
+    source: str = Field(pattern="^(genx|qwen)$")
+    url: str
+    prompt: str = ""
+    media_type: str = "image"
+    tags: List[str] = Field(default_factory=list)
+    width: int = 0
+    height: int = 0
+
+
+class ProjectMemoryPatch(BaseModel):
+    brand: Optional[dict] = None
+    designTokens: Optional[dict] = None
+    fontPair: Optional[dict] = None
+    logo: Optional[dict] = None
+    mediaAssets: Optional[List[dict]] = None
+    stack: Optional[dict] = None
+    database: Optional[dict] = None
+    auth: Optional[dict] = None
+    envRequirements: Optional[List[str]] = None
+    deploymentTarget: Optional[str] = None
+
+
+class StatusPatch(BaseModel):
+    status: str
 
 
 def _login_allowed(key: str) -> bool:
@@ -835,7 +918,65 @@ async def models_router(tier: str = "balanced") -> dict:
 
 
 def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str | None) -> dict:
-    """Determine media_strategy for a new project based on mode, tier, and media_requirements."""
+    """Determine media_strategy for a new project based on mode, tier, and media_requirements.
+
+    Explicit media source choices take priority over automatic selection:
+      "pixabay"  → Pixabay stock images/videos (requires PIXABAY_API_KEY)
+      "ai"       → GenX/Qwen AI image generation (requires balanced/premium tier)
+      "css_svg"  → CSS + SVG visual compositions only; no external image URLs
+      "auto"     → best available option (original auto-selection logic)
+    """
+    req = (media_requirements or "auto").lower().strip()
+
+    # ── Explicit "pixabay" choice ──────────────────────────────────────────────
+    if req == "pixabay":
+        return {
+            "mode": "pixabay",
+            "confirmed": True,
+            "models_used": [],
+            "source": "pixabay",
+            "notes": (
+                "Pixabay stock images/videos will be fetched and embedded in the project. "
+                "Requires PIXABAY_API_KEY configured in Settings. "
+                "If the key is missing, a setup warning will be shown instead of images."
+            ),
+        }
+
+    # ── Explicit "ai" choice ───────────────────────────────────────────────────
+    if req == "ai":
+        if quality_tier in ("balanced", "premium"):
+            return {
+                "mode": "ai_generated",
+                "confirmed": False,
+                "models_used": [],
+                "notes": (
+                    "AI image generation will be used if a GenX or Qwen media model is available. "
+                    "Falls back to CSS/SVG visuals if no media model is configured."
+                ),
+            }
+        return {
+            "mode": "placeholder",
+            "confirmed": False,
+            "models_used": [],
+            "notes": (
+                "AI image generation requires balanced or premium tier. "
+                "Upgrade your quality tier to enable AI media."
+            ),
+        }
+
+    # ── Explicit "css_svg" choice ─────────────────────────────────────────────
+    if req == "css_svg":
+        return {
+            "mode": "css_svg",
+            "confirmed": True,
+            "models_used": [],
+            "notes": (
+                "CSS gradients and inline SVG visual compositions only. "
+                "No external image URLs or API calls will be made."
+            ),
+        }
+
+    # ── Auto mode (original logic) ─────────────────────────────────────────────
     wants_media = media_requirements and any(
         kw in media_requirements.lower()
         for kw in ("generat", "image", "video", "audio", "music", "photo", "ai image")
@@ -875,7 +1016,63 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
     }
 
 
-# ── Clarification endpoint ────────────────────────────────────────────────────
+@api.get("/qwen/status")
+async def qwen_status() -> dict:
+    """Return optional Qwen direct-provider availability status.
+
+    Checks which Qwen capability keys are configured.
+    Returns honest status for each capability.
+    Never blocks normal builds — Qwen is entirely optional.
+    """
+    qwen_key = await _runtime_secret("QWEN_API_KEY")
+
+    if not qwen_key:
+        return {
+            "configured": False,
+            "api_key_set": False,
+            "capabilities": {
+                "chat":  {"available": False, "status": "not configured"},
+                "code":  {"available": False, "status": "not configured"},
+                "image": {"available": False, "status": "not configured"},
+                "video": {"available": False, "status": "not configured"},
+                "audio": {"available": False, "status": "not configured"},
+            },
+            "note": "Qwen is optional. Add QWEN_API_KEY in Settings to enable.",
+        }
+
+    async def _check_cap(key: str, label: str) -> dict:
+        model = await _runtime_secret(key)
+        if model:
+            return {"available": True, "model": model, "status": "configured"}
+        return {"available": False, "status": "not configured / unavailable"}
+
+    chat  = await _check_cap("QWEN_MODEL_CHAT",  "Chat")
+    code  = await _check_cap("QWEN_MODEL_CODE",  "Code")
+    image = await _check_cap("QWEN_MODEL_IMAGE", "Image generation")
+    video = await _check_cap("QWEN_MODEL_VIDEO", "Video generation")
+    audio = await _check_cap("QWEN_MODEL_AUDIO", "Audio/voice generation")
+
+    base_url = await _runtime_secret("QWEN_BASE_URL")
+
+    return {
+        "configured": True,
+        "api_key_set": True,
+        "base_url": base_url or os.environ.get("QWEN_BASE_URL") or "default",
+        "capabilities": {
+            "chat":  chat,
+            "code":  code,
+            "image": image,
+            "video": video,
+            "audio": audio,
+        },
+        "note": (
+            "Qwen is optional. GenX is the primary provider. "
+            "Qwen is only used for tasks where a specific Qwen model is configured."
+        ),
+    }
+
+
+
 
 class ClarificationRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=12000)
@@ -1044,6 +1241,7 @@ async def create_project(body: ProjectCreate, claims: dict = Depends(require_use
         repo_visibility=body.repo_visibility or "public",
         owner_id=claims["sub"],
         media_strategy=_build_media_strategy(build_mode, quality_tier, body.media_requirements),
+        project_memory=_empty_project_memory(),
     )
     await db.projects.insert_one(dict(proj.model_dump()))
     await hub.broadcast(proj.id, {"type": "project_status", "data": {"status": "queued"}})
@@ -1427,7 +1625,14 @@ async def iterate_project(project_id: str, body: IterateBody, claims: dict = Dep
         updates["quality_tier"] = body.tier
     await db.projects.update_one({"id": project_id}, {"$set": updates})
     await hub.broadcast(project_id, {"type": "project_status", "data": {"status": "queued"}})
-    asyncio.create_task(_launch_pipeline(project_id, body.message, "iterate"))
+    # Route imported-repo (repo_fix) projects through the build pipeline with build_mode="repo_fix"
+    # so that _run_repo_fix is called directly (intent detection, full_app_completion escalation,
+    # 1500s global timeout) instead of run_iteration with its 600s limit.
+    project_mode = proj.get("mode", "web_app")
+    if project_mode == "repo_fix" or proj.get("github"):
+        asyncio.create_task(_launch_pipeline(project_id, body.message, "build", build_mode="repo_fix"))
+    else:
+        asyncio.create_task(_launch_pipeline(project_id, body.message, "iterate"))
     return {"ok": True, "queued": True, "projectId": project_id}
 
 
@@ -1865,6 +2070,339 @@ def _ext_lang(path: str) -> str:
         "ts": "typescript", "tsx": "typescript", "json": "json", "md": "markdown",
         "py": "python", "rb": "ruby", "go": "go", "rs": "rust", "yml": "yaml", "yaml": "yaml",
     }.get(ext, "text")
+
+
+# ── Media Library Endpoints ──────────────────────────────────────────────────
+
+@secured.post("/media/upload")
+async def media_upload(
+    claims: dict = Depends(require_user),
+    file: UploadFile = File(...),
+    project_id: Optional[str] = Form(None),
+    tags: Optional[str] = Form(None),
+    media_type_override: Optional[str] = Form(None),
+) -> dict:
+    """Upload media to the media library."""
+    user_id = claims["sub"]
+    content = await file.read()
+    filename = file.filename or "upload"
+
+    validation = validate_upload(filename, content, media_type_override)
+    if not validation["ok"]:
+        # Use a safe, curated message — do not echo raw internal errors to client
+        safe_msg = validation.get("error", "Upload rejected")
+        if len(safe_msg) > 200:
+            safe_msg = safe_msg[:200]
+        raise HTTPException(400, safe_msg)
+
+    asset_id = str(uuid.uuid4())
+    safe_fn = safe_filename(filename)
+    try:
+        file_path, thumb_path = save_file(user_id, asset_id, safe_fn, content)
+    except Exception:
+        logger.exception("Failed to save uploaded file for user %s", user_id)
+        raise HTTPException(500, "Failed to save uploaded file")
+
+    public_url = public_url_for(asset_id, safe_fn)
+    thumb_url = public_url_for(asset_id, safe_fn, thumb=True) if thumb_path else public_url
+
+    tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
+    now = _now()
+    asset_doc = {
+        "id": asset_id,
+        "user_id": user_id,
+        "project_id": project_id,
+        "filename": safe_fn,
+        "original_name": filename,
+        "media_type": validation["media_type"],
+        "mime_type": validation["mime"],
+        "size_bytes": len(content),
+        "width": validation.get("width", 0),
+        "height": validation.get("height", 0),
+        "source": "upload",
+        "storage_path": str(file_path),
+        "public_url": public_url,
+        "thumbnail_url": thumb_url,
+        "prompt": "",
+        "query": "",
+        "attribution": {},
+        "tags": tag_list,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.media_assets.insert_one({**asset_doc, "_id": asset_id})
+    return {k: v for k, v in asset_doc.items() if k != "_id"}
+
+
+@secured.get("/media/library")
+async def media_library(
+    claims: dict = Depends(require_user),
+    project_id: Optional[str] = Query(None),
+    media_type: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+) -> dict:
+    """List media assets for the current user."""
+    user_id = claims["sub"]
+    query: dict = {"user_id": user_id}
+    if project_id:
+        query["project_id"] = project_id
+    if media_type:
+        query["media_type"] = media_type
+    if source:
+        query["source"] = source
+    if q:
+        query["$or"] = [
+            {"filename": {"$regex": q, "$options": "i"}},
+            {"original_name": {"$regex": q, "$options": "i"}},
+            {"tags": {"$elemMatch": {"$regex": q, "$options": "i"}}},
+        ]
+    skip = (page - 1) * per_page
+    total = await db.media_assets.count_documents(query)
+    docs = await db.media_assets.find(
+        query, {"_id": 0}
+    ).sort("created_at", -1).skip(skip).limit(per_page).to_list(per_page)
+    return {"total": total, "page": page, "per_page": per_page, "assets": docs}
+
+
+@secured.get("/media/{asset_id}")
+async def media_get(asset_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Get metadata for a media asset."""
+    user_id = claims["sub"]
+    query = {"id": asset_id} if claims.get("role") == "admin" else {"id": asset_id, "user_id": user_id}
+    doc = await db.media_assets.find_one(query, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Media asset not found")
+    return doc
+
+
+@secured.get("/media/{asset_id}/file")
+async def media_serve_file(asset_id: str, claims: dict = Depends(require_user)) -> Response:
+    """Serve the original file for a media asset."""
+    user_id = claims["sub"]
+    query = {"id": asset_id} if claims.get("role") == "admin" else {"id": asset_id, "user_id": user_id}
+    doc = await db.media_assets.find_one(query, {"_id": 0, "storage_path": 1, "mime_type": 1})
+    if not doc:
+        raise HTTPException(404, "Media asset not found")
+    storage_path = doc.get("storage_path", "")
+    if not storage_path or not storage_path_is_safe(storage_path):
+        raise HTTPException(404, "File not available")
+    path = Path(storage_path)
+    if not path.exists():
+        raise HTTPException(404, "File not found on disk")
+    content = path.read_bytes()
+    return Response(content=content, media_type=doc.get("mime_type", "application/octet-stream"))
+
+
+@secured.get("/media/{asset_id}/thumbnail")
+async def media_serve_thumbnail(asset_id: str, claims: dict = Depends(require_user)) -> Response:
+    """Serve the thumbnail for a media asset, falling back to original."""
+    user_id = claims["sub"]
+    query = {"id": asset_id} if claims.get("role") == "admin" else {"id": asset_id, "user_id": user_id}
+    doc = await db.media_assets.find_one(query, {"_id": 0, "storage_path": 1, "mime_type": 1})
+    if not doc:
+        raise HTTPException(404, "Media asset not found")
+    storage_path = doc.get("storage_path", "")
+    if not storage_path or not storage_path_is_safe(storage_path):
+        raise HTTPException(404, "File not available")
+    orig_path = Path(storage_path)
+    # Try thumbnail first
+    thumb_path = orig_path.parent / f"thumb_{orig_path.name}"
+    serving_thumb = thumb_path.exists()
+    serve_path = thumb_path if serving_thumb else orig_path
+    if not serve_path.exists():
+        raise HTTPException(404, "File not found on disk")
+    content = serve_path.read_bytes()
+    # Use JPEG MIME for thumbnail files (always JPEG), original MIME for original files
+    if serving_thumb and serve_path.suffix.lower() in (".jpg", ".jpeg"):
+        mime = "image/jpeg"
+    else:
+        mime = doc.get("mime_type", "application/octet-stream")
+    return Response(content=content, media_type=mime)
+
+
+@secured.delete("/media/{asset_id}")
+async def media_delete(asset_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Delete a media asset and its file."""
+    user_id = claims["sub"]
+    query = {"id": asset_id} if claims.get("role") == "admin" else {"id": asset_id, "user_id": user_id}
+    doc = await db.media_assets.find_one(query, {"_id": 0, "storage_path": 1})
+    if not doc:
+        raise HTTPException(404, "Media asset not found")
+    storage_path = doc.get("storage_path", "")
+    if storage_path and storage_path_is_safe(storage_path):
+        delete_asset_files(storage_path)
+    await db.media_assets.delete_one({"id": asset_id})
+    return {"ok": True, "deleted": asset_id}
+
+
+@secured.post("/media/save-pixabay")
+async def media_save_pixabay(body: SavePixabayBody, claims: dict = Depends(require_user)) -> dict:
+    """Save a selected Pixabay asset to the media library."""
+    user_id = claims["sub"]
+    if not body.attribution:
+        raise HTTPException(400, "attribution is required for Pixabay assets")
+    asset_id = body.asset_id or str(uuid.uuid4())
+    now = _now()
+    asset_doc = {
+        "id": asset_id,
+        "user_id": user_id,
+        "project_id": body.project_id,
+        "filename": safe_filename(body.url.rsplit("/", 1)[-1] or "pixabay-image.jpg"),
+        "original_name": body.url.rsplit("/", 1)[-1] or "pixabay-image",
+        "media_type": body.media_type,
+        "mime_type": "image/jpeg" if body.media_type == "image" else "video/mp4",
+        "size_bytes": 0,
+        "width": body.width,
+        "height": body.height,
+        "source": "pixabay",
+        "storage_path": "",
+        "public_url": body.url,
+        "thumbnail_url": body.thumbnail_url or body.url,
+        "prompt": "",
+        "query": body.query,
+        "attribution": body.attribution,
+        "tags": body.tags,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.media_assets.replace_one(
+        {"id": asset_id}, {**asset_doc, "_id": asset_id}, upsert=True
+    )
+    return {k: v for k, v in asset_doc.items() if k != "_id"}
+
+
+@secured.post("/media/save-generated")
+async def media_save_generated(body: SaveGeneratedBody, claims: dict = Depends(require_user)) -> dict:
+    """Save a GenX/Qwen generated media asset to the media library."""
+    user_id = claims["sub"]
+    asset_id = str(uuid.uuid4())
+    now = _now()
+    asset_doc = {
+        "id": asset_id,
+        "user_id": user_id,
+        "project_id": body.project_id,
+        "filename": f"generated-{asset_id[:8]}.jpg",
+        "original_name": f"generated-{body.source}",
+        "media_type": body.media_type,
+        "mime_type": "image/jpeg",
+        "size_bytes": 0,
+        "width": body.width,
+        "height": body.height,
+        "source": body.source,
+        "storage_path": "",
+        "public_url": body.url,
+        "thumbnail_url": body.url,
+        "prompt": body.prompt,
+        "query": "",
+        "attribution": {},
+        "tags": body.tags,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.media_assets.insert_one({**asset_doc, "_id": asset_id})
+    return {k: v for k, v in asset_doc.items() if k != "_id"}
+
+
+# ── Logo Agent Endpoint ──────────────────────────────────────────────────────
+
+@secured.post("/logo")
+async def generate_logo(body: dict, claims: dict = Depends(require_user)) -> dict:
+    """Run the Logo Agent to generate or retrieve a logo."""
+    async def _lookup_asset(asset_id: str) -> dict | None:
+        user_id = claims["sub"]
+        return await db.media_assets.find_one(
+            {"id": asset_id, "user_id": user_id}, {"_id": 0}
+        )
+
+    result = await run_logo_agent(body, media_library_fn=_lookup_asset)
+    return result
+
+
+# ── Agent Contracts Endpoint ─────────────────────────────────────────────────
+
+@secured.get("/agents/contracts")
+async def list_agent_contracts(_: dict = Depends(require_user)) -> dict:
+    """Return all specialist agent contracts."""
+    return {"contracts": get_all_contracts()}
+
+
+@secured.get("/agents/contracts/{agent_name}")
+async def get_agent_contract(agent_name: str, _: dict = Depends(require_user)) -> dict:
+    """Return a specific agent contract by name."""
+    contract = get_contract(agent_name)
+    if not contract:
+        raise HTTPException(404, f"Agent contract '{agent_name}' not found")
+    return contract
+
+
+# ── Project Memory Endpoints ─────────────────────────────────────────────────
+
+def _empty_project_memory() -> dict:
+    return {
+        "brand": {},
+        "designTokens": {},
+        "fontPair": {},
+        "logo": {},
+        "mediaAssets": [],
+        "stack": {},
+        "database": {},
+        "auth": {},
+        "envRequirements": [],
+        "deploymentTarget": "",
+        "iterationHistory": [],
+        "modelCalls": [],
+        "decisions": [],
+        "designSignatures": [],
+    }
+
+
+@secured.get("/projects/{project_id}/memory")
+async def get_project_memory(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Return the project memory for a project."""
+    user_id = claims["sub"]
+    query = {"id": project_id} if claims.get("role") == "admin" else {"id": project_id, "owner_id": user_id}
+    proj = await db.projects.find_one(query, {"_id": 0, "project_memory": 1})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    memory = proj.get("project_memory") or _empty_project_memory()
+    return {"project_id": project_id, "memory": memory}
+
+
+@secured.patch("/projects/{project_id}/memory")
+async def patch_project_memory(
+    project_id: str, body: ProjectMemoryPatch, claims: dict = Depends(require_user)
+) -> dict:
+    """Patch fields of the project memory."""
+    user_id = claims["sub"]
+    query = {"id": project_id} if claims.get("role") == "admin" else {"id": project_id, "owner_id": user_id}
+    proj = await db.projects.find_one(query, {"_id": 0, "project_memory": 1})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    memory = proj.get("project_memory") or _empty_project_memory()
+    updates = body.model_dump(exclude_none=True)
+    memory.update(updates)
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$set": {"project_memory": memory, "updated_at": _now()}},
+    )
+    return {"ok": True, "project_id": project_id, "memory": memory}
+
+
+# ── HTML/CSS Validation Endpoint ─────────────────────────────────────────────
+
+@secured.post("/validate/html")
+async def validate_html_endpoint(body: dict, _: dict = Depends(require_user)) -> dict:
+    """Validate HTML/CSS files. body: {files: [{path, content}], logo_result?, pixabay_assets?}."""
+    files = body.get("files", [])
+    logo_result = body.get("logo_result")
+    pixabay_assets = body.get("pixabay_assets")
+    if not files:
+        raise HTTPException(400, "No files provided")
+    result = validate_project_files_enhanced(files, logo_result, pixabay_assets)
+    return result
 
 
 app.include_router(api)
