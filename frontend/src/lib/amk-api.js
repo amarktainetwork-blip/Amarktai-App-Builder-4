@@ -84,6 +84,24 @@ export const Media = {
   videos: (query, opts = {}) =>
     api.get("/media/videos", { params: { query, ...opts } }).then((r) => r.data),
   styles: () => api.get("/design/styles").then((r) => r.data),
+  // Media Library
+  upload: (file, opts = {}) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (opts.project_id) fd.append("project_id", opts.project_id);
+    if (opts.tags) fd.append("tags", opts.tags);
+    if (opts.media_type_override) fd.append("media_type_override", opts.media_type_override);
+    return api.post("/media/upload", fd, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data);
+  },
+  library: (filters = {}) => api.get("/media/library", { params: filters }).then((r) => r.data),
+  get: (assetId) => api.get(`/media/${assetId}`).then((r) => r.data),
+  fileUrl: (assetId) => `${API}/media/${assetId}/file?token=${encodeURIComponent(getToken() || "")}`,
+  thumbnailUrl: (assetId) => `${API}/media/${assetId}/thumbnail?token=${encodeURIComponent(getToken() || "")}`,
+  delete: (assetId) => api.delete(`/media/${assetId}`).then((r) => r.data),
+  savePixabay: (body) => api.post("/media/save-pixabay", body).then((r) => r.data),
+  saveGenerated: (body) => api.post("/media/save-generated", body).then((r) => r.data),
+  generateLogo: (body) => api.post("/logo", body).then((r) => r.data),
+  agentContracts: () => api.get("/agents/contracts").then((r) => r.data),
 };
 
 export const Settings = {

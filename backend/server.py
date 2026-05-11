@@ -9,12 +9,12 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Query
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -28,10 +28,17 @@ from agents.build_contract import infer_build_mode, infer_project_type
 from agents.prompts import ASSISTANT_PROMPT
 from agents.clarification import check_clarification_needed, apply_clarification_answers
 from agents.pixabay import search_images, search_videos, build_media_manifest
-from agents.design_engine import get_available_styles
+from agents.design_engine import get_available_styles, make_design_signature
 from agents.repo_analyzer import analyze_repo_profile
 from agents.coverage_score import compute_coverage_score
 from agents.preview_executor import execute_preview
+from agents.media_storage import (
+    validate_upload, save_file, delete_asset_files, public_url_for,
+    get_storage_root, storage_path_is_safe, safe_filename, media_type_from_mime,
+)
+from agents.logo_agent import run_logo_agent, logo_agent_prompt_block
+from agents.agent_contracts import get_all_contracts, get_contract
+from agents.html_validator import validate_project_files_enhanced
 from auth import (
     decode_token,
     hash_password,
@@ -100,6 +107,21 @@ async def lifespan(app: FastAPI):
     assert_startup_config()
     app.state.db = db
     await seed_admin(db)
+    # Ensure media storage directory exists
+    try:
+        get_storage_root()
+        logger.info("Media storage ready at %s", os.environ.get("MEDIA_STORAGE_PATH", "/app/storage/media"))
+    except Exception as e:
+        logger.warning("Media storage init warning: %s", e)
+    # Ensure MongoDB indexes for media_assets
+    try:
+        await db.media_assets.create_index("user_id")
+        await db.media_assets.create_index("project_id")
+        await db.media_assets.create_index("media_type")
+        await db.media_assets.create_index("source")
+        await db.media_assets.create_index("created_at")
+    except Exception as e:
+        logger.warning("Media asset index creation warning: %s", e)
     logger.info("%s backend ready", APP_NAME)
     yield
     client.close()
@@ -242,6 +264,8 @@ class Project(BaseModel):
     })
     repair_attempts: int = 0
     last_validation: dict | None = None
+    # Phase 8: Project memory for brand/design/media/stack persistence
+    project_memory: dict | None = None
 
 
 class AssistantMessage(BaseModel):
@@ -291,6 +315,46 @@ class PasswordReset(BaseModel):
 class FinalizeOptions(BaseModel):
     repo_name_override: Optional[str] = None
 
+
+class SavePixabayBody(BaseModel):
+    asset_id: Optional[str] = None
+    project_id: Optional[str] = None
+    url: str
+    thumbnail_url: Optional[str] = None
+    query: str = ""
+    attribution: dict = Field(default_factory=dict)
+    tags: List[str] = Field(default_factory=list)
+    media_type: str = "image"
+    width: int = 0
+    height: int = 0
+
+
+class SaveGeneratedBody(BaseModel):
+    project_id: Optional[str] = None
+    source: str = Field(pattern="^(genx|qwen)$")
+    url: str
+    prompt: str = ""
+    media_type: str = "image"
+    tags: List[str] = Field(default_factory=list)
+    width: int = 0
+    height: int = 0
+
+
+class ProjectMemoryPatch(BaseModel):
+    brand: Optional[dict] = None
+    designTokens: Optional[dict] = None
+    fontPair: Optional[dict] = None
+    logo: Optional[dict] = None
+    mediaAssets: Optional[List[dict]] = None
+    stack: Optional[dict] = None
+    database: Optional[dict] = None
+    auth: Optional[dict] = None
+    envRequirements: Optional[List[str]] = None
+    deploymentTarget: Optional[str] = None
+
+
+class StatusPatch(BaseModel):
+    status: str
 
 
 def _login_allowed(key: str) -> bool:
@@ -1151,6 +1215,7 @@ async def create_project(body: ProjectCreate, claims: dict = Depends(require_use
         repo_visibility=body.repo_visibility or "public",
         owner_id=claims["sub"],
         media_strategy=_build_media_strategy(build_mode, quality_tier, body.media_requirements),
+        project_memory=_empty_project_memory(),
     )
     await db.projects.insert_one(dict(proj.model_dump()))
     await hub.broadcast(proj.id, {"type": "project_status", "data": {"status": "queued"}})
@@ -1979,6 +2044,326 @@ def _ext_lang(path: str) -> str:
         "ts": "typescript", "tsx": "typescript", "json": "json", "md": "markdown",
         "py": "python", "rb": "ruby", "go": "go", "rs": "rust", "yml": "yaml", "yaml": "yaml",
     }.get(ext, "text")
+
+
+# ── Media Library Endpoints ──────────────────────────────────────────────────
+
+@secured.post("/media/upload")
+async def media_upload(
+    claims: dict = Depends(require_user),
+    file: UploadFile = File(...),
+    project_id: Optional[str] = Form(None),
+    tags: Optional[str] = Form(None),
+    media_type_override: Optional[str] = Form(None),
+) -> dict:
+    """Upload media to the media library."""
+    user_id = claims["sub"]
+    content = await file.read()
+    filename = file.filename or "upload"
+
+    validation = validate_upload(filename, content, media_type_override)
+    if not validation["ok"]:
+        raise HTTPException(400, validation["error"])
+
+    asset_id = str(uuid.uuid4())
+    safe_fn = safe_filename(filename)
+    file_path, thumb_path = save_file(user_id, asset_id, safe_fn, content)
+
+    public_url = public_url_for(asset_id, safe_fn)
+    thumb_url = public_url_for(asset_id, safe_fn, thumb=True) if thumb_path else public_url
+
+    tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
+    now = _now()
+    asset_doc = {
+        "id": asset_id,
+        "user_id": user_id,
+        "project_id": project_id,
+        "filename": safe_fn,
+        "original_name": filename,
+        "media_type": validation["media_type"],
+        "mime_type": validation["mime"],
+        "size_bytes": len(content),
+        "width": validation.get("width", 0),
+        "height": validation.get("height", 0),
+        "source": "upload",
+        "storage_path": str(file_path),
+        "public_url": public_url,
+        "thumbnail_url": thumb_url,
+        "prompt": "",
+        "query": "",
+        "attribution": {},
+        "tags": tag_list,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.media_assets.insert_one({**asset_doc, "_id": asset_id})
+    return {k: v for k, v in asset_doc.items() if k != "_id"}
+
+
+@secured.get("/media/library")
+async def media_library(
+    claims: dict = Depends(require_user),
+    project_id: Optional[str] = Query(None),
+    media_type: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+) -> dict:
+    """List media assets for the current user."""
+    user_id = claims["sub"]
+    query: dict = {"user_id": user_id}
+    if project_id:
+        query["project_id"] = project_id
+    if media_type:
+        query["media_type"] = media_type
+    if source:
+        query["source"] = source
+    if q:
+        query["$or"] = [
+            {"filename": {"$regex": q, "$options": "i"}},
+            {"original_name": {"$regex": q, "$options": "i"}},
+            {"tags": {"$elemMatch": {"$regex": q, "$options": "i"}}},
+        ]
+    skip = (page - 1) * per_page
+    total = await db.media_assets.count_documents(query)
+    docs = await db.media_assets.find(
+        query, {"_id": 0}
+    ).sort("created_at", -1).skip(skip).limit(per_page).to_list(per_page)
+    return {"total": total, "page": page, "per_page": per_page, "assets": docs}
+
+
+@secured.get("/media/{asset_id}")
+async def media_get(asset_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Get metadata for a media asset."""
+    user_id = claims["sub"]
+    query = {"id": asset_id} if claims.get("role") == "admin" else {"id": asset_id, "user_id": user_id}
+    doc = await db.media_assets.find_one(query, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Media asset not found")
+    return doc
+
+
+@secured.get("/media/{asset_id}/file")
+async def media_serve_file(asset_id: str, claims: dict = Depends(require_user)) -> Response:
+    """Serve the original file for a media asset."""
+    user_id = claims["sub"]
+    query = {"id": asset_id} if claims.get("role") == "admin" else {"id": asset_id, "user_id": user_id}
+    doc = await db.media_assets.find_one(query, {"_id": 0, "storage_path": 1, "mime_type": 1})
+    if not doc:
+        raise HTTPException(404, "Media asset not found")
+    storage_path = doc.get("storage_path", "")
+    if not storage_path or not storage_path_is_safe(storage_path):
+        raise HTTPException(404, "File not available")
+    path = Path(storage_path)
+    if not path.exists():
+        raise HTTPException(404, "File not found on disk")
+    content = path.read_bytes()
+    return Response(content=content, media_type=doc.get("mime_type", "application/octet-stream"))
+
+
+@secured.get("/media/{asset_id}/thumbnail")
+async def media_serve_thumbnail(asset_id: str, claims: dict = Depends(require_user)) -> Response:
+    """Serve the thumbnail for a media asset, falling back to original."""
+    user_id = claims["sub"]
+    query = {"id": asset_id} if claims.get("role") == "admin" else {"id": asset_id, "user_id": user_id}
+    doc = await db.media_assets.find_one(query, {"_id": 0, "storage_path": 1, "mime_type": 1})
+    if not doc:
+        raise HTTPException(404, "Media asset not found")
+    storage_path = doc.get("storage_path", "")
+    if not storage_path or not storage_path_is_safe(storage_path):
+        raise HTTPException(404, "File not available")
+    orig_path = Path(storage_path)
+    # Try thumbnail first
+    thumb_path = orig_path.parent / f"thumb_{orig_path.name}"
+    serve_path = thumb_path if thumb_path.exists() else orig_path
+    if not serve_path.exists():
+        raise HTTPException(404, "File not found on disk")
+    content = serve_path.read_bytes()
+    mime = "image/jpeg" if str(serve_path).endswith("thumb_") or str(serve_path).endswith(".jpg") else doc.get("mime_type", "application/octet-stream")
+    return Response(content=content, media_type=mime)
+
+
+@secured.delete("/media/{asset_id}")
+async def media_delete(asset_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Delete a media asset and its file."""
+    user_id = claims["sub"]
+    query = {"id": asset_id} if claims.get("role") == "admin" else {"id": asset_id, "user_id": user_id}
+    doc = await db.media_assets.find_one(query, {"_id": 0, "storage_path": 1})
+    if not doc:
+        raise HTTPException(404, "Media asset not found")
+    storage_path = doc.get("storage_path", "")
+    if storage_path and storage_path_is_safe(storage_path):
+        delete_asset_files(storage_path)
+    await db.media_assets.delete_one({"id": asset_id})
+    return {"ok": True, "deleted": asset_id}
+
+
+@secured.post("/media/save-pixabay")
+async def media_save_pixabay(body: SavePixabayBody, claims: dict = Depends(require_user)) -> dict:
+    """Save a selected Pixabay asset to the media library."""
+    user_id = claims["sub"]
+    if not body.attribution:
+        raise HTTPException(400, "attribution is required for Pixabay assets")
+    asset_id = body.asset_id or str(uuid.uuid4())
+    now = _now()
+    asset_doc = {
+        "id": asset_id,
+        "user_id": user_id,
+        "project_id": body.project_id,
+        "filename": safe_filename(body.url.rsplit("/", 1)[-1] or "pixabay-image.jpg"),
+        "original_name": body.url.rsplit("/", 1)[-1] or "pixabay-image",
+        "media_type": body.media_type,
+        "mime_type": "image/jpeg" if body.media_type == "image" else "video/mp4",
+        "size_bytes": 0,
+        "width": body.width,
+        "height": body.height,
+        "source": "pixabay",
+        "storage_path": "",
+        "public_url": body.url,
+        "thumbnail_url": body.thumbnail_url or body.url,
+        "prompt": "",
+        "query": body.query,
+        "attribution": body.attribution,
+        "tags": body.tags,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.media_assets.replace_one(
+        {"id": asset_id}, {**asset_doc, "_id": asset_id}, upsert=True
+    )
+    return {k: v for k, v in asset_doc.items() if k != "_id"}
+
+
+@secured.post("/media/save-generated")
+async def media_save_generated(body: SaveGeneratedBody, claims: dict = Depends(require_user)) -> dict:
+    """Save a GenX/Qwen generated media asset to the media library."""
+    user_id = claims["sub"]
+    asset_id = str(uuid.uuid4())
+    now = _now()
+    asset_doc = {
+        "id": asset_id,
+        "user_id": user_id,
+        "project_id": body.project_id,
+        "filename": f"generated-{asset_id[:8]}.jpg",
+        "original_name": f"generated-{body.source}",
+        "media_type": body.media_type,
+        "mime_type": "image/jpeg",
+        "size_bytes": 0,
+        "width": body.width,
+        "height": body.height,
+        "source": body.source,
+        "storage_path": "",
+        "public_url": body.url,
+        "thumbnail_url": body.url,
+        "prompt": body.prompt,
+        "query": "",
+        "attribution": {},
+        "tags": body.tags,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.media_assets.insert_one({**asset_doc, "_id": asset_id})
+    return {k: v for k, v in asset_doc.items() if k != "_id"}
+
+
+# ── Logo Agent Endpoint ──────────────────────────────────────────────────────
+
+@secured.post("/logo")
+async def generate_logo(body: dict, claims: dict = Depends(require_user)) -> dict:
+    """Run the Logo Agent to generate or retrieve a logo."""
+    async def _lookup_asset(asset_id: str) -> dict | None:
+        user_id = claims["sub"]
+        return await db.media_assets.find_one(
+            {"id": asset_id, "user_id": user_id}, {"_id": 0}
+        )
+
+    result = await run_logo_agent(body, media_library_fn=_lookup_asset)
+    return result
+
+
+# ── Agent Contracts Endpoint ─────────────────────────────────────────────────
+
+@secured.get("/agents/contracts")
+async def list_agent_contracts(_: dict = Depends(require_user)) -> dict:
+    """Return all specialist agent contracts."""
+    return {"contracts": get_all_contracts()}
+
+
+@secured.get("/agents/contracts/{agent_name}")
+async def get_agent_contract(agent_name: str, _: dict = Depends(require_user)) -> dict:
+    """Return a specific agent contract by name."""
+    contract = get_contract(agent_name)
+    if not contract:
+        raise HTTPException(404, f"Agent contract '{agent_name}' not found")
+    return contract
+
+
+# ── Project Memory Endpoints ─────────────────────────────────────────────────
+
+def _empty_project_memory() -> dict:
+    return {
+        "brand": {},
+        "designTokens": {},
+        "fontPair": {},
+        "logo": {},
+        "mediaAssets": [],
+        "stack": {},
+        "database": {},
+        "auth": {},
+        "envRequirements": [],
+        "deploymentTarget": "",
+        "iterationHistory": [],
+        "modelCalls": [],
+        "decisions": [],
+        "designSignatures": [],
+    }
+
+
+@secured.get("/projects/{project_id}/memory")
+async def get_project_memory(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Return the project memory for a project."""
+    user_id = claims["sub"]
+    query = {"id": project_id} if claims.get("role") == "admin" else {"id": project_id, "owner_id": user_id}
+    proj = await db.projects.find_one(query, {"_id": 0, "project_memory": 1})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    memory = proj.get("project_memory") or _empty_project_memory()
+    return {"project_id": project_id, "memory": memory}
+
+
+@secured.patch("/projects/{project_id}/memory")
+async def patch_project_memory(
+    project_id: str, body: ProjectMemoryPatch, claims: dict = Depends(require_user)
+) -> dict:
+    """Patch fields of the project memory."""
+    user_id = claims["sub"]
+    query = {"id": project_id} if claims.get("role") == "admin" else {"id": project_id, "owner_id": user_id}
+    proj = await db.projects.find_one(query, {"_id": 0, "project_memory": 1})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    memory = proj.get("project_memory") or _empty_project_memory()
+    updates = body.model_dump(exclude_none=True)
+    memory.update(updates)
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$set": {"project_memory": memory, "updated_at": _now()}},
+    )
+    return {"ok": True, "project_id": project_id, "memory": memory}
+
+
+# ── HTML/CSS Validation Endpoint ─────────────────────────────────────────────
+
+@secured.post("/validate/html")
+async def validate_html_endpoint(body: dict, _: dict = Depends(require_user)) -> dict:
+    """Validate HTML/CSS files. body: {files: [{path, content}], logo_result?, pixabay_assets?}."""
+    files = body.get("files", [])
+    logo_result = body.get("logo_result")
+    pixabay_assets = body.get("pixabay_assets")
+    if not files:
+        raise HTTPException(400, "No files provided")
+    result = validate_project_files_enhanced(files, logo_result, pixabay_assets)
+    return result
 
 
 app.include_router(api)

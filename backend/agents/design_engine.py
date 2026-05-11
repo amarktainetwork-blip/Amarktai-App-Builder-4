@@ -422,23 +422,68 @@ def _select_style_name(
     project_type: str,
     audience: str,
     tier: str,
+    recent_signatures: list[dict] | None = None,
 ) -> str:
     """Select a design style name based on project context.
 
     Uses a deterministic hash so the same prompt always gets the same style,
     but the style varies meaningfully across different prompts.
+
+    Applies a design diversity penalty: if the candidate style was used in any
+    of the recent_signatures, it falls back to the next-best alternative.
     """
     combined = f"{prompt} {project_type} {audience}".lower()
 
-    # Try keyword-based selection first
+    # Collect recently used style names to penalize
+    recent_style_names: set[str] = set()
+    if recent_signatures:
+        for sig in recent_signatures:
+            sn = sig.get("styleName", "")
+            if sn:
+                recent_style_names.add(sn)
+
+    # Build candidate from keyword hints
+    keyword_candidate: str | None = None
     for keywords, style_name in _STYLE_HINTS:
         if any(kw in combined for kw in keywords):
-            return style_name
+            keyword_candidate = style_name
+            break
 
-    # Deterministic fallback based on hash of combined text
+    # If keyword candidate not recently used, use it
+    if keyword_candidate and keyword_candidate not in recent_style_names:
+        return keyword_candidate
+
+    # Deterministic hash-based selection with diversity fallback
     h = int(hashlib.sha256(combined.encode()).hexdigest(), 16)
-    style = _DESIGN_STYLES[h % len(_DESIGN_STYLES)]
-    return style["name"]
+    n = len(_DESIGN_STYLES)
+
+    # Try up to n alternatives to find one not recently used
+    for offset in range(n):
+        style = _DESIGN_STYLES[(h + offset) % n]
+        if style["name"] not in recent_style_names:
+            return style["name"]
+
+    # All styles recently used (very unlikely) — just use hash fallback
+    return _DESIGN_STYLES[h % n]["name"]
+
+
+def make_design_signature(style: dict) -> dict:
+    """Create a compact design signature for diversity tracking."""
+    palette = style.get("palette", {})
+    # Create a stable hash of the palette
+    palette_str = "|".join(
+        f"{k}={v}" for k, v in sorted(palette.items())
+    )
+    palette_hash = hashlib.sha256(palette_str.encode()).hexdigest()[:8]
+    typo = style.get("typography", {})
+    font_pair = f"{typo.get('heading', '')}|{typo.get('body', '')}"
+
+    return {
+        "styleName": style.get("name", ""),
+        "paletteHash": palette_hash,
+        "fontPair": font_pair,
+        "layoutArchetype": style.get("layout_rhythm", ""),
+    }
 
 
 def create_design_direction(
@@ -446,6 +491,7 @@ def create_design_direction(
     project_type: str = "static-site",
     audience: str = "",
     tier: str = "balanced",
+    recent_signatures: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Generate a unique design direction for the given project context.
 
@@ -458,13 +504,16 @@ def create_design_direction(
         project_type: Amarktai project type string.
         audience: Audience description from Scout (if available).
         tier: Quality tier ("cheap" | "balanced" | "premium").
+        recent_signatures: Optional list of recent design signatures for
+            diversity penalty (from project memory or user history).
 
     Returns:
         dict with: name, label, palette, typography, spacing, layout_rhythm,
         visual_motifs, media_direction, motion, mobile, tailwind_config,
-        coder_instructions (a human-readable directive for the Coder agent).
+        coder_instructions (a human-readable directive for the Coder agent),
+        design_signature (compact signature for diversity tracking).
     """
-    style_name = _select_style_name(prompt, project_type, audience, tier)
+    style_name = _select_style_name(prompt, project_type, audience, tier, recent_signatures)
     style = next(
         (s for s in _DESIGN_STYLES if s["name"] == style_name),
         _DESIGN_STYLES[0],
@@ -491,14 +540,18 @@ def create_design_direction(
         f"Make the site feel custom and distinctive."
     )
 
+    signature = make_design_signature(style)
+
     return {
         **style,
         "coder_instructions": coder_instructions,
         "tier": tier,
         "project_type": project_type,
+        "design_signature": signature,
     }
 
 
 def get_available_styles() -> list[dict[str, str]]:
     """Return the list of available design styles (name + label only)."""
     return [{"name": s["name"], "label": s["label"]} for s in _DESIGN_STYLES]
+

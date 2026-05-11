@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import Header from "@/components/Header";
 import SettingsDialog from "@/components/SettingsDialog";
 import ClarificationModal from "@/components/ClarificationModal";
+import MediaLibraryDialog from "@/components/MediaLibraryDialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Projects, System, Clarify } from "@/lib/amk-api";
@@ -36,6 +37,7 @@ export default function ProjectListPage() {
   const [branch, setBranch] = useState("");
   const [creating, setCreating] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
   const [readiness, setReadiness] = useState(null);
 
   const refresh = () => Projects.list().then(setProjects).catch(() => setProjects([]));
@@ -175,6 +177,7 @@ export default function ProjectListPage() {
 
       <Header
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenMediaLibrary={() => setMediaLibraryOpen(true)}
         rightExtra={
           <button
             data-testid="header-logout-btn"
@@ -428,6 +431,7 @@ export default function ProjectListPage() {
       </main>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <MediaLibraryDialog open={mediaLibraryOpen} onOpenChange={setMediaLibraryOpen} />
     </div>
   );
 }
