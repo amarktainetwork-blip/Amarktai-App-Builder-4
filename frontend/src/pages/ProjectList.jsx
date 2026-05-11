@@ -195,13 +195,13 @@ export default function ProjectListPage() {
           <div className="max-w-xl">
             <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3 mb-3">[ new build ]</div>
             <h1 className="font-display font-semibold text-3xl lg:text-5xl tracking-tight leading-[1.05] mb-3">
-              Describe.<br />
-              <span className="text-amk-fg2">Or import.</span><br />
-              <span className="text-amk-accent">Watch agents ship.<span className="blink ml-1" /></span>
+              Describe what<br />
+              <span className="text-amk-fg2">you want to build.</span><br />
+              <span className="text-amk-accent">Watch agents ship it.<span className="blink ml-1" /></span>
             </h1>
             <p className="text-sm text-amk-fg2 mb-8 leading-relaxed">
-              Start from a prompt or pull in a GitHub repo. Amarktai Coding Agents collaborate,
-              files appear in real time, and Amarktai Assistant keeps iteration moving.
+              Describe a landing page, multi-page website, PWA, dashboard, API, or SaaS app.
+              Four AI agents plan, code, review, and validate — files stream live.
             </p>
             <ReadinessStrip readiness={readiness} onRefresh={refreshReadiness} />
 
