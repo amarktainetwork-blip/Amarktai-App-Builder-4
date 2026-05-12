@@ -1,0 +1,77 @@
+name: Deploy (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type 'deploy' to confirm"
+        required: true
+        default: ""
+
+# Required GitHub secrets:
+#   VPS_HOST       — IP or hostname of the production VPS
+#   VPS_USER       — SSH user on the VPS (e.g. ubuntu, deploy)
+#   VPS_SSH_KEY    — Private SSH key (PEM format, no passphrase)
+#   DEPLOY_PATH    — Absolute path to the repo on the VPS (e.g. /opt/amarktai)
+#
+# Optional app env secrets (injected into docker-compose.override.yml):
+#   JWT_SECRET, MONGO_URL, GENX_API_KEY, GITHUB_PAT_DEFAULT,
+#   BRAVE_SEARCH_API_KEY, PIXABAY_API_KEY, QWEN_API_KEY
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm == 'deploy' }}
+
+    steps:
+      - name: Verify confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "deploy" ]; then
+            echo "Confirmation not provided — aborting."
+            exit 1
+          fi
+
+      - name: Check required secrets
+        run: |
+          for secret in VPS_HOST VPS_USER VPS_SSH_KEY DEPLOY_PATH; do
+            if [ -z "${{ secrets[secret] }}" ]; then
+              echo "Missing required secret: $secret"
+              exit 1
+            fi
+          done
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd ${{ secrets.DEPLOY_PATH }}
+
+            echo "==> Fetching latest code"
+            git fetch origin
+            git reset --hard origin/main
+
+            echo "==> Running cleanup scripts (if present)"
+            bash scripts/cleanup_previews.sh || true
+            bash scripts/cleanup_build_cache.sh || true
+
+            echo "==> Building containers"
+            docker compose build --no-cache
+
+            echo "==> Bringing up containers"
+            docker compose up -d
+
+            echo "==> Container status"
+            docker compose ps
+
+            echo "==> Health checks"
+            sleep 10
+            curl -fsS http://localhost/api/health || (echo "Health check failed"; exit 1)
+            curl -fsS http://localhost/api/runtime/health || true
+            curl -fsS http://localhost/api/agents/status || true
+
+            echo "==> Deploy complete"

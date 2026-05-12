@@ -465,15 +465,15 @@ export default function WorkspacePage() {
             {/* Workspace navigation */}
             <button
               data-testid="back-to-projects-btn"
-              onClick={() => nav("/app")}
-              title="Back to Projects"
+              onClick={() => nav("/dashboard")}
+              title="Back to Dashboard"
               className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white"
             >
               <Home className="w-3 h-3" strokeWidth={1.5} /> Projects
             </button>
             <button
               data-testid="new-build-btn"
-              onClick={() => nav("/app")}
+              onClick={() => nav("/dashboard/new")}
               title="Start a new build"
               className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white"
             >
@@ -543,9 +543,10 @@ export default function WorkspacePage() {
       />
 
       {/* Workspace */}
+      {/* Desktop: side-by-side layout. Mobile/tablet: full-screen tabs. */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* LEFT 35% — chat & timeline */}
-        <aside className="w-[35%] min-w-[360px] border-r border-amk-line bg-amk-base flex flex-col overflow-hidden">
+        {/* ── Desktop layout (lg+): left sidebar + right panel ── */}
+        <aside className="hidden lg:flex w-[35%] min-w-[360px] border-r border-amk-line bg-amk-base flex-col overflow-hidden">
           <AgentTimeline events={events} />
           {!connected && (
             <div data-testid="ws-status-banner" className="border-y border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px] text-agent-scout">
@@ -707,8 +708,8 @@ export default function WorkspacePage() {
           <ChatPanel messages={messages} onSend={send} disabled={busy} busy={busy} />
         </aside>
 
-        {/* RIGHT 65% — code & preview */}
-        <section className="flex-1 flex flex-col bg-amk-panel overflow-hidden">
+        {/* Desktop right panel */}
+        <section className="hidden lg:flex flex-1 flex-col bg-amk-panel overflow-hidden">
           <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col min-h-0">
             <div className="h-9 border-b border-amk-line bg-amk-base flex items-center px-2 shrink-0">
               <TabsList className="bg-transparent h-9 p-0 gap-0">
@@ -751,6 +752,90 @@ export default function WorkspacePage() {
             </TabsContent>
           </Tabs>
         </section>
+
+        {/* ── Mobile/tablet layout (< lg): single full-screen tab bar ── */}
+        <div className="lg:hidden flex-1 flex flex-col min-h-0 overflow-hidden">
+          <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col min-h-0">
+            {/* Mobile tab bar */}
+            <div className="border-b border-amk-line bg-amk-base shrink-0">
+              <TabsList className="bg-transparent h-10 p-0 gap-0 w-full justify-start overflow-x-auto flex-nowrap">
+                {[
+                  { value: "preview", label: "Preview" },
+                  { value: "chat", label: "Chat" },
+                  { value: "timeline", label: "Timeline" },
+                  { value: "files", label: "Files" },
+                  { value: "validation", label: "Validation" },
+                ].map(({ value, label }) => (
+                  <TabsTrigger
+                    key={value}
+                    value={value}
+                    data-testid={`mobile-tab-${value}`}
+                    className="font-mono text-[10px] uppercase tracking-wider px-3 h-10 rounded-none border-r border-amk-line data-[state=active]:bg-amk-panel data-[state=active]:text-white data-[state=active]:shadow-none text-amk-fg3 shrink-0"
+                  >
+                    {label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
+
+            {/* Preview tab */}
+            <TabsContent value="preview" className="flex-1 m-0 min-h-0 overflow-hidden">
+              <LivePreview
+                projectId={projectId}
+                refreshKey={refreshKey}
+                projectStatus={project?.status}
+                projectError={project?.error}
+                failedAgent={project?.failed_agent}
+                projectMode={project?.mode}
+                previewStrategy={project?.preview_strategy}
+                buildPhase={buildPhase}
+                previewFallback={previewFallback}
+              />
+            </TabsContent>
+
+            {/* Chat tab */}
+            <TabsContent value="chat" className="flex-1 m-0 min-h-0 overflow-hidden flex flex-col bg-amk-base">
+              {!connected && (
+                <div data-testid="ws-status-banner" className="border-b border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px] text-agent-scout">
+                  {wsState === "reconnecting"
+                    ? "WebSocket reconnecting… Live updates will resume automatically."
+                    : "WebSocket disconnected. Reconnecting…"}
+                </div>
+              )}
+              <ChatPanel messages={messages} onSend={send} disabled={busy} busy={busy} />
+            </TabsContent>
+
+            {/* Timeline tab */}
+            <TabsContent value="timeline" className="flex-1 m-0 min-h-0 overflow-hidden flex flex-col bg-amk-base">
+              <AgentTimeline events={events} />
+            </TabsContent>
+
+            {/* Files tab */}
+            <TabsContent value="files" className="flex-1 m-0 min-h-0 overflow-hidden">
+              <div className="h-full flex flex-col">
+                <FileTree files={files} activePath={activePath} onSelect={(p) => { setActivePath(p); setTab("code"); }} />
+              </div>
+            </TabsContent>
+
+            {/* Validation tab */}
+            <TabsContent value="validation" className="flex-1 m-0 min-h-0 overflow-auto bg-amk-base">
+              <ValidationPanel validation={validation} />
+              <BuildPlanBanner plan={buildPlan} />
+              <AdvisorPanel advisor={advisorResult} />
+              {isRepoProject && (
+                <RepoWorkbenchPanel
+                  projectId={projectId}
+                  project={project}
+                  repoAnalysis={repoAnalysis}
+                  coverage={coverageResult}
+                  onRunPreview={runPreviewFallback}
+                  onContinueMissing={continueMissingRequirements}
+                  busy={busy}
+                />
+              )}
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
 
       <StatusBar project={project} lastModel={lastModel} connected={connected} />

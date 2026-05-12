@@ -67,6 +67,7 @@ export const Projects = {
   finalizeAsBranch: (id) => api.post(`/projects/${id}/finalize/branch-pr`).then((r) => r.data),
   openPR: (id, body) => api.post(`/projects/${id}/pr`, body).then((r) => r.data),
   previewUrl: (id) => `${API}/projects/${id}/preview?token=${encodeURIComponent(getToken() || "")}`,
+  previewBaseUrl: (id) => `${API}/projects/${id}/preview`,
   repoAnalysis: (id) => api.get(`/projects/${id}/repo-analysis`).then((r) => r.data),
   coverage: (id) => api.get(`/projects/${id}/coverage`).then((r) => r.data),
   previewFallback: (id) => api.get(`/projects/${id}/preview-fallback`).then((r) => r.data),

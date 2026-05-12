@@ -362,3 +362,153 @@ test("AgentTimeline shows failed and skipped states", () => {
   expect(content).toMatch(/latestDetail/);
 });
 
+// ── Phase 2C: Dashboard structure ─────────────────────────────────────────────
+
+test("App.js has /dashboard route", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const content = fs.readFileSync(
+    path.join(__dirname, "../App.js"),
+    "utf8"
+  );
+  expect(content).toMatch(/\/dashboard/);
+  expect(content).toMatch(/DashboardLayout/);
+});
+
+test("App.js has /app redirect to /dashboard", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const content = fs.readFileSync(
+    path.join(__dirname, "../App.js"),
+    "utf8"
+  );
+  // /app must redirect, not render ProjectListPage directly
+  expect(content).toMatch(/\/app/);
+  expect(content).toMatch(/Navigate/);
+  expect(content).toMatch(/\/dashboard/);
+});
+
+test("App.js has public /features, /pipeline, /access routes", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const content = fs.readFileSync(
+    path.join(__dirname, "../App.js"),
+    "utf8"
+  );
+  expect(content).toMatch(/\/features/);
+  expect(content).toMatch(/\/pipeline/);
+  expect(content).toMatch(/\/access/);
+});
+
+test("DashboardLayout uses framer-motion and Outlet", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../components/DashboardLayout.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/framer-motion/);
+  expect(content).toMatch(/Outlet/);
+  expect(content).toMatch(/hidden lg:flex/);
+});
+
+test("Access page has form with email and reason fields", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Access.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/type="email"/);
+  expect(content).toMatch(/reason/);
+  // Must call real API, not fake success
+  expect(content).toMatch(/\/access\/request/);
+  expect(content).toMatch(/status.*error|error.*status/i);
+});
+
+test("Access page calls real POST /api/access/request", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Access.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/api\.post.*access\/request|access\/request.*api\.post/);
+  expect(content).not.toMatch(/success.*true.*{}/); // no fake success object
+});
+
+// ── Phase 2C: Preview token security ──────────────────────────────────────────
+
+test("LivePreview uses preview token, not full auth token in URL", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../components/LivePreview.jsx"),
+    "utf8"
+  );
+  // Must use preview-token endpoint
+  expect(content).toMatch(/preview-token/);
+  // Must NOT embed full getToken() in iframe URL
+  expect(content).not.toMatch(/previewUrl\(projectId\)/);
+  // Must show loading state while token not ready
+  expect(content).toMatch(/previewToken/);
+});
+
+test("LivePreview refreshes token before expiry", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../components/LivePreview.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/ttl_seconds/);
+  expect(content).toMatch(/setTimeout/);
+  expect(content).toMatch(/clearTimeout/);
+});
+
+// ── Phase 2C: Responsive workspace ────────────────────────────────────────────
+
+test("Workspace has mobile tab bar with 5 tabs", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  // Mobile tabs are rendered via a template literal: data-testid={`mobile-tab-${value}`}
+  // We check the tab values array contains all 5 required tabs
+  expect(content).toMatch(/mobile-tab-/);
+  expect(content).toMatch(/preview.*chat.*timeline.*files.*validation|preview|chat|timeline|files|validation/i);
+  // Ensure the mobile tab values are defined in the component
+  const mobileTabValues = ["preview", "chat", "timeline", "files", "validation"];
+  mobileTabValues.forEach((v) => expect(content).toMatch(new RegExp(v)));
+});
+
+test("Workspace desktop aside is hidden on mobile with hidden lg:flex", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/hidden lg:flex/);
+  expect(content).toMatch(/lg:hidden/);
+});
+
+// ── Phase 2C: CI/CD ───────────────────────────────────────────────────────────
+
+test("GitHub Actions CI workflow exists", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const ciPath = path.join(__dirname, "../../../.github/workflows/ci.yml");
+  expect(fs.existsSync(ciPath)).toBe(true);
+  const content = fs.readFileSync(ciPath, "utf8");
+  expect(content).toMatch(/backend/i);
+  expect(content).toMatch(/frontend/i);
+  expect(content).toMatch(/playwright/i);
+});
+
+test("GitHub Actions deploy workflow exists with workflow_dispatch only", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const deployPath = path.join(__dirname, "../../../.github/workflows/deploy.yml");
+  expect(fs.existsSync(deployPath)).toBe(true);
+  const content = fs.readFileSync(deployPath, "utf8");
+  expect(content).toMatch(/workflow_dispatch/);
+  expect(content).not.toMatch(/on:\s*push/); // must NOT auto-deploy on push
+});
+
+

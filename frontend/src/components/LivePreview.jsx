@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Projects } from "@/lib/amk-api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Projects, api } from "@/lib/amk-api";
 import { RefreshCw, ExternalLink, Cpu, AlertTriangle, Loader2, BookOpen, Wrench, CheckCircle, Terminal } from "lucide-react";
 
 // Modes that show repo structure instead of an iframe
@@ -8,12 +8,44 @@ const REPO_STRUCTURE_MODES = new Set([
   "automation_bot", "trading_bot_scaffold", "repo_fix",
 ]);
 
+// Hook: fetch a short-lived preview token for the iframe.
+// Refreshes automatically before it expires.
+function usePreviewToken(projectId) {
+  const [token, setToken] = useState(null);
+  const timerRef = useRef(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await api.post(`/projects/${projectId}/preview-token`);
+      setToken(res.data.token);
+      // Schedule refresh at 80% of TTL so we never send an expired token
+      const ttl = (res.data.ttl_seconds || 600) * 1000 * 0.8;
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(refresh, ttl);
+    } catch {
+      // Fall back to null — the iframe will show a 401 which is acceptable
+      setToken(null);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    refresh();
+    return () => clearTimeout(timerRef.current);
+  }, [refresh]);
+
+  return token;
+}
+
 export default function LivePreview({ projectId, refreshKey, projectStatus, projectError, failedAgent, projectMode, previewStrategy, buildPhase, previewFallback }) {
   const [bust, setBust] = useState(0);
-  // NOTE: The preview URL contains a bearer token as a query parameter for iframe auth.
-  // TODO: Move to a short-lived preview token or use a dedicated preview origin to reduce
-  //       token exposure in browser history and server logs.
-  const url = `${Projects.previewUrl(projectId)}&v=${refreshKey || 0}-${bust}`;
+  // Phase 2C: Use a short-lived preview-scoped token instead of the full auth token.
+  // The preview token is issued by POST /api/projects/{id}/preview-token and expires
+  // after 10 minutes.  It cannot be used for any other API call.
+  const previewToken = usePreviewToken(projectId);
+  const baseUrl = `${Projects.previewBaseUrl(projectId)}`;
+  const url = previewToken
+    ? `${baseUrl}?token=${encodeURIComponent(previewToken)}&v=${refreshKey || 0}-${bust}`
+    : null; // Don't render iframe until token is ready
 
   useEffect(() => { setBust((b) => b + 1); }, [refreshKey]);
 
@@ -128,10 +160,12 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
           <span className="font-mono text-[10px] text-amk-fg3 uppercase">sandboxed iframe</span>
         </div>
         <div className="flex items-center gap-1">
-          <a data-testid="open-preview-btn" href={url} target="_blank" rel="noreferrer"
-            className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3 hover:text-white inline-flex items-center gap-1.5 px-2 h-6 border border-amk-line">
-            <ExternalLink className="w-3 h-3" /> open
-          </a>
+          {url && (
+            <a data-testid="open-preview-btn" href={url} target="_blank" rel="noreferrer"
+              className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3 hover:text-white inline-flex items-center gap-1.5 px-2 h-6 border border-amk-line">
+              <ExternalLink className="w-3 h-3" /> open
+            </a>
+          )}
           <button data-testid="refresh-preview-btn" onClick={() => setBust((b) => b + 1)}
             className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3 hover:text-white inline-flex items-center gap-1.5 px-2 h-6 border border-amk-line">
             <RefreshCw className="w-3 h-3" /> reload
@@ -148,10 +182,19 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
          * endpoint inlines all assets into a single HTML document.
          * For features that require same-origin access (e.g. localStorage), use the
          * "Open" button below to open the preview in a new tab without sandboxing.
+         *
+         * Phase 2C: The iframe src uses a short-lived preview-scoped token issued by
+         * POST /api/projects/{id}/preview-token — never the full session JWT.
          */}
-        <iframe data-testid="preview-iframe" title="preview" src={url}
-          className="w-full h-full border-0"
-          sandbox="allow-scripts allow-forms allow-popups allow-downloads" />
+        {url ? (
+          <iframe data-testid="preview-iframe" title="preview" src={url}
+            className="w-full h-full border-0"
+            sandbox="allow-scripts allow-forms allow-popups allow-downloads" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <Loader2 className="w-5 h-5 text-amk-fg3 animate-spin" />
+          </div>
+        )}
       </div>
     </div>
   );

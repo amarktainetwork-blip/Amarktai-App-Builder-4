@@ -893,6 +893,33 @@ async def contact(body: ContactBody) -> dict:
     return {"ok": True, "id": doc["id"]}
 
 
+class AccessRequestBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    email: EmailStr
+    reason: str = Field(min_length=1, max_length=4000)
+
+
+@api.post("/access/request")
+async def access_request(body: AccessRequestBody) -> dict:
+    """Phase 2C: Store a public access request (no auth required).
+
+    Saves the request to the ``access_requests`` collection and returns a
+    confirmation.  Approved users are subsequently created manually via the
+    admin panel.
+    """
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": body.name,
+        "email": body.email,
+        "reason": body.reason,
+        "status": "pending",
+        "created_at": _now(),
+    }
+    await db.access_requests.insert_one(dict(doc))
+    logger.info("Access request from %s <%s>", body.name, body.email)
+    return {"ok": True, "id": doc["id"], "message": "Access request received. We will review and contact you shortly."}
+
+
 # ── Phase 1A: Capability Registry endpoints ───────────────────────────────────
 
 @api.get("/capabilities")
@@ -1944,8 +1971,49 @@ async def stack_decide(
     return decide_stack(prompt=prompt, mode=mode, quality_tier=tier)
 
 
-@secured.get("/projects/{project_id}/preview", response_class=HTMLResponse)
-async def project_preview(project_id: str, claims: dict = Depends(require_user)) -> HTMLResponse:
+async def _require_preview_access(request: Request, project_id: str) -> dict:
+    """Accept either a full bearer token or a short-lived preview-scoped token.
+
+    Phase 2C: The preview endpoint is the only place that accepts preview tokens.
+    Preview tokens cannot be used for any other API call because the ``scope``
+    field is checked explicitly here.
+    """
+    # Extract token from Authorization header or query param
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        tok = auth_header.split(" ", 1)[1].strip()
+    else:
+        tok = request.query_params.get("token")
+    if not tok:
+        raise HTTPException(401, "Missing token")
+    secret = os.environ["JWT_SECRET"]
+    algo = os.environ.get("JWT_ALGO", "HS256")
+    try:
+        claims = jwt.decode(tok, secret, algorithms=[algo])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Token expired")
+    except jwt.PyJWTError:
+        raise HTTPException(401, "Invalid token")
+    # If it's a preview-scoped token, verify the project_id matches
+    if claims.get("scope") == "preview":
+        if claims.get("project_id") != project_id:
+            raise HTTPException(403, "Preview token is not valid for this project")
+        return claims
+    # Otherwise fall back to full user validation
+    db_handle = request.app.state.db
+    user = await db_handle.users.find_one({"id": claims["sub"]}, {"_id": 0})
+    if not user:
+        raise HTTPException(401, "User no longer exists")
+    if user.get("status", "active") != "active":
+        raise HTTPException(403, "User is disabled")
+    claims["role"] = user.get("role", claims.get("role", "user"))
+    claims["email"] = user.get("email", claims.get("email"))
+    return claims
+
+
+@app.get("/api/projects/{project_id}/preview", response_class=HTMLResponse)
+async def project_preview(project_id: str, request: Request,
+                          claims: dict = Depends(_require_preview_access)) -> HTMLResponse:
     await _own(project_id, claims)
     proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1, "error": 1,
                                                              "failed_agent": 1, "mode": 1,
@@ -1962,6 +2030,45 @@ async def project_preview(project_id: str, claims: dict = Depends(require_user))
     else:
         html = render_preview(files)
     return HTMLResponse(content=html, headers={"X-Frame-Options": "SAMEORIGIN"})
+
+
+# Phase 2C — Short-lived preview token endpoint
+# Tokens are scoped only to preview and expire after 10 minutes.
+# The frontend must use this token in the iframe URL instead of the full auth token.
+
+_PREVIEW_TOKEN_TTL_MINUTES = 10
+
+
+@secured.post("/projects/{project_id}/preview-token")
+async def get_preview_token(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Issue a short-lived, preview-scoped token for iframe use.
+
+    Phase 2C: Replaces the practice of appending the full bearer token to the
+    iframe URL query string.  The preview token:
+    - expires in 10 minutes
+    - is scoped to a single project_id
+    - is marked ``scope=preview`` so it cannot be used for regular API calls
+    - is validated by the /projects/{id}/preview endpoint via the same JWT secret
+
+    Frontend LivePreview must call this endpoint and use the returned token.
+    """
+    await _own(project_id, claims)
+    secret = os.environ["JWT_SECRET"]
+    algo = os.environ.get("JWT_ALGO", "HS256")
+    exp = datetime.now(timezone.utc) + timedelta(minutes=_PREVIEW_TOKEN_TTL_MINUTES)
+    payload = {
+        "sub": claims["sub"],
+        "project_id": project_id,
+        "scope": "preview",
+        "exp": exp,
+        "iat": datetime.now(timezone.utc),
+    }
+    token = jwt.encode(payload, secret, algorithm=algo)
+    return {
+        "token": token,
+        "expires_at": exp.isoformat(),
+        "ttl_seconds": _PREVIEW_TOKEN_TTL_MINUTES * 60,
+    }
 
 
 # MIME type map for preview file serving

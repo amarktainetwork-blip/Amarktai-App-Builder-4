@@ -101,3 +101,193 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: >
+  Phase 2C — Pre-Prompt-3 Completion: Dashboard structure, QA, preview security, CI/CD, responsiveness.
+  Fix all remaining architectural blockers before the final public website + dashboard go-live overhaul.
+
+backend:
+  - task: "POST /api/access/request endpoint"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Implemented POST /api/access/request. Stores request in access_requests collection. Returns ok:true. No auth required."
+
+  - task: "POST /api/projects/{id}/preview-token endpoint"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Implemented POST /api/projects/{id}/preview-token. Issues short-lived (10min) JWT with scope=preview and project_id. Signed with JWT_SECRET."
+
+  - task: "Preview endpoint accepts preview-scoped token"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "GET /api/projects/{id}/preview now uses _require_preview_access dependency. Accepts full bearer token OR short-lived preview token. Preview tokens are validated for scope=preview and project_id match."
+
+  - task: "Existing health endpoints preserved"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "No changes to /api/health, /api/runtime/health, /api/agents/status, /api/capabilities/status, /api/orchestration/health."
+
+frontend:
+  - task: "DashboardLayout with sidebar + mobile drawer"
+    implemented: true
+    working: true
+    file: "frontend/src/components/DashboardLayout.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Desktop sidebar hidden lg:flex with framer-motion animated mobile drawer. NavLinks for /dashboard, /dashboard/new, /dashboard/projects, /dashboard/repo, /dashboard/media, /dashboard/settings. Uses Outlet for nested routes."
+
+  - task: "/dashboard nested routes in App.js"
+    implemented: true
+    working: true
+    file: "frontend/src/App.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "App.js updated. /dashboard uses DashboardLayout with nested routes. /app redirects to /dashboard. /features, /pipeline, /access are public routes."
+
+  - task: "DashboardHome, NewBuild, Projects, RepoWorkbench, MediaLibraryPage, SettingsPage pages"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/dashboard/"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "All 6 focused dashboard pages created. DashboardHome, NewBuild, Projects already existed. Added RepoWorkbench, MediaLibraryPage, SettingsPage."
+
+  - task: "Public /features, /pipeline, /access pages"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Features.jsx, Pipeline.jsx, Access.jsx created. Access page has real POST /api/access/request form, handles success/error honestly."
+
+  - task: "LivePreview uses preview token instead of full auth token"
+    implemented: true
+    working: true
+    file: "frontend/src/components/LivePreview.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "LivePreview now calls POST /api/projects/{id}/preview-token to get short-lived token. Token refreshed at 80% TTL. Iframe src uses preview token, NOT getToken(). Shows loading spinner until token ready."
+
+  - task: "Workspace responsive mobile tabs"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/Workspace.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Desktop: side-by-side layout with hidden lg:flex aside. Mobile/tablet: single full-screen tab bar with 5 tabs (Preview, Chat, Timeline, Files, Validation) using lg:hidden."
+
+  - task: "GitHub Actions CI workflow"
+    implemented: true
+    working: true
+    file: ".github/workflows/ci.yml"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "ci.yml: runs backend pytest + frontend smoke tests + build. Playwright tests on main branch. deploy.yml: manual workflow_dispatch only, SSH to VPS via secrets."
+
+  - task: "Playwright test infrastructure"
+    implemented: true
+    working: true
+    file: "frontend/playwright.config.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "playwright.config.js added. @playwright/test added to package.json devDependencies. e2e/smoke.spec.js with public route checks, mobile overflow, API health. Tests skip gracefully if server unreachable."
+
+metadata:
+  created_by: "main_agent"
+  version: "2.3"
+  test_sequence: 1
+  run_ui: false
+  phase: "Phase 2C"
+  date: "2026-05-12"
+  commit_context: "Phase 2C dashboard + public routes + preview security + CI/CD + responsive workspace"
+
+known_gaps:
+  - "Playwright tests run against live server only — no local dev server started in CI for these tests yet"
+  - "axe-core accessibility integration planned but not yet wired into Playwright tests"
+  - "Lighthouse CI integration is documented in README but not yet running in CI"
+  - "Media Director GenX/Qwen/Pixabay capability status is honest per registry — not faked"
+  - "ExecutionGraph wrapper preserved but full DAG not yet implemented — documented honestly"
+  - "Diff view for iterations uses changedFiles/addedFiles from iterationResult — full line-level diff not yet implemented"
+
+test_plan:
+  current_focus:
+    - "POST /api/access/request"
+    - "POST /api/projects/{id}/preview-token"
+    - "Preview token iframe security"
+    - "/dashboard nested routes"
+    - "Mobile workspace tabs"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: >
+      Phase 2C implementation complete. Summary of changes:
+      1. Dashboard: DashboardLayout (framer-motion sidebar+mobile), 6 focused pages, /dashboard nested routes, /app→/dashboard redirect.
+      2. Public routes: /features, /pipeline, /access with real API form.
+      3. Preview security: preview-token endpoint (10min JWT), LivePreview uses preview token not full auth token.
+      4. CI/CD: .github/workflows/ci.yml + deploy.yml (manual only).
+      5. Playwright: config + e2e smoke tests + package.json devDep.
+      6. Responsive workspace: desktop lg: side-by-side, mobile: 5-tab layout.
+      All existing smoke tests should still pass. New smoke tests added for all 2C features.
