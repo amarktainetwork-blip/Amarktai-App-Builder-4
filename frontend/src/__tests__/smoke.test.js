@@ -260,3 +260,105 @@ test("workspace refreshes files and project on iteration_complete", () => {
   expect(iterCompleteSection).toMatch(/Projects\.files/);
   expect(iterCompleteSection).toMatch(/Projects\.get/);
 });
+
+// ── Phase 2: AdvisorPanel ─────────────────────────────────────────────────────
+
+test("AdvisorPanel component exists and has advisor-panel test id", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../components/AdvisorPanel.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/advisor-panel/);
+  expect(content).toMatch(/overall_rating/);
+  expect(content).toMatch(/quick_wins/);
+  expect(content).toMatch(/priority_action/);
+});
+
+test("workspace imports AdvisorPanel and BuildPlanBanner", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/AdvisorPanel/);
+  expect(content).toMatch(/BuildPlanBanner/);
+});
+
+test("workspace handles build_plan event", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/build_plan/);
+  expect(content).toMatch(/setBuildPlan/);
+});
+
+test("workspace handles advisor_ready event", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/advisor_ready/);
+  expect(content).toMatch(/setAdvisorResult/);
+});
+
+// ── Phase 3: Extended scores in ValidationPanel ────────────────────────────────
+
+test("ValidationPanel shows extended product scores", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../components/ValidationPanel.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/conversionScore/);
+  expect(content).toMatch(/uxScore/);
+  expect(content).toMatch(/accessibilityScore/);
+  expect(content).toMatch(/seoScore/);
+  expect(content).toMatch(/responsivenessScore/);
+  expect(content).toMatch(/performanceScore/);
+  expect(content).toMatch(/Product Scores/);
+});
+
+// ── Phase 4: BuildPlanBanner ──────────────────────────────────────────────────
+
+test("BuildPlanBanner component exists with plan details", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../components/BuildPlanBanner.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/build-plan-banner/);
+  expect(content).toMatch(/complexity/);
+  expect(content).toMatch(/estimated_pages/);
+  expect(content).toMatch(/recommended_stack/);
+  expect(content).toMatch(/build_phases/);
+});
+
+// ── Phase 1: AgentTimeline improvements ──────────────────────────────────────
+
+test("AgentTimeline shows planner and advisor agents", () => {
+  const fs = require("fs");
+  const agents = fs.readFileSync(
+    require.resolve("../lib/agents.js"),
+    "utf8"
+  );
+  expect(agents).toMatch(/planner/);
+  expect(agents).toMatch(/advisor/);
+  expect(agents).toMatch(/Build Intelligence/);
+  expect(agents).toMatch(/Product Intelligence/);
+});
+
+test("AgentTimeline shows failed and skipped states", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../components/AgentTimeline.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/isFailed/);
+  expect(content).toMatch(/isSkipped/);
+  expect(content).toMatch(/latestDetail/);
+});
+

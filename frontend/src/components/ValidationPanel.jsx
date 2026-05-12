@@ -1,4 +1,4 @@
-import { ShieldCheck, ShieldAlert, Paintbrush, Star, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+import { ShieldCheck, ShieldAlert, Paintbrush, Star, AlertTriangle, ChevronDown, ChevronUp, TrendingUp, Accessibility, Search, Smartphone, Zap, Users } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -10,7 +10,9 @@ import { useState } from "react";
  * Props:
  *   validation – object from project.last_validation (qualityScore, designScore,
  *                securityScore, qualityOk, designOk, securityOk, canFinalize,
- *                qualityErrors, designErrors, securityErrors, designDirection)
+ *                qualityErrors, designErrors, securityErrors, designDirection,
+ *                conversionScore, uxScore, accessibilityScore, seoScore,
+ *                responsivenessScore, performanceScore + matching error arrays)
  */
 export default function ValidationPanel({ validation }) {
   const [expanded, setExpanded] = useState(false);
@@ -30,6 +32,19 @@ export default function ValidationPanel({ validation }) {
     securityErrors = [],
     designDirection,
     contentStats,
+    // Phase 3: extended scores
+    conversionScore = 0,
+    uxScore = 0,
+    accessibilityScore = 0,
+    seoScore = 0,
+    responsivenessScore = 0,
+    performanceScore = 0,
+    conversionErrors = [],
+    uxErrors = [],
+    accessibilityErrors = [],
+    seoErrors = [],
+    responsivenessErrors = [],
+    performanceErrors = [],
   } = validation;
 
   const allOk = qualityOk && designOk && securityOk;
@@ -64,7 +79,7 @@ export default function ValidationPanel({ validation }) {
       {/* Detail panel */}
       {expanded && (
         <div data-testid="validation-detail" className="px-3 pb-3 space-y-3 border-t border-white/10">
-          {/* Score breakdown */}
+          {/* Core scores */}
           <div className="pt-3 grid grid-cols-3 gap-3">
             <ScoreDetail
               label="Quality"
@@ -91,6 +106,65 @@ export default function ValidationPanel({ validation }) {
               threshold={75}
             />
           </div>
+
+          {/* Phase 3: Extended scores */}
+          {(conversionScore > 0 || uxScore > 0 || seoScore > 0) && (
+            <>
+              <div className="text-amk-fg3 uppercase tracking-wider pt-1">Product Scores</div>
+              <div className="grid grid-cols-3 gap-3">
+                <ScoreDetail
+                  label="Conversion"
+                  score={conversionScore}
+                  ok={conversionScore >= 70}
+                  icon={<TrendingUp className="w-3 h-3" strokeWidth={1.5} />}
+                  errors={conversionErrors}
+                  threshold={70}
+                />
+                <ScoreDetail
+                  label="UX"
+                  score={uxScore}
+                  ok={uxScore >= 70}
+                  icon={<Users className="w-3 h-3" strokeWidth={1.5} />}
+                  errors={uxErrors}
+                  threshold={70}
+                />
+                <ScoreDetail
+                  label="Accessibility"
+                  score={accessibilityScore}
+                  ok={accessibilityScore >= 70}
+                  icon={<Accessibility className="w-3 h-3" strokeWidth={1.5} />}
+                  errors={accessibilityErrors}
+                  threshold={70}
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <ScoreDetail
+                  label="SEO"
+                  score={seoScore}
+                  ok={seoScore >= 70}
+                  icon={<Search className="w-3 h-3" strokeWidth={1.5} />}
+                  errors={seoErrors}
+                  threshold={70}
+                />
+                <ScoreDetail
+                  label="Responsive"
+                  score={responsivenessScore}
+                  ok={responsivenessScore >= 70}
+                  icon={<Smartphone className="w-3 h-3" strokeWidth={1.5} />}
+                  errors={responsivenessErrors}
+                  threshold={70}
+                />
+                <ScoreDetail
+                  label="Performance"
+                  score={performanceScore}
+                  ok={performanceScore >= 60}
+                  icon={<Zap className="w-3 h-3" strokeWidth={1.5} />}
+                  errors={performanceErrors}
+                  threshold={60}
+                />
+              </div>
+            </>
+          )}
 
           {/* Design direction */}
           {designDirection && (

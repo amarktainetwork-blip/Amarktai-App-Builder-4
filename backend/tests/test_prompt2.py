@@ -581,3 +581,226 @@ def test_contracts_prompt_block_contains_all():
     assert "SPECIALIST AGENTS" in block
     assert "Logo Agent" in block
     assert "QA" in block
+
+
+# ── Phase 3: Extended Scoring Tests ─────────────────────────────────────────
+
+from agents.quality_validator import (
+    _score_conversion,
+    _score_ux,
+    _score_accessibility,
+    _score_seo,
+    _score_responsiveness,
+    _score_performance,
+)
+
+_GOOD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Premium SaaS platform for teams.">
+  <meta property="og:title" content="TestCo">
+  <meta property="og:description" content="Build better.">
+  <link rel="canonical" href="https://testco.io">
+  <title>TestCo — Build Better</title>
+  <link rel="preload" as="font" href="/fonts/inter.woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to main content</a>
+  <nav aria-label="Main navigation"><ul><li><a href="/">Home</a></li></ul></nav>
+  <main id="main">
+    <h1>Build Better with TestCo</h1>
+    <h2 aria-label="Features">Features</h2>
+    <h3>Why teams love us</h3>
+    <p>Trusted by 500+ verified customers worldwide.</p>
+    <div>
+      <p>Testimonials from happy clients</p>
+      <span class="rating">★★★★★</span>
+    </div>
+    <img src="hero.png" alt="TestCo dashboard screenshot" loading="lazy" width="800" height="600">
+    <button aria-label="Get started for free">Get started free</button>
+    <a href="/signup">Start your free trial</a>
+    <form action="/subscribe"><input type="email" name="email"><button>Subscribe</button></form>
+    <div class="pricing">$29/mo</div>
+    <p>Join 10,000+ teams who save time with TestCo. Reduce overhead, grow faster.</p>
+  </main>
+  <footer><p>&copy; 2024 TestCo</p></footer>
+</body>
+</html>"""
+
+_GOOD_CSS = """
+@media (max-width: 768px) { body { font-size: 14px; } }
+@media (max-width: 480px) { .hero { flex-direction: column; } }
+@media (min-width: 1200px) { .container { max-width: 1200px; } }
+body { display: flex; flex-direction: column; font-size: 1rem; }
+.hero { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+.container { width: 90%; max-width: 1200px; margin: 0 auto; }
+a:focus-visible { outline: 2px solid #2962FF; }
+:root { --color-bg: #0A0A0A; --color-accent: #2962FF; }
+"""
+
+_POOR_HTML = "<html><body><h2>Hello</h2><img src='x.png'></body></html>"
+_POOR_CSS = "body { color: red; }"
+
+
+# Conversion score
+def test_conversion_score_good_html_high():
+    score, errors = _score_conversion(_GOOD_HTML, _GOOD_CSS)
+    assert score >= 80, f"Expected high conversion score, got {score}. Errors: {errors}"
+
+
+def test_conversion_score_poor_html_lower():
+    score, _ = _score_conversion(_POOR_HTML, _POOR_CSS)
+    assert score < 90
+
+
+def test_conversion_score_includes_form_bonus():
+    html = "<html><body><form><input type='email'><button>Subscribe</button></form></body></html>"
+    score, _ = _score_conversion(html, "")
+    assert score > 60  # baseline + form bonus
+
+
+def test_conversion_score_returns_errors_without_cta():
+    html = "<html><body><p>Hello world</p></body></html>"
+    _, errors = _score_conversion(html, "")
+    assert any("CTA" in e or "action" in e.lower() for e in errors)
+
+
+# UX score
+def test_ux_score_good_html_high():
+    score, errors = _score_ux(_GOOD_HTML, _GOOD_CSS)
+    assert score >= 80, f"Expected high UX score, got {score}. Errors: {errors}"
+
+
+def test_ux_score_missing_nav_penalised():
+    _, errors = _score_ux(_POOR_HTML, _POOR_CSS)
+    assert any("nav" in e.lower() or "<nav>" in e.lower() for e in errors)
+
+
+def test_ux_score_missing_footer_flagged():
+    html = "<html><body><nav>nav</nav><h1>Hello</h1></body></html>"
+    _, errors = _score_ux(html, _GOOD_CSS)
+    assert any("footer" in e.lower() for e in errors)
+
+
+# Accessibility score
+def test_accessibility_score_good_html_high():
+    score, errors = _score_accessibility(_GOOD_HTML, _GOOD_CSS)
+    assert score >= 75, f"Expected high a11y score, got {score}. Errors: {errors}"
+
+
+def test_accessibility_score_missing_lang_penalised():
+    html = "<html><body><h1>Hello</h1></body></html>"
+    _, errors = _score_accessibility(html, "")
+    assert any("lang" in e.lower() for e in errors)
+
+
+def test_accessibility_score_missing_alt_penalised():
+    html = '<html lang="en"><body><h1>x</h1><img src="logo.png"></body></html>'
+    _, errors = _score_accessibility(html, "")
+    assert any("alt" in e.lower() for e in errors)
+
+
+def test_accessibility_score_with_all_features():
+    score, _ = _score_accessibility(_GOOD_HTML, _GOOD_CSS)
+    assert score >= 75
+
+
+# SEO score
+def test_seo_score_good_html_high():
+    score, errors = _score_seo(_GOOD_HTML)
+    assert score >= 80, f"Expected high SEO score, got {score}. Errors: {errors}"
+
+
+def test_seo_score_missing_title_penalised():
+    html = '<html lang="en"><head><meta name="description" content="test"></head><body><h1>Hi</h1></body></html>'
+    _, errors = _score_seo(html)
+    assert any("title" in e.lower() for e in errors)
+
+
+def test_seo_score_missing_meta_description_penalised():
+    html = '<html lang="en"><head><title>TestCo</title></head><body><h1>Hi</h1></body></html>'
+    _, errors = _score_seo(html)
+    assert any("description" in e.lower() for e in errors)
+
+
+def test_seo_score_no_og_tags_flagged():
+    html = '<html><head><title>x</title><meta name="description" content="y"></head><body><h1>z</h1></body></html>'
+    _, errors = _score_seo(html)
+    assert any("og" in e.lower() or "open graph" in e.lower() for e in errors)
+
+
+# Responsiveness score
+def test_responsiveness_score_good_high():
+    score, errors = _score_responsiveness(_GOOD_HTML, _GOOD_CSS)
+    assert score >= 80, f"Expected high responsiveness, got {score}. Errors: {errors}"
+
+
+def test_responsiveness_score_missing_viewport_penalised():
+    html = "<html><head></head><body></body></html>"
+    _, errors = _score_responsiveness(html, _GOOD_CSS)
+    assert any("viewport" in e.lower() for e in errors)
+
+
+def test_responsiveness_score_no_media_queries_penalised():
+    _, errors = _score_responsiveness(_GOOD_HTML, "body { color: red; }")
+    assert any("media" in e.lower() for e in errors)
+
+
+# Performance score
+def test_performance_score_good_html_high():
+    score, errors = _score_performance(_GOOD_HTML, _GOOD_CSS)
+    assert score >= 70, f"Expected reasonable perf score, got {score}. Errors: {errors}"
+
+
+def test_performance_score_lazy_load_bonus():
+    html = '<html><body><img src="x.png" loading="lazy" width="100" height="100"></body></html>'
+    score_lazy, _ = _score_performance(html, "")
+    html_no_lazy = '<html><body><img src="x.png"></body></html>'
+    score_no_lazy, _ = _score_performance(html_no_lazy, "")
+    assert score_lazy >= score_no_lazy
+
+
+# score_project_quality includes extended scores
+def test_score_project_quality_includes_extended_scores():
+    from agents.quality_validator import score_project_quality
+    files = [
+        {"path": "index.html", "language": "html", "content": _GOOD_HTML},
+        {"path": "styles.css", "language": "css", "content": _GOOD_CSS},
+        {"path": "README.md", "language": "markdown", "content": "# TestCo\n## Architecture\n## Deployment\n## SEO Basics\n## Accessibility\n## Responsive Design\n## Production Notes"},
+        {"path": "amarktai.project.json", "language": "json", "content": '{"name":"TestCo","mode":"landing_page"}'},
+    ]
+    result = score_project_quality(files, project_type="static-site", build_mode="landing_page")
+    assert "conversionScore" in result, "Extended scores must be included"
+    assert "uxScore" in result
+    assert "accessibilityScore" in result
+    assert "seoScore" in result
+    assert "responsivenessScore" in result
+    assert "performanceScore" in result
+    # All extended scores should be integers or floats in [0, 100]
+    for key in ["conversionScore", "uxScore", "accessibilityScore", "seoScore", "responsivenessScore", "performanceScore"]:
+        assert 0 <= result[key] <= 100, f"{key} = {result[key]} out of range"
+
+
+# Build planner prompt is present
+def test_build_planner_prompt_exists():
+    from agents.prompts import BUILD_PLANNER_PROMPT
+    assert "complexity" in BUILD_PLANNER_PROMPT
+    assert "estimated_pages" in BUILD_PLANNER_PROMPT
+    assert "missing_apis" in BUILD_PLANNER_PROMPT
+    assert "plan_summary" in BUILD_PLANNER_PROMPT
+
+
+# Advisor prompt is present
+def test_advisor_prompt_exists():
+    from agents.prompts import ADVISOR_PROMPT
+    assert "ux_improvements" in ADVISOR_PROMPT
+    assert "conversion_improvements" in ADVISOR_PROMPT
+    assert "monetization_suggestions" in ADVISOR_PROMPT
+    assert "seo_suggestions" in ADVISOR_PROMPT
+    assert "priority_action" in ADVISOR_PROMPT
+    assert "overall_rating" in ADVISOR_PROMPT
+
