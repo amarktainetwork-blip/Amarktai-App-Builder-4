@@ -211,7 +211,8 @@ async def restore_version(
         fs:         A ``ProjectFS`` instance for the project.
 
     Returns:
-        A status dict with ``ok``, ``version_id``, ``restored_files``, and ``status``.
+        A status dict with ``ok``, ``version_id``, ``restored_files``, ``status``,
+        and ``diff_summary`` (a brief description of what the restored version contained).
 
     Raises:
         ValueError: If the version record is not found.

@@ -527,7 +527,7 @@ async def _launch_pipeline(project_id: str, prompt: str, mode: str,
                     timeout=global_timeout,
                 )
             # Only update completed_at if project was not already failed by orchestrator
-            proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1, "prompt": 1, "validation_state": 1, "project_memory": 1})
+            proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1})
             if proj and proj.get("status") not in ("failed", "cancelled"):
                 completed = _now()
                 updates = {"completed_at": completed, "updated_at": completed}

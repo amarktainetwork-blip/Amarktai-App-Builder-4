@@ -1054,11 +1054,18 @@ class Orchestrator:
                 backend_data = backend_res["data"]
                 backend_files = backend_data.get("files", [])
                 for bf in backend_files:
-                    # Never overwrite files already written by the frontend coder
+                    # Never overwrite files already written by the frontend coder;
+                    # preserving frontend files prevents backend agent from clobbering
+                    # index.html, styles.css, or shared config files.
                     existing = await self.fs.read(bf["path"])
                     if not existing:
                         await self.fs.write(bf["path"], bf["content"], bf.get("language", "text"))
                         await self.emit({"type": "file_written", "data": {"path": bf["path"]}})
+                    else:
+                        await self._record_event(
+                            "backend_coder", "info",
+                            f"Skipped overwrite of existing file: {bf['path']}",
+                        )
                 await self._record_message(
                     "agent", "backend_coder",
                     f"**Backend:** {backend_data.get('summary', 'Backend services implemented.')}",
