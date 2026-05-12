@@ -20,14 +20,14 @@ import os
 import re
 import resource
 import shutil
-import signal
 import sys
 import tempfile
-import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from agents.preview import render_preview
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +230,7 @@ _ERROR_PATTERNS: list[tuple[str, str, str]] = [
         "Permission denied: {path}. Cannot write to that location.",
     ),
     (
-        r"(?P<var>[A-Z_]{3,})\s+is not defined|missing.*env.*(?P<var2>[A-Z_]{3,})",
+        r"(?:[A-Z_]{3,})\s+is not defined",
         "missing_env",
         "Missing environment variable. Check your .env file.",
     ),
@@ -450,6 +450,10 @@ class SandboxManager:
         """
         Called in the child process before exec.  Sets RLIMIT_AS to cap memory.
         Only effective on Linux; harmless to set on other platforms.
+        Note: preexec_fn is not safe in multi-threaded processes.  This sandbox
+        is intended for use in single-threaded async workers; for production
+        multi-threaded deployments, enforce memory limits at the container or
+        cgroup level instead.
         """
         try:
             resource.setrlimit(
@@ -638,7 +642,6 @@ class SandboxManager:
         Inline a static project's CSS/JS into its index.html for iframe preview.
         Returns the inlined HTML string, or an empty string if no index.html.
         """
-        from agents.preview import render_preview
         return render_preview(files)
 
     # ── Phase 4 — runtime status helper ──────────────────────────────────────
@@ -848,6 +851,8 @@ class SandboxManager:
             return result
 
         finally:
-            # Always clean up the workspace directory after the preview is built.
-            # For long-running dev servers this would happen on explicit cleanup().
+            # Clean up the workspace directory after the preview is built.
+            # run_preview() is a one-shot build; it does not start a long-running
+            # dev server.  For persistent dev-server support, call _create_workspace()
+            # and manage the lifecycle manually via cleanup_all().
             self._cleanup_workspace(wid)

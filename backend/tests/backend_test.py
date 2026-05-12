@@ -4874,10 +4874,10 @@ def test_detect_stack_vite_takes_priority_over_react():
 
 
 def test_detect_stack_all_types_covered():
-    """STACK_TYPES must contain all documented stack names."""
+    """STACK_TYPES must contain exactly the documented stack names."""
     expected = {"static", "vite", "react", "next", "express",
                 "fastapi", "django", "flask", "fullstack", "pwa", "unknown"}
-    assert expected <= STACK_TYPES
+    assert expected == STACK_TYPES
 
 
 # ---------- Phase 6: Error Intelligence ----------
@@ -5171,7 +5171,6 @@ async def test_patch_and_reload_updates_cache_bust():
 @pytest.mark.asyncio
 async def test_patch_and_reload_writes_files():
     """patch_and_reload() must actually write the patched files to disk."""
-    import uuid as _uuid
     sb = SandboxManager()
     wid, ws = sb._create_workspace()
     try:
@@ -5252,7 +5251,6 @@ async def test_pip_install_skips_when_no_requirements(tmp_path):
 @pytest.mark.asyncio
 async def test_sandbox_context_manager_cleanup():
     """SandboxManager used as async context manager must clean up workspaces on exit."""
-    import uuid as _uuid
     workspace_paths = []
 
     async with SandboxManager() as sb:
