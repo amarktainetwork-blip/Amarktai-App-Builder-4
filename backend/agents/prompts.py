@@ -71,6 +71,150 @@ Rules by mode:
 
 # ── Coder (mode-aware) ────────────────────────────────────────────────────────
 
+# Premium section archetypes — defined before CODER_PROMPT so they can be
+# embedded directly into it at module load time.
+PREMIUM_SECTION_LIBRARY = """
+PREMIUM SECTION ARCHETYPES (use these composable patterns for landing pages and websites):
+
+1. CINEMATIC HERO
+   - Full-viewport height (min-height: 100vh)
+   - Bold h1 (clamp(3rem, 8vw, 7rem)) with subheadline and ONE primary CTA
+   - Background: design_direction palette or CSS gradient — never placeholder.com
+   - Optional: animated gradient, grain texture, or SVG abstract shape overlay
+   - Rule: no overcrowded hero — max 3 text lines + 1-2 CTA buttons + 1 visual element
+
+2. LUXURY SHOWCASE
+   - Asymmetric two-column layout (60/40 or 55/45 split)
+   - Full-bleed image or CSS gradient on one side, rich text block on the other
+   - Generous padding (min 6rem vertical), thin separator lines, gold/accent colour details
+   - Rule: no random gradients — use palette.accent or palette.surface only
+
+3. PRODUCT SPOTLIGHT
+   - Screenshot/mockup + feature bullets in a horizontal band
+   - Visual: device frame (CSS-only, no images required) or gradient card
+   - Feature list with accent-coloured icons (unicode or inline SVG)
+   - Rule: hierarchy must read headline → visual → bullets → CTA
+
+4. DASHBOARD PREVIEW
+   - Dark card grid showing mock UI panels, charts, and stat counters
+   - Background: palette.surface; cards: slightly lighter with 1px border
+   - Numbers animate on scroll (CSS counter-up or simple intersection observer)
+   - Rule: must communicate "real product" — not placeholder lorem ipsum
+
+5. WORKFLOW TIMELINE
+   - Horizontal (desktop) / vertical (mobile) numbered step flow
+   - Each step: icon, short title, 1-2 sentence explanation
+   - Visual connector lines between steps using CSS borders or SVG
+   - Rule: max 6 steps — if more, group into phases
+
+6. TRUST BAR
+   - Single row of 4-8 logo placeholders (SVG initials or CSS pill shapes)
+   - Heading: "Trusted by X companies" or "As seen in"
+   - Subtle background (palette.surface), no border, compact padding
+   - Rule: use placeholder brand initials in SVG — never use random external image URLs
+
+7. COMPARISON GRID
+   - Table or card grid: columns = options (Free / Pro / Enterprise)
+   - Rows = features with checkmarks or value cells
+   - Highlight the recommended plan with accent border + "Most Popular" badge
+   - Rule: every cell must have real content — no "coming soon" rows
+
+8. PRICING
+   - 2-4 pricing cards with: plan name, price, feature list, CTA button
+   - Monthly/Annual toggle (CSS class toggle, no backend required)
+   - Recommended tier: accent border + "Best Value" badge
+   - Rule: real prices or clear placeholders, not "Contact Us" for all tiers
+
+9. CTA SECTION
+   - Single focused band: headline + sub-text + 1-2 action buttons
+   - Background: accent gradient or dark-mode card on light-mode pages
+   - Rule: CTA must use action verbs ("Start Building", "Book Demo", "Get Early Access")
+
+10. TESTIMONIALS
+    - 3-6 cards (grid or CSS scroll-snap)
+    - Each card: quote, avatar initial (CSS circle), name, company, optional rating stars
+    - Rule: write real-sounding testimonials for the specific product — no generic filler
+
+11. FEATURE CARDS
+    - 3 or 6 card grid (CSS grid, auto-fit, minmax(280px, 1fr))
+    - Each card: icon (SVG or unicode emoji), short title, 2-3 sentence description
+    - Cards: palette.surface background, accent top border on hover
+    - Rule: no more than 6 features per section — use multiple sections for more
+
+12. GALLERY
+    - Masonry or uniform grid (CSS columns or grid)
+    - Each cell: image container with aspect-ratio + object-fit: cover, or CSS gradient fallback
+    - Caption on hover (CSS transform translateY reveal)
+    - Rule: never use placeholder.com URLs — use CSS gradient fills with descriptive aria-labels
+
+13. FAQ
+    - Accordion (pure CSS details/summary or JS toggle)
+    - Each item: question in bold, answer in regular weight, divider border
+    - Max 8-10 questions — link to docs/support for more
+    - Rule: write real Q&As for the specific product domain
+
+14. METRICS
+    - 3-5 large stat numbers with labels (e.g. "10M+ users", "99.9% uptime")
+    - Animate on scroll using IntersectionObserver counter-up (inline JS, no library)
+    - Light background or dark band with high-contrast numbers
+    - Rule: numbers must be plausible and relevant to the product
+
+15. INTEGRATIONS
+    - Grid of integration logos (SVG initials or service-specific shapes)
+    - Group by category if needed (CRM, Payments, Analytics, etc.)
+    - Hover state: subtle lift + accent shadow
+    - Rule: use only integrations relevant to the product domain
+
+COMPOSITION RULES FOR SECTIONS:
+- Every section must have adequate padding (min 4rem vertical on desktop, 2.5rem on mobile)
+- Section headings: h2 using var(--font-heading), font-weight >= 700
+- Body text in sections: var(--font-body), line-height 1.6-1.8, min 16px
+- Use CSS custom properties for all colours — never hardcode hex values inline
+- Every section must be responsive: test at 320px, 768px, 1280px breakpoints
+- Sections must have meaningful aria-labels or role="region" attributes
+"""
+
+# Visual composition hard rules — applied to Coder and Iteration agents.
+VISUAL_COMPOSITION_RULES = """
+VISUAL COMPOSITION RULES (MANDATORY — violations are build failures):
+
+HERO RULES:
+- NO overcrowded hero — max 3 text elements + 1-2 buttons + 1 visual
+- NO random gradients — use only palette values from design_direction
+- NO full-width text blocks with no visual break — add shapes, patterns, or colour bands
+
+COLOUR RULES:
+- NO excessive shadows (max 1 box-shadow per element, no stacked drop-shadows)
+- NO more than 3 accent colours visible on one page
+- NO gradient text unless it is an intentional brand choice in the design_direction
+
+TYPOGRAPHY RULES:
+- NO unreadable text — minimum contrast ratio 4.5:1 for normal text, 3:1 for large text
+- NO tiny fonts — minimum 15px for body copy, minimum 13px for captions
+- NO inconsistent font families — use only var(--font-heading) and var(--font-body)
+- NO all-caps body text — headings may use text-transform: uppercase if design requires
+
+SPACING RULES:
+- NO inconsistent spacing — use a spacing scale: 0.5rem, 1rem, 1.5rem, 2rem, 3rem, 4rem, 6rem
+- NO sections directly touching each other — minimum 3rem padding between sections
+- NO cramped mobile layouts — minimum 1rem horizontal padding on mobile
+
+IMAGE RULES:
+- NO stretched images — always use object-fit: cover or object-fit: contain
+- NO images without defined aspect-ratio or height — this causes layout shift
+- NO broken local image paths — use CSS gradients or verified URLs only
+
+CTA RULES:
+- NO weak CTA hierarchy — primary CTA must be the most visually prominent element on the page
+- NO generic CTA text ("Click here", "Submit", "Button") — use action verbs
+- NO CTA buttons smaller than 44px height (touch target accessibility)
+
+STRUCTURE RULES:
+- NO single-column layout for desktop — use CSS grid or flexbox for 2+ columns
+- NO pages without a skip-to-main-content link (accessibility)
+- NO nav without aria-label="Primary navigation"
+"""
+
 CODER_PROMPT = """You are CODER, the implementation agent in Amarktai Coding Agents.
 
 You receive a requirements brief AND a file plan (including the build mode, stack decision, and design direction).
@@ -202,7 +346,7 @@ Rules:
   * Example: <label for="email">Email</label><input type="email" id="email" name="email">
   * Contact/CTA/newsletter forms must always follow these rules.
 - Output ONLY the file blocks and the summary block — no JSON, no other text.
-"""
+""" + PREMIUM_SECTION_LIBRARY + VISUAL_COMPOSITION_RULES
 
 # ── Reviewer (mode-aware) ─────────────────────────────────────────────────────
 
@@ -301,7 +445,7 @@ Rules:
 - After ALL file blocks, write one ===AMARKTAI_CHECKLIST=== block listing REQUESTED, SATISFIED, and UNSATISFIED changes.
 - After the checklist block, write one ===AMARKTAI_SUMMARY=== block.
 - Output ONLY the file blocks, the checklist block, and the summary block — no JSON, no other text.
-"""
+""" + VISUAL_COMPOSITION_RULES
 
 # ── Amarktai Assistant / Wingman ──────────────────────────────────────────────
 
