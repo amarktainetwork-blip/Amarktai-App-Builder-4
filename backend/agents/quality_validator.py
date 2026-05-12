@@ -845,9 +845,56 @@ def _score_security(
     return max(0, score), errors
 
 
-# ── Public API ───────────────────────────────────────────────────────────────
+# ── Phase 1F: Strict validation additions ─────────────────────────────────────
 
-# Minimum passing thresholds (problem statement spec)
+# Duplicate section detector: finds multiple identical section-class or id patterns
+_DUPLICATE_ID_PAT = re.compile(
+    r'id=["\']([a-zA-Z][a-zA-Z0-9_-]{2,})["\']',
+    re.IGNORECASE,
+)
+# Broken anchor links: <a href="#anchor"> should have a matching id="anchor"
+_ANCHOR_HREF_PAT = re.compile(r'href=["\']#([a-zA-Z][a-zA-Z0-9_-]+)["\']', re.IGNORECASE)
+# Detects missing/wrong CSS font-family declaration when font var is used but not declared
+_FONT_VAR_USAGE = re.compile(r'var\(--font-(?:heading|body)\)', re.IGNORECASE)
+_FONT_VAR_DECL = re.compile(r'--font-(?:heading|body)\s*:', re.IGNORECASE)
+# Detects inline style="" blocks with !important overrides (indicates CSS not working)
+_IMPORTANT_INLINE = re.compile(r'style=["\'][^"\']*!important', re.IGNORECASE)
+# Runtime-error markers that sometimes appear in generated code
+_RUNTIME_ERROR_MARKERS = re.compile(
+    r"undefined\s+is\s+not|cannot\s+read\s+property|TypeError:|ReferenceError:|"
+    r"SyntaxError:|console\.error\(|throw\s+new\s+Error\(",
+    re.IGNORECASE,
+)
+
+
+def _check_duplicate_ids(html: str) -> list[str]:
+    """Return list of IDs that appear more than once in the HTML (duplicate section anchors)."""
+    ids = _DUPLICATE_ID_PAT.findall(html)
+    seen: dict[str, int] = {}
+    for id_val in ids:
+        seen[id_val] = seen.get(id_val, 0) + 1
+    return [id_val for id_val, count in seen.items() if count > 1]
+
+
+def _check_broken_anchors(html: str) -> list[str]:
+    """Return list of #anchor hrefs that have no matching id in the HTML."""
+    anchor_hrefs = set(_ANCHOR_HREF_PAT.findall(html))
+    declared_ids = set(_DUPLICATE_ID_PAT.findall(html))
+    return [a for a in anchor_hrefs if a not in declared_ids]
+
+
+def _check_typography_integrity(html: str, css: str) -> list[str]:
+    """Return errors when font vars are used but never declared (broken typography)."""
+    issues: list[str] = []
+    combined = html + "\n" + css
+    if _FONT_VAR_USAGE.search(combined) and not _FONT_VAR_DECL.search(combined):
+        issues.append(
+            "CSS font variables (var(--font-heading) / var(--font-body)) are referenced "
+            "but never declared in :root. Typography will be broken at runtime."
+        )
+    return issues
+
+# ── Phase 1F: Minimum passing thresholds (also exported for tests/callers) ───
 MIN_QUALITY_SCORE = 80
 MIN_DESIGN_SCORE = 80
 MIN_SECURITY_SCORE = 75  # Only enforced when auth/security is relevant
@@ -1063,6 +1110,65 @@ def score_project_quality(
         "automation-bot-scaffold", "trading-bot-scaffold",
     } or auth_required
     security_ok = (not security_relevant) or (security_score >= MIN_SECURITY_SCORE)
+
+    # ── Phase 1F: Strict supplementary checks ────────────────────────────────
+    # These run on top of existing scores and can force hard failure.
+    _primary_html_for_strict = (
+        files_by_path.get("index.html", {}).get("content", "")
+        or next(
+            (f.get("content", "") for p, f in files_by_path.items() if p.endswith(".html")),
+            "",
+        )
+    )
+    _all_css_for_strict = "\n".join(
+        f.get("content", "")
+        for p, f in files_by_path.items()
+        if p.endswith(".css")
+    )
+
+    # 1. Duplicate section/ID check
+    dup_ids = _check_duplicate_ids(_primary_html_for_strict)
+    if dup_ids:
+        penalty = min(20, len(dup_ids) * 5)
+        design_score -= penalty
+        design_errors.append(
+            f"Duplicate HTML IDs detected ({', '.join(dup_ids[:5])}). "
+            "Sections must have unique IDs."
+        )
+
+    # 2. Broken anchor link check
+    broken_anchors = _check_broken_anchors(_primary_html_for_strict)
+    if broken_anchors:
+        penalty = min(15, len(broken_anchors) * 5)
+        quality_score -= penalty
+        quality_errors.append(
+            f"Broken anchor links detected (#{', #'.join(broken_anchors[:5])}). "
+            "Every href='#anchor' must have a matching id='anchor' on the page."
+        )
+
+    # 3. Typography integrity check
+    typo_issues = _check_typography_integrity(_primary_html_for_strict, _all_css_for_strict)
+    if typo_issues:
+        design_score -= 20
+        design_errors.extend(typo_issues)
+        design_ok = False  # Typography failure is a hard block
+
+    # 4. Runtime error markers in JS files
+    js_content = "\n".join(
+        f.get("content", "")
+        for p, f in files_by_path.items()
+        if p.endswith((".js", ".jsx", ".ts", ".tsx"))
+    )
+    if _RUNTIME_ERROR_MARKERS.search(js_content):
+        quality_score -= 10
+        quality_errors.append(
+            "Possible runtime error markers found in JavaScript files. "
+            "Review and remove error conditions before shipping."
+        )
+
+    # Re-apply thresholds after Phase 1F checks
+    quality_ok = quality_score >= MIN_QUALITY_SCORE and quality_ok
+    design_ok = design_score >= MIN_DESIGN_SCORE and design_ok
 
     return {
         "qualityScore": quality_score,

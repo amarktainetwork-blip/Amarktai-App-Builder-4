@@ -39,6 +39,10 @@ from agents.media_storage import (
 from agents.logo_agent import run_logo_agent, logo_agent_prompt_block
 from agents.agent_contracts import get_all_contracts, get_contract
 from agents.html_validator import validate_project_files_enhanced
+from agents.mode_classifier import classify_build_mode, ModeClassification
+from app.core.capability_registry import (
+    get_registry, capabilities_summary, probe_live_status, models_with_capability,
+)
 from auth import (
     decode_token,
     hash_password,
@@ -165,9 +169,21 @@ def _now() -> str:
 
 
 class Hub:
+    """WebSocket broadcast hub with event persistence and reconnect replay.
+
+    Phase 1G: All orchestration events are persisted in memory (and optionally
+    MongoDB) so that reconnecting clients can replay the full timeline without
+    requiring a page refresh.
+    """
+
+    # Maximum events to buffer per project (in memory)
+    _MAX_BUFFER = 500
+
     def __init__(self) -> None:
         self.rooms: dict[str, set[WebSocket]] = {}
         self.lock = asyncio.Lock()
+        # In-memory event buffer: project_id → ordered list of events
+        self._event_buffer: dict[str, list[dict]] = {}
 
     async def join(self, project_id: str, ws: WebSocket) -> None:
         async with self.lock:
@@ -177,7 +193,26 @@ class Hub:
         async with self.lock:
             self.rooms.get(project_id, set()).discard(ws)
 
+    def _buffer_event(self, project_id: str, payload: dict) -> None:
+        """Add an event to the in-memory replay buffer."""
+        buf = self._event_buffer.setdefault(project_id, [])
+        # Stamp every event with a server timestamp so the client can order them
+        if "ts" not in payload:
+            payload = {**payload, "ts": datetime.now(timezone.utc).isoformat()}
+        buf.append(payload)
+        # Keep buffer bounded
+        if len(buf) > self._MAX_BUFFER:
+            self._event_buffer[project_id] = buf[-self._MAX_BUFFER:]
+
+    def get_buffered_events(self, project_id: str) -> list[dict]:
+        """Return all buffered events for a project (for reconnect replay)."""
+        return list(self._event_buffer.get(project_id, []))
+
     async def broadcast(self, project_id: str, payload: dict) -> None:
+        # Buffer before sending so replay includes all events (including those
+        # sent when no client is connected)
+        self._buffer_event(project_id, payload)
+
         async with self.lock:
             sockets = list(self.rooms.get(project_id, set()))
         dead: list[WebSocket] = []
@@ -190,6 +225,40 @@ class Hub:
             async with self.lock:
                 for ws in dead:
                     self.rooms.get(project_id, set()).discard(ws)
+
+    async def replay(self, project_id: str, ws: WebSocket,
+                     since_ts: str | None = None) -> None:
+        """Replay buffered events to a newly connected WebSocket.
+
+        Sends a ``replay_start`` sentinel, then all buffered events, then a
+        ``replay_end`` sentinel so the frontend can reconcile its state.
+
+        Parameters
+        ----------
+        since_ts:
+            ISO timestamp.  Only events with ``ts >= since_ts`` are replayed.
+            Pass ``None`` to replay all buffered events.
+        """
+        events = self.get_buffered_events(project_id)
+
+        if since_ts:
+            events = [e for e in events if e.get("ts", "") >= since_ts]
+
+        try:
+            await ws.send_json({
+                "type": "replay_start",
+                "data": {"project_id": project_id, "event_count": len(events)},
+                "ts": datetime.now(timezone.utc).isoformat(),
+            })
+            for evt in events:
+                await ws.send_json(evt)
+            await ws.send_json({
+                "type": "replay_end",
+                "data": {"project_id": project_id, "replayed": len(events)},
+                "ts": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass  # Client may have disconnected during replay — ignore
 
 
 hub = Hub()
@@ -758,6 +827,92 @@ async def contact(body: ContactBody) -> dict:
     doc = {"id": str(uuid.uuid4()), "name": body.name, "email": body.email, "message": body.message, "created_at": _now()}
     await db.contact_messages.insert_one(dict(doc))
     return {"ok": True, "id": doc["id"]}
+
+
+# ── Phase 1A: Capability Registry endpoints ───────────────────────────────────
+
+@api.get("/capabilities")
+async def get_capabilities() -> dict:
+    """Return the full AI capability registry.
+
+    Phase 1A: This is the single source of truth for what every provider
+    and model supports.  The frontend must use this to decide what to show.
+    """
+    return {
+        "registry": get_registry(),
+        "summary": capabilities_summary(),
+        "timestamp": _now(),
+    }
+
+
+@api.get("/capabilities/status")
+async def capabilities_status() -> dict:
+    """Return the current runtime availability of each AI capability.
+
+    Derives status from configured environment variables without a live
+    network call — returns instantly.
+    """
+    summary = capabilities_summary()
+    available_caps = [k for k, v in summary.items() if v.get("available")]
+    unavailable_caps = {
+        k: v["reason"]
+        for k, v in summary.items()
+        if not v.get("available")
+    }
+    return {
+        "available": available_caps,
+        "unavailable": unavailable_caps,
+        "summary": summary,
+        "timestamp": _now(),
+    }
+
+
+@api.get("/capabilities/models")
+async def capability_models(capability: Optional[str] = None) -> dict:
+    """Return models from the registry, optionally filtered by capability.
+
+    ?capability=image_generation  → models that support image generation
+    ?capability=reasoning          → models that support reasoning
+    (omit parameter to return all models)
+    """
+    if capability:
+        models = models_with_capability(capability)
+        if not models:
+            return {
+                "capability": capability,
+                "models": [],
+                "available": False,
+                "message": f"No models in the registry support '{capability}'. "
+                           "This feature may not be available in the current configuration.",
+            }
+        return {
+            "capability": capability,
+            "models": models,
+            "available": True,
+            "count": len(models),
+        }
+    return {"models": get_registry(), "count": len(get_registry())}
+
+
+# ── Phase 1E: Build Mode Classifier endpoint ──────────────────────────────────
+
+class ClassifyModeBody(BaseModel):
+    prompt: str = Field(min_length=1, max_length=12000)
+    forced_mode: Optional[str] = None
+
+
+@api.post("/classify-mode")
+async def classify_mode(body: ClassifyModeBody) -> dict:
+    """Classify the build mode from a user prompt.
+
+    Phase 1E: Returns the detected mode, confidence, and targeted
+    clarification questions if the prompt is ambiguous.
+
+    The frontend MUST present clarification questions when
+    needs_clarification=True before starting the build pipeline.
+    """
+    result = classify_build_mode(body.prompt, forced_mode=body.forced_mode)
+    return result.to_dict()
 
 
 @secured.get("/models")
@@ -2048,14 +2203,21 @@ async def ws_project(ws: WebSocket, project_id: str) -> None:
     await ws.accept()
     await hub.join(project_id, ws)
     try:
-        await ws.send_json({"type": "hello", "data": {"project_id": project_id, "connected": True}})
+        # Phase 1G: Replay buffered events on connect so the client can
+        # reconcile its state without a page refresh.
+        # The client may pass ?since=<ISO timestamp> to request partial replay.
+        since_ts = ws.query_params.get("since")
+        await hub.replay(project_id, ws, since_ts=since_ts)
+
+        await ws.send_json({"type": "hello", "data": {"project_id": project_id, "connected": True},
+                            "ts": _now()})
         while True:
             try:
                 msg = await asyncio.wait_for(ws.receive_text(), timeout=30)
                 if msg == "ping":
-                    await ws.send_json({"type": "pong", "data": {"t": _now()}})
+                    await ws.send_json({"type": "pong", "data": {"t": _now()}, "ts": _now()})
             except asyncio.TimeoutError:
-                await ws.send_json({"type": "heartbeat", "data": {"t": _now()}})
+                await ws.send_json({"type": "heartbeat", "data": {"t": _now()}, "ts": _now()})
     except WebSocketDisconnect:
         pass
     finally:
