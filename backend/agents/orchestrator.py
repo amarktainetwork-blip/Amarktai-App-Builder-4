@@ -40,6 +40,19 @@ from .prompts import (
 from .design_engine import create_design_direction
 from .repo_analyzer import analyze_repo_profile, detect_update_intent
 from .coverage_score import compute_coverage_score
+from .project_memory import (
+    load_memory,
+    save_memory,
+    update_memory_brand,
+    update_memory_design,
+    update_memory_product,
+    update_memory_pages,
+    update_memory_features,
+    update_memory_iteration,
+    update_memory_agent_decision,
+    get_design_lock_prompt,
+)
+from .design_dna import build_diversity_context, record_design_choice
 
 # Per-agent timeout in seconds
 AGENT_TIMEOUTS = {
@@ -710,6 +723,9 @@ class Orchestrator:
         """Standard Scout → Architect → Coder → Reviewer → Validate → Repair loop pipeline."""
         sd = stack_decision or {}
 
+        # Load project memory at the start of the build (Phase 1)
+        memory = await load_memory(self.db, self.project_id)
+
         # 1) Scout
         await self._check_cancel()
         shared_ctx = await self._shared_context()
@@ -741,6 +757,14 @@ class Orchestrator:
             meta={"model": scout["model_label"]},
         )
 
+        # Persist brand + features into project memory after Scout (Phase 1)
+        memory = update_memory_brand(memory, scout_data, mode)
+        memory = update_memory_features(memory, scout_data)
+        memory = update_memory_agent_decision(memory, "scout", "requirements_extracted", {
+            "audience": scout_data.get("audience", ""),
+            "core_features": scout_data.get("core_features", []),
+        })
+
         # 2) Architect
         await self._check_cancel()
         arch_input = json.dumps({
@@ -763,13 +787,21 @@ class Orchestrator:
             meta={"model": arch["model_label"]},
         )
 
+        # Persist product/stack decisions into project memory after Architect (Phase 1)
+        memory = update_memory_product(memory, mode, sd)
+        memory = update_memory_agent_decision(memory, "architect", "stack_decided", {
+            "frontend": arch_data.get("tech_stack", {}).get("frontend", ""),
+            "styling": arch_data.get("tech_stack", {}).get("styling", ""),
+        })
+        await save_memory(self.db, self.project_id, memory)
+
         # 3) Coder — generate design direction and include in input
         await self._check_cancel()
         project_for_design = await self._load_project()
         project_type_for_design = infer_project_type(mode, project_for_design.get("project_type"))
-        # Load recent design signatures from project memory for diversity penalty
-        project_memory = project_for_design.get("project_memory") or {}
-        recent_signatures = project_memory.get("designSignatures", [])
+        # Use design DNA to build diversity context (Phase 4)
+        diversity_ctx = build_diversity_context(memory)
+        recent_signatures = diversity_ctx["recent_signatures"]
         design_direction = create_design_direction(
             prompt=user_prompt,
             project_type=project_type_for_design,
@@ -777,25 +809,26 @@ class Orchestrator:
             tier=project_for_design.get("quality_tier", "balanced"),
             recent_signatures=recent_signatures if recent_signatures else None,
         )
-        # Store design signature in project memory for future diversity tracking
+        # Persist design direction into project memory (Phase 1 & 4)
+        memory = update_memory_design(memory, design_direction)
+        memory = record_design_choice(memory, design_direction)
+        memory = update_memory_agent_decision(memory, "creative_director", "design_selected", {
+            "style": design_direction.get("name", ""),
+            "layout": design_direction.get("layout_rhythm", ""),
+        })
+
         sig = design_direction.get("design_signature", {})
-        if sig:
-            updated_signatures = (recent_signatures + [sig])[-20:]  # keep last 20
-            await self.db.projects.update_one(
-                {"id": self.project_id},
-                {"$set": {
-                    "design_direction": design_direction,
-                    "updated_at": _now(),
-                    "project_memory.designSignatures": updated_signatures,
-                    "project_memory.designTokens": design_direction.get("palette", {}),
-                    "project_memory.fontPair": design_direction.get("typography", {}),
-                }},
-            )
-        else:
-            await self.db.projects.update_one(
-                {"id": self.project_id},
-                {"$set": {"design_direction": design_direction, "updated_at": _now()}},
-            )
+        updated_signatures = memory.get("designSignatures", [])
+        await self.db.projects.update_one(
+            {"id": self.project_id},
+            {"$set": {
+                "design_direction": design_direction,
+                "updated_at": _now(),
+                "project_memory.designSignatures": updated_signatures,
+                "project_memory.designTokens": design_direction.get("palette", {}),
+                "project_memory.fontPair": design_direction.get("typography", {}),
+            }},
+        )
         await self.emit({"type": "design_direction", "data": {
             "name": design_direction["name"],
             "label": design_direction["label"],
@@ -835,6 +868,14 @@ class Orchestrator:
             coder_data.get("summary", "Files generated."),
             meta={"model": coder["model_label"], "files": [f["path"] for f in generated_files]},
         )
+
+        # Persist pages + save full memory after Coder (Phase 1)
+        memory = update_memory_pages(memory, generated_files)
+        memory = update_memory_agent_decision(memory, "coder", "files_generated", {
+            "file_count": len(generated_files),
+            "files": [f["path"] for f in generated_files],
+        })
+        await save_memory(self.db, self.project_id, memory)
         await self._ensure_contract_files(user_prompt, arch_data)
 
         # 4) Reviewer (first pass) — non-fatal: if the Reviewer returns invalid JSON and
@@ -1294,12 +1335,22 @@ class Orchestrator:
                 await self._record_message("system", None, msg, meta={"iteration_blocked": True})
                 return
 
+            # Load project memory to inject design lock into iteration prompt (Phase 3)
+            memory = await load_memory(self.db, self.project_id)
+            design_lock = get_design_lock_prompt(memory)
+
             existing_paths = {f["path"] for f in app_files}
             payload: dict[str, Any] = {
                 "request": user_prompt,
                 "files": [{"path": f["path"], "content": f["content"]} for f in app_files],
             }
-            iter_res = await self._run_agent_blocks("iteration", ITERATION_PROMPT, json.dumps(payload, indent=2))
+
+            # Build iteration system prompt with design lock prepended (Phase 3)
+            iteration_system = ITERATION_PROMPT
+            if design_lock:
+                iteration_system = design_lock + "\n\n" + ITERATION_PROMPT
+
+            iter_res = await self._run_agent_blocks("iteration", iteration_system, json.dumps(payload, indent=2))
             # Guard: model may return null/non-dict JSON — treat as empty rather than crash
             data = iter_res["data"] if isinstance(iter_res.get("data"), dict) else {}
             if not data.get("files"):
@@ -1346,7 +1397,7 @@ class Orchestrator:
                 added_files=added,
             )
 
-            # Build iteration history entry for project_memory
+            # Build iteration history entry and persist into project memory (Phase 1)
             iteration_entry = {
                 "timestamp": _now(),
                 "request": user_prompt,
@@ -1357,19 +1408,16 @@ class Orchestrator:
                 "addedFiles": added,
                 "model": iter_res.get("model_label", ""),
             }
-
-            # Append to project_memory.iterationHistory (capped at 20 entries)
-            existing_memory = project.get("project_memory") or {}
-            iteration_history = existing_memory.get("iterationHistory", [])
-            iteration_history.append(iteration_entry)
-            if len(iteration_history) > _MAX_ITERATION_HISTORY:
-                iteration_history = iteration_history[-_MAX_ITERATION_HISTORY:]
+            memory = update_memory_iteration(memory, iteration_entry)
+            memory = update_memory_agent_decision(memory, "iteration", "files_updated", {
+                "changed": changed, "added": added,
+            })
+            await save_memory(self.db, self.project_id, memory)
 
             await self.db.projects.update_one(
                 {"id": self.project_id},
                 {"$set": {
                     "coverage_score": coverage,
-                    "project_memory.iterationHistory": iteration_history,
                     "updated_at": _now(),
                 }},
             )

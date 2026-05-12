@@ -3985,3 +3985,749 @@ def test_multipage_with_all_pages_passes_quality():
         f"All 6 pages present — should not get page-count error. "
         f"Got: {page_missing_errors}\nAll errors: {result['qualityErrors']}"
     )
+
+
+# ── Phase 7: Product Brain Tests ─────────────────────────────────────────────
+
+# ---------- Project Memory Engine (Phase 1) ----------
+
+from agents.project_memory import (
+    make_empty_memory,
+    update_memory_brand,
+    update_memory_design,
+    update_memory_product,
+    update_memory_pages,
+    update_memory_features,
+    update_memory_iteration,
+    update_memory_agent_decision,
+    get_design_tokens,
+    get_font_pair,
+    get_design_lock_prompt,
+    get_design_direction_summary,
+)
+
+
+def test_project_memory_empty_schema_has_all_keys():
+    """make_empty_memory() must return all required top-level keys."""
+    mem = make_empty_memory()
+    required_keys = {
+        "brand", "design", "media", "product",
+        "pages", "features", "requirements",
+        "resolvedIssues", "unresolvedIssues",
+        "iterationHistory", "agentDecisions",
+        "designSignatures", "designTokens", "fontPair",
+    }
+    missing = required_keys - set(mem.keys())
+    assert not missing, f"make_empty_memory() is missing keys: {missing}"
+
+
+def test_project_memory_brand_keys():
+    """Memory brand section must have all required sub-keys."""
+    mem = make_empty_memory()
+    brand_keys = {"name", "industry", "tone", "audience", "positioning"}
+    assert set(mem["brand"].keys()) >= brand_keys
+
+
+def test_project_memory_design_keys():
+    """Memory design section must have all required sub-keys."""
+    mem = make_empty_memory()
+    design_keys = {
+        "visualDirection", "palette", "fonts", "spacing",
+        "layoutStyle", "animationStyle", "componentStyle",
+    }
+    assert set(mem["design"].keys()) >= design_keys
+
+
+def test_project_memory_product_keys():
+    """Memory product section must have all required sub-keys."""
+    mem = make_empty_memory()
+    product_keys = {
+        "buildMode", "stack", "database", "authStrategy", "deploymentStrategy",
+    }
+    assert set(mem["product"].keys()) >= product_keys
+
+
+def test_update_memory_brand_populates_audience():
+    """update_memory_brand must record audience from Scout output."""
+    mem = make_empty_memory()
+    scout_data = {
+        "audience": "small business owners",
+        "summary": "An invoicing tool for freelancers",
+        "core_features": ["invoicing", "payments"],
+    }
+    mem = update_memory_brand(mem, scout_data, mode="web_app")
+    assert mem["brand"]["audience"] == "small business owners"
+    assert "invoicing" in mem["brand"]["positioning"].lower() or "freelancer" in mem["brand"]["positioning"].lower()
+    assert mem["product"]["buildMode"] == "web_app"
+
+
+def test_update_memory_brand_does_not_overwrite_existing():
+    """update_memory_brand must not overwrite existing non-empty brand fields."""
+    mem = make_empty_memory()
+    mem["brand"]["audience"] = "enterprise customers"
+    scout_data = {"audience": "startups", "summary": "SaaS app"}
+    mem = update_memory_brand(mem, scout_data)
+    # Existing audience should be preserved
+    assert mem["brand"]["audience"] == "enterprise customers"
+
+
+def test_update_memory_design_populates_palette():
+    """update_memory_design must store palette and typography from design_direction."""
+    mem = make_empty_memory()
+    design_direction = {
+        "name": "premium-monochrome",
+        "palette": {"background": "#000000", "accent": "#ffffff"},
+        "typography": {"heading": "'Manrope'", "body": "'Manrope'"},
+        "layout_rhythm": "minimal_centered",
+        "spacing": "generous",
+        "motion": "200ms ease",
+        "visual_motifs": "clean white cards",
+        "design_signature": {
+            "styleName": "premium-monochrome",
+            "paletteHash": "abc12345",
+            "fontPair": "'Manrope'|'Manrope'",
+            "layoutArchetype": "minimal_centered",
+        },
+    }
+    mem = update_memory_design(mem, design_direction)
+    assert mem["design"]["palette"]["background"] == "#000000"
+    assert mem["design"]["fonts"]["heading"] == "'Manrope'"
+    assert mem["design"]["visualDirection"] == "premium-monochrome"
+    assert mem["design"]["layoutStyle"] == "minimal_centered"
+    # Also stored in top-level shortcut fields
+    assert mem["designTokens"]["accent"] == "#ffffff"
+    assert mem["fontPair"]["heading"] == "'Manrope'"
+    # Design signature tracked
+    assert len(mem["designSignatures"]) == 1
+    assert mem["designSignatures"][0]["styleName"] == "premium-monochrome"
+
+
+def test_update_memory_design_does_not_overwrite_existing_palette():
+    """update_memory_design must NOT overwrite existing palette on subsequent calls."""
+    mem = make_empty_memory()
+    # First build sets the palette
+    mem = update_memory_design(mem, {
+        "name": "luxury-black-gold",
+        "palette": {"background": "#0a0800", "accent": "#c8a96e"},
+        "typography": {"heading": "'Playfair Display'"},
+        "design_signature": {"styleName": "luxury-black-gold"},
+    })
+    # Second build call (e.g. from repair) tries to overwrite -- must be rejected
+    mem = update_memory_design(mem, {
+        "name": "different-style",
+        "palette": {"background": "#ffffff", "accent": "#4f46e5"},
+        "typography": {"heading": "'Inter'"},
+        "design_signature": {"styleName": "different-style"},
+    })
+    assert mem["design"]["palette"]["background"] == "#0a0800", (
+        "Existing palette must NOT be overwritten during repair/iteration"
+    )
+
+
+def test_update_memory_product_records_stack():
+    """update_memory_product must record stack from stack_decision."""
+    mem = make_empty_memory()
+    stack_decision = {
+        "stack": {"frontend": "React", "backend": "FastAPI", "database": "MongoDB"},
+        "preview_strategy": "iframe",
+    }
+    mem = update_memory_product(mem, "full_stack", stack_decision)
+    assert "React" in mem["product"]["stack"]
+    assert mem["product"]["database"] == "MongoDB"
+    assert mem["product"]["buildMode"] == "full_stack"
+
+
+def test_update_memory_pages_records_html_files():
+    """update_memory_pages must record all .html files from generated files."""
+    mem = make_empty_memory()
+    files = [
+        {"path": "index.html", "content": "<html/>"},
+        {"path": "about.html", "content": "<html/>"},
+        {"path": "styles.css", "content": "body{}"},
+    ]
+    mem = update_memory_pages(mem, files)
+    page_paths = [p["path"] for p in mem["pages"]]
+    assert "index.html" in page_paths
+    assert "about.html" in page_paths
+    assert "styles.css" not in page_paths
+
+
+def test_update_memory_features_records_core_features():
+    """update_memory_features must deduplicate and record core features."""
+    mem = make_empty_memory()
+    scout_data = {"core_features": ["auth", "dashboard", "export"]}
+    mem = update_memory_features(mem, scout_data)
+    assert "auth" in mem["features"]
+    assert "dashboard" in mem["features"]
+    # Running again should not duplicate
+    mem = update_memory_features(mem, scout_data)
+    assert mem["features"].count("auth") == 1
+
+
+def test_update_memory_iteration_appends_entry():
+    """update_memory_iteration must append entries to iterationHistory."""
+    mem = make_empty_memory()
+    entry1 = {"request": "make it blue", "changedFiles": ["styles.css"]}
+    entry2 = {"request": "add pricing section", "changedFiles": ["index.html"]}
+    mem = update_memory_iteration(mem, entry1)
+    mem = update_memory_iteration(mem, entry2)
+    assert len(mem["iterationHistory"]) == 2
+    assert mem["iterationHistory"][0]["request"] == "make it blue"
+
+
+def test_update_memory_iteration_caps_at_max():
+    """iterationHistory must be capped at 20 entries."""
+    from agents.project_memory import _MAX_ITERATION_HISTORY
+    mem = make_empty_memory()
+    for i in range(25):
+        mem = update_memory_iteration(mem, {"request": f"change {i}"})
+    assert len(mem["iterationHistory"]) == _MAX_ITERATION_HISTORY
+
+
+def test_update_memory_agent_decision_records_decisions():
+    """update_memory_agent_decision must record agent decisions with metadata."""
+    mem = make_empty_memory()
+    mem = update_memory_agent_decision(mem, "scout", "requirements_extracted", {"audience": "devs"})
+    mem = update_memory_agent_decision(mem, "coder", "files_generated", {"file_count": 5})
+    assert len(mem["agentDecisions"]) == 2
+    assert mem["agentDecisions"][0]["agent"] == "scout"
+    assert mem["agentDecisions"][1]["decision"] == "files_generated"
+
+
+def test_get_design_tokens_returns_palette():
+    """get_design_tokens must return the locked palette dict."""
+    mem = make_empty_memory()
+    mem["designTokens"] = {"background": "#000", "accent": "#fff"}
+    tokens = get_design_tokens(mem)
+    assert tokens["background"] == "#000"
+
+
+def test_get_font_pair_returns_typography():
+    """get_font_pair must return the locked font pair dict."""
+    mem = make_empty_memory()
+    mem["fontPair"] = {"heading": "'Playfair Display'", "body": "'Cormorant'"}
+    fonts = get_font_pair(mem)
+    assert fonts["heading"] == "'Playfair Display'"
+
+
+def test_get_design_direction_summary_produces_text():
+    """get_design_direction_summary must return non-empty text when memory is populated."""
+    mem = make_empty_memory()
+    mem["design"] = {
+        "visualDirection": "luxury-black-gold",
+        "palette": {"background": "#0a0800", "accent": "#c8a96e"},
+        "fonts": {"heading": "'Playfair Display'", "body": "'Cormorant'"},
+        "spacing": "spacious",
+        "layoutStyle": "centered_luxury",
+        "animationStyle": "slow 600ms ease",
+        "componentStyle": "gold ornamental dividers",
+    }
+    mem["designTokens"] = {"background": "#0a0800", "accent": "#c8a96e"}
+    mem["fontPair"] = {"heading": "'Playfair Display'", "body": "'Cormorant'"}
+    summary = get_design_direction_summary(mem)
+    assert "luxury-black-gold" in summary
+    assert "'Playfair Display'" in summary
+    assert "spacious" in summary
+
+
+def test_get_design_lock_prompt_includes_locked_tokens():
+    """get_design_lock_prompt must include DESIGN IDENTITY LOCK heading and palette values."""
+    mem = make_empty_memory()
+    mem["designTokens"] = {"background": "#0a0800", "accent": "#c8a96e"}
+    mem["fontPair"] = {"heading": "'Playfair Display'", "body": "'Cormorant'"}
+    mem["design"] = {
+        "visualDirection": "luxury-black-gold",
+        "palette": {"background": "#0a0800", "accent": "#c8a96e"},
+        "fonts": {"heading": "'Playfair Display'", "body": "'Cormorant'"},
+        "spacing": "spacious",
+        "layoutStyle": "centered_luxury",
+        "animationStyle": "slow 600ms ease",
+        "componentStyle": "gold ornamental dividers",
+    }
+    lock = get_design_lock_prompt(mem)
+    assert "DESIGN IDENTITY LOCK" in lock
+    assert "#0a0800" in lock
+    assert "Playfair Display" in lock
+    assert "DO NOT CHANGE" in lock
+
+
+def test_get_design_lock_prompt_empty_memory_returns_empty():
+    """get_design_lock_prompt must return empty string when memory has no design."""
+    mem = make_empty_memory()
+    lock = get_design_lock_prompt(mem)
+    assert lock == ""
+
+
+# ---------- Project Memory Persistence (Phase 1 async) ----------
+
+@pytest.mark.asyncio
+async def test_project_memory_saved_after_build():
+    """After a successful build, project_memory must be persisted to the project document."""
+    db, proj, files, events, messages = _make_db()
+    call_count = [0]
+    responses = [
+        # scout
+        {"summary": "Invoicing SaaS", "audience": "freelancers", "core_features": ["invoicing", "pdf"], "requirements_md": "# Reqs"},
+        # architect
+        {"tech_stack": {"frontend": "HTML", "styling": "CSS"}, "file_plan": [
+            {"path": "index.html", "purpose": "entry"},
+        ]},
+        # coder
+        {"files": [
+            {"path": "index.html", "language": "html", "content": "<!DOCTYPE html><html><body><h1>Hello</h1></body></html>"},
+            {"path": "styles.css", "language": "css", "content": ":root{--font-heading:'Inter'}body{font-family:var(--font-heading)}"},
+            {"path": "README.md", "language": "markdown", "content": "# App"},
+            {"path": "amarktai.project.json", "language": "json", "content": '{"name":"App","mode":"landing_page"}'},
+        ], "summary": "Done"},
+        # reviewer
+        {"verdict": "pass", "issues": [], "patched_files": [], "summary": "OK"},
+    ]
+
+    async def complete_se(**kwargs):
+        idx = call_count[0] % len(responses)
+        call_count[0] += 1
+        return {"text": json.dumps(responses[idx]), "model_label": "test", "model": "test", "session_id": "s", "usage": {}}
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(side_effect=complete_se)
+    events_received = []
+
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    written = []
+
+    async def fake_write(p, c, l="text"):
+        written.append({"path": p, "content": c, "language": l})
+
+    orch.fs.write = fake_write
+    orch.fs.list_full = AsyncMock(side_effect=lambda: list(written))
+    orch.fs.list = AsyncMock(return_value=[])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    from agents.stack_engine import decide_stack
+    sd = decide_stack(mode="landing_page")
+    await orch.run_full_build("Build an invoicing SaaS", mode="landing_page", stack_decision=sd)
+
+    # project_memory must have been written to the DB
+    assert "project_memory" in proj, "project_memory must be persisted to the project document"
+    memory = proj["project_memory"]
+    assert isinstance(memory, dict), "project_memory must be a dict"
+
+    # Brand must have audience
+    assert memory.get("brand", {}).get("audience") == "freelancers", (
+        f"brand.audience must be 'freelancers', got: {memory.get('brand', {})}"
+    )
+
+    # agentDecisions must be populated
+    assert len(memory.get("agentDecisions", [])) >= 2, (
+        "At least scout + architect decisions must be recorded"
+    )
+
+
+@pytest.mark.asyncio
+async def test_iteration_memory_preserved_after_iteration():
+    """Iteration must append to iterationHistory and keep design tokens intact."""
+    db, proj, files, events, messages = _make_db()
+
+    # Pre-seed project memory with design tokens (simulating a prior build)
+    proj["project_memory"] = {
+        "brand": {"name": "TestCo", "industry": "SaaS", "tone": "", "audience": "devs", "positioning": ""},
+        "design": {
+            "visualDirection": "premium-monochrome",
+            "palette": {"background": "#000000", "accent": "#ffffff"},
+            "fonts": {"heading": "'Manrope'", "body": "'Manrope'"},
+            "spacing": "generous",
+            "layoutStyle": "minimal_centered",
+            "animationStyle": "200ms ease",
+            "componentStyle": "clean white cards",
+        },
+        "designTokens": {"background": "#000000", "accent": "#ffffff"},
+        "fontPair": {"heading": "'Manrope'", "body": "'Manrope'"},
+        "designSignatures": [{"styleName": "premium-monochrome", "paletteHash": "abc12345"}],
+        "media": {"preferredStyle": "", "heroStyle": "", "logoStyle": "", "imageSubjects": [], "aspectRatios": [], "generatedAssets": []},
+        "product": {"buildMode": "landing_page", "stack": "HTML / none", "database": "", "authStrategy": "", "deploymentStrategy": "iframe"},
+        "pages": [{"path": "index.html", "title": "Index"}],
+        "features": ["auth", "dashboard"],
+        "requirements": [],
+        "resolvedIssues": [],
+        "unresolvedIssues": [],
+        "iterationHistory": [],
+        "agentDecisions": [],
+    }
+
+    # Seed app files
+    app_content = '<!DOCTYPE html><html><body><h1>App</h1></body></html>'
+    proj["mode"] = "landing_page"
+    proj["prompt"] = "Build landing page"
+
+    # Iteration response
+    iter_response = {
+        "files": [
+            {"path": "index.html", "language": "html", "content": app_content},
+            {"path": "styles.css", "language": "css", "content": ":root{--font-heading:'Manrope'}body{}"},
+            {"path": "README.md", "language": "markdown", "content": "# App"},
+            {"path": "amarktai.project.json", "language": "json", "content": '{"name":"App"}'},
+        ],
+        "summary": "Added blue button",
+        "requestedChanges": ["blue button"],
+        "satisfiedChanges": ["blue button"],
+        "unsatisfiedChanges": [],
+    }
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(return_value={
+        "text": json.dumps(iter_response),
+        "model_label": "test", "model": "test", "session_id": "s", "usage": {},
+    })
+    events_received = []
+
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    written = [
+        {"path": "index.html", "content": app_content, "language": "html"},
+        {"path": "styles.css", "content": "body{}", "language": "css"},
+        {"path": "README.md", "content": "# App", "language": "markdown"},
+        {"path": "amarktai.project.json", "content": '{"name":"App"}', "language": "json"},
+    ]
+
+    async def fake_write(p, c, l="text"):
+        written.append({"path": p, "content": c, "language": l})
+
+    orch.fs.write = fake_write
+    orch.fs.list_full = AsyncMock(side_effect=lambda: list(written))
+    orch.fs.list = AsyncMock(return_value=[])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    await orch.run_iteration("Make the button blue")
+
+    # Design tokens must NOT have changed
+    memory = proj.get("project_memory", {})
+    tokens = memory.get("designTokens", {})
+    assert tokens.get("background") == "#000000", (
+        f"Design tokens must be preserved -- background changed. Got: {tokens}"
+    )
+    assert tokens.get("accent") == "#ffffff", (
+        f"Design tokens must be preserved -- accent changed. Got: {tokens}"
+    )
+
+    # iterationHistory must have one entry
+    history = memory.get("iterationHistory", [])
+    assert len(history) == 1, f"iterationHistory must have 1 entry, got {len(history)}"
+    assert history[0]["request"] == "Make the button blue"
+
+
+# ---------- Design DNA Engine (Phase 4) ----------
+
+from agents.design_dna import (
+    compute_repetition_score,
+    get_overused_elements,
+    get_originality_report,
+    record_design_choice,
+    build_diversity_context,
+    extract_section_archetypes,
+    compute_section_penalty,
+    is_palette_overused,
+    palette_hash,
+)
+
+
+def test_design_dna_repetition_score_zero_for_empty_history():
+    """Repetition score must be 0.0 when there is no history."""
+    candidate = {"styleName": "premium-monochrome", "paletteHash": "abc", "fontPair": "x|y", "layoutArchetype": "minimal"}
+    score = compute_repetition_score(candidate, [])
+    assert score == 0.0
+
+
+def test_design_dna_repetition_score_nonzero_for_same_style():
+    """Repetition score must be > 0 when same style was recently used."""
+    candidate = {"styleName": "luxury-black-gold", "paletteHash": "abc", "fontPair": "x|y", "layoutArchetype": "centered_luxury"}
+    recent = [{"styleName": "luxury-black-gold", "paletteHash": "abc", "fontPair": "x|y", "layoutArchetype": "centered_luxury"}]
+    score = compute_repetition_score(candidate, recent)
+    assert score > 0.0, f"Same style must score > 0. Got: {score}"
+
+
+def test_design_dna_repetition_score_capped_at_one():
+    """Repetition score must never exceed 1.0."""
+    candidate = {"styleName": "organic-nature", "paletteHash": "def", "fontPair": "a|b", "layoutArchetype": "flowing"}
+    recent = [{"styleName": "organic-nature", "paletteHash": "def", "fontPair": "a|b", "layoutArchetype": "flowing"}] * 20
+    score = compute_repetition_score(candidate, recent)
+    assert 0.0 <= score <= 1.0, f"Score must be in [0,1], got: {score}"
+
+
+def test_design_dna_get_overused_elements_counts_correctly():
+    """get_overused_elements must accurately count style/palette/font/layout repeats."""
+    sigs = [
+        {"styleName": "style-a", "paletteHash": "h1", "fontPair": "f1|f2", "layoutArchetype": "layout-x"},
+        {"styleName": "style-a", "paletteHash": "h1", "fontPair": "f1|f2", "layoutArchetype": "layout-x"},
+        {"styleName": "style-b", "paletteHash": "h2", "fontPair": "f3|f4", "layoutArchetype": "layout-y"},
+    ]
+    overused = get_overused_elements(sigs)
+    assert overused["styles"]["style-a"] == 2
+    assert overused["styles"]["style-b"] == 1
+    assert overused["palettes"]["h1"] == 2
+
+
+def test_design_dna_originality_report_low_risk_for_fresh_history():
+    """Originality report must return low risk when all styles are unique."""
+    mem = make_empty_memory()
+    mem["designSignatures"] = [
+        {"styleName": f"style-{i}", "paletteHash": f"h{i}", "fontPair": "a|b", "layoutArchetype": "x"}
+        for i in range(5)
+    ]
+    report = get_originality_report(mem)
+    assert report["repetition_risk"] == "low"
+    assert report["unique_styles_used"] == 5
+
+
+def test_design_dna_originality_report_high_risk_for_repeated_style():
+    """Originality report must return high risk when one style dominates."""
+    mem = make_empty_memory()
+    mem["designSignatures"] = [
+        {"styleName": "luxury-black-gold", "paletteHash": "abc", "fontPair": "a|b", "layoutArchetype": "x"}
+        for _ in range(4)
+    ]
+    report = get_originality_report(mem)
+    assert report["repetition_risk"] in ("medium", "high")
+    assert "luxury-black-gold" in report["recommendation"]
+
+
+def test_design_dna_record_design_choice_adds_signature():
+    """record_design_choice must add design signature to memory.designSignatures."""
+    mem = make_empty_memory()
+    direction = {
+        "name": "neo-brutalist",
+        "design_signature": {
+            "styleName": "neo-brutalist",
+            "paletteHash": "xyz",
+            "fontPair": "'Space Grotesk'|'Space Grotesk'",
+            "layoutArchetype": "chunky_blocks",
+        },
+    }
+    mem = record_design_choice(mem, direction)
+    assert len(mem["designSignatures"]) == 1
+    assert mem["designSignatures"][0]["styleName"] == "neo-brutalist"
+
+
+def test_design_dna_record_design_choice_does_not_duplicate():
+    """record_design_choice must not add duplicate entry for same styleName."""
+    mem = make_empty_memory()
+    direction = {
+        "name": "neo-brutalist",
+        "design_signature": {"styleName": "neo-brutalist", "paletteHash": "xyz"},
+    }
+    mem = record_design_choice(mem, direction)
+    mem = record_design_choice(mem, direction)
+    assert len(mem["designSignatures"]) == 1, "Duplicate must not be added"
+
+
+def test_design_dna_build_diversity_context_returns_recent_and_avoid():
+    """build_diversity_context must return recent_signatures and avoid_styles."""
+    mem = make_empty_memory()
+    mem["designSignatures"] = [
+        {"styleName": "luxury-black-gold", "paletteHash": "a"},
+        {"styleName": "luxury-black-gold", "paletteHash": "a"},
+        {"styleName": "organic-nature", "paletteHash": "b"},
+    ]
+    ctx = build_diversity_context(mem)
+    assert "recent_signatures" in ctx
+    assert "avoid_styles" in ctx
+    assert "luxury-black-gold" in ctx["avoid_styles"]
+    assert "organic-nature" not in ctx["avoid_styles"]
+
+
+def test_design_dna_extract_section_archetypes_hero():
+    """extract_section_archetypes must detect hero sections."""
+    html = '<section class="hero"><h1>Welcome</h1></section>'
+    archetypes = extract_section_archetypes(html)
+    assert "cinematic_hero" in archetypes
+
+
+def test_design_dna_extract_section_archetypes_pricing():
+    """extract_section_archetypes must detect pricing sections."""
+    html = '<section id="pricing"><div class="plan">$9/mo</div></section>'
+    archetypes = extract_section_archetypes(html)
+    assert "pricing" in archetypes
+
+
+def test_design_dna_extract_section_archetypes_faq_and_testimonials():
+    """extract_section_archetypes must detect FAQ and testimonials."""
+    html = '<section id="faq"><details><summary>Q1</summary><p>A1</p></details></section>\n    <section id="testimonials"><div class="card">Great product!</div></section>'
+    archetypes = extract_section_archetypes(html)
+    assert "faq" in archetypes
+    assert "testimonials" in archetypes
+
+
+def test_design_dna_palette_hash_is_stable():
+    """palette_hash must return the same value for the same palette."""
+    palette = {"background": "#000000", "accent": "#c8a96e", "text_primary": "#f5e6c8"}
+    h1 = palette_hash(palette)
+    h2 = palette_hash(palette)
+    assert h1 == h2
+    assert len(h1) == 8
+
+
+def test_design_dna_palette_hash_differs_for_different_palettes():
+    """palette_hash must differ for different palettes."""
+    p1 = {"background": "#000000", "accent": "#ffffff"}
+    p2 = {"background": "#ffffff", "accent": "#000000"}
+    assert palette_hash(p1) != palette_hash(p2)
+
+
+def test_design_dna_is_palette_overused_false_for_fresh():
+    """is_palette_overused must return False when palette has not been used before."""
+    mem = make_empty_memory()
+    palette = {"background": "#000000", "accent": "#c8a96e"}
+    assert is_palette_overused(palette, mem) is False
+
+
+def test_design_dna_is_palette_overused_true_after_repeats():
+    """is_palette_overused must return True when palette appears >= 2 times."""
+    mem = make_empty_memory()
+    palette = {"background": "#000000", "accent": "#c8a96e"}
+    ph = palette_hash(palette)
+    mem["designSignatures"] = [
+        {"styleName": "a", "paletteHash": ph},
+        {"styleName": "b", "paletteHash": ph},
+    ]
+    assert is_palette_overused(palette, mem) is True
+
+
+# ---------- Premium Section Library (Phase 5) ----------
+
+from agents.prompts import PREMIUM_SECTION_LIBRARY, VISUAL_COMPOSITION_RULES
+
+
+def test_premium_section_library_contains_all_15_archetypes():
+    """PREMIUM_SECTION_LIBRARY must define all 15 section archetypes."""
+    archetypes = [
+        "CINEMATIC HERO", "LUXURY SHOWCASE", "PRODUCT SPOTLIGHT", "DASHBOARD PREVIEW",
+        "WORKFLOW TIMELINE", "TRUST BAR", "COMPARISON GRID", "PRICING", "CTA SECTION",
+        "TESTIMONIALS", "FEATURE CARDS", "GALLERY", "FAQ", "METRICS", "INTEGRATIONS",
+    ]
+    for archetype in archetypes:
+        assert archetype in PREMIUM_SECTION_LIBRARY, (
+            f"PREMIUM_SECTION_LIBRARY missing archetype: {archetype}"
+        )
+
+
+def test_premium_section_library_has_composition_rules():
+    """PREMIUM_SECTION_LIBRARY must include composition rules."""
+    assert "COMPOSITION RULES" in PREMIUM_SECTION_LIBRARY
+
+
+# ---------- Visual Composition Rules (Phase 6) ----------
+
+def test_visual_composition_rules_present_in_coder_prompt():
+    """CODER_PROMPT must include visual composition rules."""
+    from agents.prompts import CODER_PROMPT
+    assert "VISUAL COMPOSITION RULES" in CODER_PROMPT, (
+        "CODER_PROMPT must include VISUAL_COMPOSITION_RULES"
+    )
+
+
+def test_visual_composition_rules_present_in_iteration_prompt():
+    """ITERATION_PROMPT must include visual composition rules."""
+    from agents.prompts import ITERATION_PROMPT
+    assert "VISUAL COMPOSITION RULES" in ITERATION_PROMPT, (
+        "ITERATION_PROMPT must include VISUAL_COMPOSITION_RULES"
+    )
+
+
+def test_visual_composition_rules_covers_key_categories():
+    """VISUAL_COMPOSITION_RULES must cover all 6 rule categories."""
+    categories = ["HERO RULES", "COLOUR RULES", "TYPOGRAPHY RULES",
+                  "SPACING RULES", "IMAGE RULES", "CTA RULES", "STRUCTURE RULES"]
+    for cat in categories:
+        assert cat in VISUAL_COMPOSITION_RULES, (
+            f"VISUAL_COMPOSITION_RULES missing category: {cat}"
+        )
+
+
+def test_visual_composition_rules_no_overcrowded_hero():
+    """VISUAL_COMPOSITION_RULES must prohibit overcrowded hero."""
+    assert "overcrowded" in VISUAL_COMPOSITION_RULES.lower()
+
+
+def test_visual_composition_rules_no_tiny_fonts():
+    """VISUAL_COMPOSITION_RULES must prohibit tiny fonts."""
+    assert "tiny" in VISUAL_COMPOSITION_RULES.lower() or "15px" in VISUAL_COMPOSITION_RULES
+
+
+def test_visual_composition_rules_no_random_gradients():
+    """VISUAL_COMPOSITION_RULES must prohibit random gradients."""
+    assert "random gradient" in VISUAL_COMPOSITION_RULES.lower()
+
+
+def test_visual_composition_rules_no_stretched_images():
+    """VISUAL_COMPOSITION_RULES must prohibit stretched images."""
+    assert "stretched" in VISUAL_COMPOSITION_RULES.lower()
+
+
+# ---------- Agent hierarchy / decisions (Phase 2) ----------
+
+def test_agent_hierarchy_decisions_have_agent_field():
+    """Agent decisions must record the responsible agent."""
+    mem = make_empty_memory()
+    mem = update_memory_agent_decision(mem, "scout", "requirements_extracted")
+    mem = update_memory_agent_decision(mem, "creative_director", "design_selected", {"style": "luxury"})
+    mem = update_memory_agent_decision(mem, "coder", "files_generated", {"count": 8})
+
+    agents = [d["agent"] for d in mem["agentDecisions"]]
+    assert "scout" in agents
+    assert "creative_director" in agents
+    assert "coder" in agents
+
+    # Each decision has timestamp
+    for d in mem["agentDecisions"]:
+        assert "timestamp" in d, f"Decision missing timestamp: {d}"
+
+
+def test_agent_hierarchy_design_not_overwritten_by_later_agents():
+    """Design direction stored by creative_director must not be overwritten by coder."""
+    mem = make_empty_memory()
+    # Creative director sets design
+    mem = update_memory_design(mem, {
+        "name": "luxury-black-gold",
+        "palette": {"background": "#0a0800", "accent": "#c8a96e"},
+        "typography": {"heading": "'Playfair Display'", "body": "'Cormorant'"},
+        "design_signature": {"styleName": "luxury-black-gold"},
+    })
+    original_palette = dict(mem["design"]["palette"])
+
+    # Coder tries to set a new design -- should be rejected
+    mem = update_memory_design(mem, {
+        "name": "neo-brutalist",
+        "palette": {"background": "#ffffff", "accent": "#ff3e00"},
+        "typography": {"heading": "'Space Grotesk'", "body": "'Space Grotesk'"},
+        "design_signature": {"styleName": "neo-brutalist"},
+    })
+
+    assert mem["design"]["palette"] == original_palette, (
+        "Coder must NOT overwrite creative director's palette decision"
+    )
+
+
+# ---------- Repair preserves branding (Phase 7) ----------
+
+def test_repair_memory_brand_not_lost_after_update():
+    """Brand memory must persist across multiple update cycles (simulate repair)."""
+    mem = make_empty_memory()
+    scout_data = {"audience": "luxury car buyers", "summary": "BMW dealership website"}
+    mem = update_memory_brand(mem, scout_data, mode="website")
+
+    # Simulate repair: update product and pages without touching brand
+    stack_decision = {"stack": {"frontend": "HTML", "backend": "none"}, "preview_strategy": "iframe"}
+    mem = update_memory_product(mem, "website", stack_decision)
+    mem = update_memory_pages(mem, [
+        {"path": "index.html"}, {"path": "inventory.html"}
+    ])
+
+    # Brand must still be intact
+    assert mem["brand"]["audience"] == "luxury car buyers", (
+        f"Brand audience must survive repair cycle. Got: {mem['brand']}"
+    )
+    assert "BMW" in mem["brand"]["positioning"] or "luxury" in mem["brand"]["positioning"].lower()
