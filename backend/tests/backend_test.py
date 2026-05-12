@@ -3658,3 +3658,330 @@ def test_parse_checklist_line_strips_whitespace():
     body = "REQUESTED:  item one ,  item two  , item three\n"
     result = _parse_checklist_line(body, "REQUESTED")
     assert result == ["item one", "item two", "item three"]
+
+
+# ── Phase 8: Raised thresholds, design token check, multi-page enforcement ────
+
+def test_min_quality_score_is_80():
+    """MIN_QUALITY_SCORE must be 80 per problem statement spec."""
+    from agents.quality_validator import MIN_QUALITY_SCORE
+    assert MIN_QUALITY_SCORE == 80, f"Expected 80, got {MIN_QUALITY_SCORE}"
+
+
+def test_min_design_score_is_80():
+    """MIN_DESIGN_SCORE must be 80 per problem statement spec."""
+    from agents.quality_validator import MIN_DESIGN_SCORE
+    assert MIN_DESIGN_SCORE == 80, f"Expected 80, got {MIN_DESIGN_SCORE}"
+
+
+def test_css_no_custom_props_penalizes_design():
+    """CSS without var(--...) custom properties must reduce design score."""
+    from agents.quality_validator import score_project_quality
+    html = (
+        "<!DOCTYPE html><html><head><title>Test</title>"
+        '<link rel="stylesheet" href="https://fonts.bunny.net/css?family=inter">'
+        '</head><body>'
+        '<header><nav><a href="index.html">Home</a></nav></header>'
+        '<section class="hero"><h1>My Site</h1><p>Premium content.</p><a class="btn">Start</a></section>'
+        '<section id="features"><h2>Features</h2><p>Feature A</p></section>'
+        '<section id="about"><h2>About</h2><p>About us</p></section>'
+        '<section id="pricing"><h2>Pricing</h2><p>Plans</p></section>'
+        '<section id="contact"><h2>Contact</h2><p>Reach out</p></section>'
+        '<footer>Footer</footer></body></html>'
+    )
+    # CSS without var(-- custom props — uses plain font-family
+    css_no_vars = (
+        "body { font-family: sans-serif; font-size: 16px; background: #000; color: #fff; } "
+        "@media (max-width: 768px) { body { font-size: 15px; } } "
+        ".hero { background: linear-gradient(135deg, #111, #000); min-height: 80vh; } "
+        "section { padding: 48px; } "
+    ) * 4
+    files = [
+        {"path": "index.html", "content": html, "language": "html"},
+        {"path": "styles.css", "content": css_no_vars, "language": "css"},
+    ]
+    result = score_project_quality(files, "static-site", "landing-page", "Build a site")
+    css_vars_errors = [e for e in result["designErrors"] if "custom prop" in e.lower() or "var(--" in e.lower()]
+    assert css_vars_errors, (
+        f"CSS without custom properties should generate a design error. "
+        f"Got: {result['designErrors']}"
+    )
+
+
+def test_css_with_custom_props_no_penalty():
+    """CSS with var(--font-heading) custom properties must not trigger the CSS custom props error."""
+    from agents.quality_validator import score_project_quality
+    html = (
+        "<!DOCTYPE html><html><head><title>Test</title>"
+        '<link rel="stylesheet" href="https://fonts.bunny.net/css?family=inter">'
+        '</head><body>'
+        '<section class="hero"><h1>My Site</h1><p>Content</p><a class="btn">CTA</a></section>'
+        '<section id="features"><h2>Features</h2><p>Feature content here.</p></section>'
+        '<section id="about"><h2>About</h2><p>About us content.</p></section>'
+        '<section id="pricing"><h2>Pricing</h2><p>Pricing info.</p></section>'
+        '<section id="contact"><h2>Contact</h2><p>Contact us.</p></section>'
+        '<footer>Footer</footer></body></html>'
+    )
+    css_with_vars = (
+        ":root { --font-heading: 'Inter', sans-serif; --font-body: 'Inter', sans-serif; "
+        "--color-bg: #000; --color-primary: #fff; --color-text: #fff; --color-muted: #aaa; } "
+        "body { font-family: var(--font-body); font-size: 16px; background: var(--color-bg); "
+        "color: var(--color-text); } "
+        "h1, h2, h3 { font-family: var(--font-heading); } "
+        "@media (max-width: 768px) { body { font-size: 15px; } } "
+        ".hero { background: linear-gradient(135deg, #111, #000); min-height: 80vh; } "
+    ) * 3
+    files = [
+        {"path": "index.html", "content": html, "language": "html"},
+        {"path": "styles.css", "content": css_with_vars, "language": "css"},
+    ]
+    result = score_project_quality(files, "static-site", "landing-page", "Build a site")
+    css_vars_errors = [e for e in result["designErrors"] if "custom prop" in e.lower() or "var(--" in e.lower()]
+    assert not css_vars_errors, (
+        f"CSS with custom properties should not trigger the CSS vars design error. "
+        f"Got: {css_vars_errors}"
+    )
+
+
+def test_placeholder_page_penalized():
+    """Pages containing 'coming soon' or 'detail not found' must be penalized in quality and design."""
+    from agents.quality_validator import score_project_quality
+    html_index = (
+        "<!DOCTYPE html><html><head><link rel='stylesheet' href='styles.css'></head>"
+        "<body><section class='hero'><h1>BMW Dealership</h1><p>Premium cars.</p>"
+        "<a href='#' class='btn'>Browse inventory</a></section>"
+        "<section id='features'><h2>Features</h2><p>Quality cars.</p></section>"
+        "<section id='about'><h2>About</h2><p>About the dealership.</p></section>"
+        "<section id='inventory'><h2>Inventory</h2><p>See our cars.</p></section>"
+        "<section id='contact'><h2>Contact</h2><p>Call us.</p></section>"
+        "<footer>Footer</footer></body></html>"
+    )
+    html_detail = (
+        "<!DOCTYPE html><html><head><link rel='stylesheet' href='styles.css'></head>"
+        "<body><p>Detail not found</p></body></html>"
+    )
+    css = (
+        "body { background: #000; color: #fff; font-family: var(--font-body); } "
+        "@media (max-width: 768px) {} .hero { background: linear-gradient(#000,#111); } "
+    ) * 4
+    files = [
+        {"path": "index.html", "content": html_index, "language": "html"},
+        {"path": "vehicle-detail.html", "content": html_detail, "language": "html"},
+        {"path": "styles.css", "content": css, "language": "css"},
+    ]
+    result = score_project_quality(
+        files, "multi-page-site", "multi-page-website",
+        "Build a 6-page BMW dealership website"
+    )
+    placeholder_errors = [e for e in result["qualityErrors"] if "placeholder" in e.lower() or "not found" in e.lower() or "incomplete" in e.lower()]
+    assert placeholder_errors, (
+        f"Placeholder page must generate quality error. Got: {result['qualityErrors']}"
+    )
+
+
+def test_multipage_single_index_penalized_for_6_page_request():
+    """Prompt requesting 6 pages but only index.html must score far below MIN_QUALITY_SCORE."""
+    from agents.quality_validator import score_project_quality, MIN_QUALITY_SCORE
+    html = (
+        "<!DOCTYPE html><html><head><link rel='stylesheet' href='styles.css'></head>"
+        "<body><section class='hero'><h1>BMW Dealer</h1><p>Premium vehicles.</p>"
+        "<a class='btn' href='#'>Browse</a></section>"
+        "<section id='features'><h2>Features</h2><p>Quality BMW vehicles.</p></section>"
+        "<section id='about'><h2>About</h2><p>About us.</p></section>"
+        "<section id='inventory'><h2>Inventory</h2><p>Our cars.</p></section>"
+        "<section id='contact'><h2>Contact</h2><p>Contact us.</p></section>"
+        "<footer>Footer</footer></body></html>"
+    )
+    css = (
+        "body { background: #000; color: #fff; font-family: var(--font-body); } "
+        "@media (max-width: 768px) {} .hero { background: linear-gradient(#000, #111); } "
+    ) * 5
+    # Only index.html — no other pages at all
+    files = [
+        {"path": "index.html", "content": html, "language": "html"},
+        {"path": "styles.css", "content": css, "language": "css"},
+    ]
+    result = score_project_quality(
+        files, "multi-page-site", "multi-page-website",
+        "Build a complete 6-page BMW dealership website with inventory, about, finance, and contact pages"
+    )
+    assert result["qualityScore"] < MIN_QUALITY_SCORE, (
+        f"Single index.html for 6-page request must score below {MIN_QUALITY_SCORE}. "
+        f"Got: {result['qualityScore']}. Errors: {result['qualityErrors']}"
+    )
+    # Must have a specific error about missing pages
+    page_errors = [e for e in result["qualityErrors"] if "page" in e.lower()]
+    assert page_errors, f"Must report page count errors. Got: {result['qualityErrors']}"
+
+
+def test_extract_requested_page_count_numeric():
+    """extract_requested_page_count must extract numeric counts from common phrases."""
+    from agents.quality_validator import extract_requested_page_count
+    assert extract_requested_page_count("Build a 6-page website") == 6
+    assert extract_requested_page_count("5 page website for my business") == 5
+    assert extract_requested_page_count("complete 10-page SaaS") == 10
+    assert extract_requested_page_count("build a 3 page portfolio") == 3
+
+
+def test_extract_requested_page_count_word():
+    """extract_requested_page_count must handle word-form page counts."""
+    from agents.quality_validator import extract_requested_page_count
+    assert extract_requested_page_count("six page website") == 6
+    assert extract_requested_page_count("five page BMW dealership") == 5
+    assert extract_requested_page_count("build a three page site") == 3
+
+
+def test_extract_requested_page_count_none():
+    """extract_requested_page_count must return 0 when no page count found."""
+    from agents.quality_validator import extract_requested_page_count
+    assert extract_requested_page_count("Build a landing page") == 0
+    assert extract_requested_page_count("Create a SaaS application") == 0
+
+
+def test_multipage_required_files_automotive_bmw():
+    """BMW dealership prompt must require automotive-specific page files."""
+    from agents.build_contract import get_required_files
+    required = get_required_files(
+        "multi-page-site", "multi-page-website",
+        "Build a complete 6-page website for a used BMW dealership with inventory and finance"
+    )
+    assert "inventory.html" in required, f"inventory.html required for automotive. Got: {required}"
+    assert "vehicle-detail.html" in required, f"vehicle-detail.html required. Got: {required}"
+    assert "about.html" in required, f"about.html required. Got: {required}"
+    assert "finance.html" in required, f"finance.html required. Got: {required}"
+    assert "contact.html" in required, f"contact.html required. Got: {required}"
+
+
+def test_design_engine_automotive_returns_industry_media_brief():
+    """BMW/automotive prompt must produce a design direction with a car-specific media brief."""
+    from agents.design_engine import create_design_direction
+    direction = create_design_direction(
+        prompt="Build a complete website for a used BMW dealership",
+        project_type="multi-page-site",
+        audience="Car buyers",
+        tier="balanced",
+    )
+    brief = direction.get("industry_media_brief", "")
+    assert brief, "industry_media_brief must be non-empty for automotive prompts"
+    # Must mention automotive/car content
+    assert any(kw in brief.lower() for kw in ["bmw", "vehicle", "car", "automotive"]), (
+        f"Automotive media brief should mention BMW/vehicles. Got: {brief}"
+    )
+
+
+def test_design_engine_fashion_returns_industry_media_brief():
+    """Fashion/lingerie prompt must produce a design direction with a fashion media brief."""
+    from agents.design_engine import create_design_direction
+    direction = create_design_direction(
+        prompt="Build a premium landing page for a South African lingerie brand",
+        project_type="static-site",
+        audience="Fashion-conscious women 25-45",
+        tier="balanced",
+    )
+    brief = direction.get("industry_media_brief", "")
+    assert brief, "industry_media_brief must be non-empty for fashion prompts"
+    # Must mention fashion/editorial content
+    assert any(kw in brief.lower() for kw in ["fashion", "editorial", "fabric", "product"]), (
+        f"Fashion media brief should mention fashion imagery. Got: {brief}"
+    )
+
+
+def test_coder_prompt_contains_multipage_contract():
+    """CODER_PROMPT must contain the multi-page website contract section."""
+    from agents.prompts import CODER_PROMPT
+    assert "MULTI-PAGE WEBSITE CONTRACT" in CODER_PROMPT, "CODER_PROMPT missing multi-page contract"
+    assert "Generate EVERY requested page" in CODER_PROMPT, "Multi-page contract missing mandatory generation rule"
+    assert "coming soon" in CODER_PROMPT, "Multi-page contract must forbid 'coming soon' pages"
+
+
+def test_coder_prompt_contains_css_custom_props_requirement():
+    """CODER_PROMPT must require CSS custom properties declaration."""
+    from agents.prompts import CODER_PROMPT
+    assert "--font-heading" in CODER_PROMPT, "CODER_PROMPT must require --font-heading CSS var"
+    assert "--font-body" in CODER_PROMPT, "CODER_PROMPT must require --font-body CSS var"
+    assert "var(--font-heading)" in CODER_PROMPT, "CODER_PROMPT must require var(--font-heading) usage"
+
+
+def test_iteration_prompt_contains_css_verification():
+    """ITERATION_PROMPT must include CSS change verification rules."""
+    from agents.prompts import ITERATION_PROMPT
+    assert "CSS CHANGE VERIFICATION" in ITERATION_PROMPT, "ITERATION_PROMPT missing CSS verification section"
+    assert "SATISFIED" in ITERATION_PROMPT, "ITERATION_PROMPT must reference SATISFIED checklist"
+    assert "UNSATISFIED" in ITERATION_PROMPT, "ITERATION_PROMPT must reference UNSATISFIED checklist"
+    assert "black background" in ITERATION_PROMPT.lower(), (
+        "ITERATION_PROMPT must give concrete black background example"
+    )
+
+
+def test_reviewer_prompt_contains_design_token_check():
+    """REVIEWER_PROMPT must check for CSS design token usage."""
+    from agents.prompts import REVIEWER_PROMPT
+    assert "design token" in REVIEWER_PROMPT.lower() or "--font-heading" in REVIEWER_PROMPT, (
+        "REVIEWER_PROMPT must check for design token / CSS custom properties"
+    )
+
+
+def test_multipage_with_all_pages_passes_quality():
+    """Multi-page site with all 6 BMW pages must NOT be penalized for missing pages."""
+    from agents.quality_validator import score_project_quality
+    def _page(title, page_id):
+        return (
+            f"<!DOCTYPE html><html><head><title>{title}</title>"
+            '<link rel="stylesheet" href="https://fonts.bunny.net/css?family=inter">'
+            "<link rel='stylesheet' href='styles.css'></head>"
+            "<body>"
+            f"<header><nav>"
+            f"<a href='index.html'>Home</a><a href='inventory.html'>Inventory</a>"
+            f"<a href='vehicle-detail.html'>Details</a><a href='about.html'>About</a>"
+            f"<a href='finance.html'>Finance</a><a href='contact.html'>Contact</a>"
+            f"</nav></header>"
+            f"<main><section class='hero'><h1>{title}</h1>"
+            f"<p>Premium BMW dealership content for the {title} page. Quality vehicles and service.</p>"
+            f"<a class='btn' href='#'>Get started</a></section>"
+            f"<section id='content-{page_id}'><h2>Section</h2><p>Detailed content about {title} "
+            "at our BMW dealership. We offer premium vehicles, financing options, and excellent "
+            "customer service. Visit us today for the best deal.</p></section>"
+            "<section id='cta'><h2>Contact</h2><p>Call us now.</p></section>"
+            "</main><footer>BMW Dealership &copy; 2024</footer></body></html>"
+        )
+
+    css = (
+        ":root { --font-heading: 'Inter', sans-serif; --font-body: 'Inter', sans-serif; "
+        "--color-bg: #0a0a0a; --color-primary: #c8a84b; --color-text: #fff; } "
+        "body { font-family: var(--font-body); background: var(--color-bg); color: var(--color-text); "
+        "margin: 0; font-size: 16px; } "
+        "h1, h2 { font-family: var(--font-heading); } "
+        ".hero { min-height: 80vh; background: linear-gradient(135deg, #111, #000); "
+        "display: flex; align-items: center; padding: 48px; } "
+        ".btn { display: inline-block; background: var(--color-primary); color: #000; "
+        "padding: 12px 24px; text-decoration: none; font-weight: 700; } "
+        "section { padding: 48px; border-bottom: 1px solid #222; } "
+        "nav { display: flex; gap: 16px; padding: 16px; } "
+        "nav a { color: #ccc; text-decoration: none; } "
+        "footer { padding: 24px; border-top: 1px solid #222; color: #aaa; } "
+        "@media (max-width: 768px) { .hero { flex-direction: column; } "
+        "nav { flex-wrap: wrap; } h1 { font-size: 2rem; } } "
+    ) * 2
+
+    files = [
+        {"path": "index.html", "content": _page("BMW Dealership", "home"), "language": "html"},
+        {"path": "inventory.html", "content": _page("Inventory", "inventory"), "language": "html"},
+        {"path": "vehicle-detail.html", "content": _page("Vehicle Detail", "detail"), "language": "html"},
+        {"path": "about.html", "content": _page("About Us", "about"), "language": "html"},
+        {"path": "finance.html", "content": _page("Finance", "finance"), "language": "html"},
+        {"path": "contact.html", "content": _page("Contact", "contact"), "language": "html"},
+        {"path": "styles.css", "content": css, "language": "css"},
+    ]
+    result = score_project_quality(
+        files, "multi-page-site", "multi-page-website",
+        "Build a complete 6-page website for a used BMW dealership"
+    )
+    # With all 6 pages, should not get penalized for missing pages
+    page_missing_errors = [
+        e for e in result["qualityErrors"]
+        if "6 pages" in e or "missing" in e.lower() and "html" in e.lower()
+    ]
+    assert not page_missing_errors, (
+        f"All 6 pages present — should not get page-count error. "
+        f"Got: {page_missing_errors}\nAll errors: {result['qualityErrors']}"
+    )

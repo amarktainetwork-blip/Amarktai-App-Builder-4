@@ -217,3 +217,46 @@ test("project list does not import unused Video icon", () => {
   // Video is not used anywhere in ProjectList — should not be imported
   expect(content).not.toMatch(/\bVideo\b/);
 });
+
+// ── Polling fallback & files_refreshed ───────────────────────────────────────
+
+test("workspace has polling fallback while build running", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  // Must have polling timer ref
+  expect(content).toMatch(/pollTimerRef/);
+  // Must use setInterval for polling
+  expect(content).toMatch(/setInterval/);
+  // Must clear the poll timer on cleanup
+  expect(content).toMatch(/clearInterval/);
+  // Must poll every 5 seconds
+  expect(content).toMatch(/5000/);
+});
+
+test("workspace handles files_refreshed event to refetch files", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  // Must handle the files_refreshed event type
+  expect(content).toMatch(/files_refreshed/);
+});
+
+test("workspace refreshes files and project on iteration_complete", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  // iteration_complete must trigger file and project refresh
+  const iterCompleteSection = content.slice(
+    content.indexOf("iteration_complete"),
+    content.indexOf("iteration_complete") + 600
+  );
+  expect(iterCompleteSection).toMatch(/Projects\.files/);
+  expect(iterCompleteSection).toMatch(/Projects\.get/);
+});

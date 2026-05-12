@@ -122,6 +122,19 @@ DESIGN DIRECTION (MANDATORY — apply to all generated files):
 - Do NOT produce generic purple/teal AI gradients or plain white Tailwind defaults.
 - Every generated site must feel custom and distinctive — not like every other AI-generated page.
 - Apply the design_direction's coder_instructions exactly.
+- MUST declare CSS custom properties at the top of styles.css:
+  :root {
+    --font-heading: <heading font from design_direction>;
+    --font-body: <body font from design_direction>;
+    --color-bg: <background from design_direction.palette>;
+    --color-primary: <primary/accent from design_direction.palette>;
+    --color-text: <text_primary from design_direction.palette>;
+    --color-muted: <text_secondary from design_direction.palette>;
+  }
+  Then USE these vars: font-family: var(--font-heading) for headings, var(--font-body) for body, etc.
+- Load the web font using the design_direction's font_import.link_href inside every HTML <head>.
+- If industry_media_brief is provided in design_direction, use those image subjects and styles.
+  For example: "BMW vehicles, luxury cars" → only use BMW/car imagery or quality CSS fallback.
 
 QUALITY REQUIREMENTS FOR LANDING PAGES AND WEBSITES (MANDATORY):
 Landing pages (landing_page / website / media_page mode) MUST:
@@ -134,11 +147,33 @@ Landing pages (landing_page / website / media_page mode) MUST:
 7. Have working navigation links to page sections or other pages.
 8. NOT contain generic template copy like "Your Product", "Lorem ipsum", or {{placeholders}}.
 
+MULTI-PAGE WEBSITE CONTRACT (MANDATORY when mode="website" or prompt specifies N pages):
+If the user requests a multi-page website or specifies a page count (e.g. "6-page site", "complete 6-page website"):
+1. Generate EVERY requested page as a separate .html file with FULL, REAL, unique content.
+2. Each page must have its own unique sections, headings, and at least 200 words of real written content.
+3. Every page MUST include a shared <nav> linking ALL pages (same nav on every page).
+4. The active page in the nav must have aria-current="page" and a visual active style.
+5. Never generate a page with "coming soon", "under construction", "page not found", or placeholder text.
+6. Every page must link styles.css in <head>: <link rel="stylesheet" href="styles.css">
+7. Required page sets by domain — generate ALL of these:
+   - BMW/car/automotive dealership (6 pages): index.html, inventory.html, vehicle-detail.html, about.html, finance.html, contact.html
+   - General business (5 pages): index.html, about.html, services.html, pricing.html, contact.html
+   - Restaurant (5 pages): index.html, menu.html, reservations.html, about.html, contact.html
+   - Portfolio (4 pages): index.html, portfolio.html, about.html, contact.html
+   - If prompt specifies N pages explicitly, generate exactly N .html files.
+8. Missing pages = BUILD FAILURE. Generate all N pages or the build is incomplete.
+
 Image rules for landing_page/website/media_page:
-- Use reliable public remote images (e.g. https://images.unsplash.com/...) OR CSS gradients/SVG placeholders.
-- If Pixabay images are provided in the shared_context media_manifest, use those URLs.
+- PREFERRED: Use CSS gradients, SVG patterns, and visual sections — these always render correctly.
+- If Pixabay images are provided in shared_context.media_manifest, use those exact URLs.
+- If using remote images (Unsplash, etc.), use subject-specific query terms that match the actual content:
+  * BMW/automotive: use car/luxury-car specific image queries or CSS cinematic dark gradients instead
+  * Fashion/lingerie: use fashion product or abstract gradient alternatives
+  * Nature/eco: use landscape or nature abstracts
+- Never use random generic Unsplash URLs that don't match the subject.
 - Never use broken local image paths. No placeholder.com, no lorempixel.
-- Prefer CSS gradients and SVG patterns when image URLs are uncertain.
+- Set object-fit: cover and aspect-ratio on every image container.
+- If subject-specific images cannot be verified, use CSS gradient or SVG fallback and note it.
 
 SECURE AUTH SCAFFOLDING (MANDATORY when auth_required=true):
 When auth is required (full_stack / dashboard / admin_panel with auth_required=true):
@@ -187,6 +222,12 @@ You receive the generated files (and the build mode). Audit them for:
 - security issues (hardcoded secrets, etc.)
 - for trading_bot_scaffold: verify paper mode default, risk controls, kill switch, safety README section
 - visual coherence and obvious bugs
+- design token usage: styles.css must declare CSS custom properties (--font-heading, --font-body, --color-bg)
+  and use them via var(). If missing, flag and patch.
+- multi-page check: if the build mode is "website" or multiple .html files are expected,
+  verify ALL pages link styles.css and share the same nav. Patch any missing links.
+- placeholder page check: if any page contains "coming soon", "under construction", "detail not found",
+  or "page not found" text, flag it as a critical issue.
 
 If you find issues, return patched file contents.
 
@@ -223,13 +264,33 @@ Format (repeat one block per changed file, then a checklist block, then a summar
 
 ===AMARKTAI_CHECKLIST===
 REQUESTED: <comma-separated list of what the user asked for, extracted verbatim or paraphrased>
-SATISFIED: <comma-separated list of changes you actually completed in this iteration>
+SATISFIED: <comma-separated list of changes you actually completed and can PROVE exist in the returned files>
 UNSATISFIED: <comma-separated list of requested changes you could NOT complete, or "none">
 ===END_AMARKTAI_CHECKLIST===
 
 ===AMARKTAI_SUMMARY===
 1-2 line description of what you changed.
 ===END_AMARKTAI_SUMMARY===
+
+CSS CHANGE VERIFICATION (MANDATORY):
+When the user requests a CSS/visual change, you MUST prove it is satisfied in the returned CSS:
+- "black background" → styles.css must contain `background: #000` or `background-color: #000` or `background: black`
+- "white font" or "white text" → styles.css must contain `color: #fff` or `color: white`
+- "blue buttons" → styles.css must contain a button/btn selector with `background: #...blue-value...`
+- "bold headings" → styles.css must contain a heading selector with `font-weight: 700` or higher
+- "dark theme" → styles.css must have a dark background color (<#333) applied to body
+- If you request a change to ALL pages of a multi-page site, ALL .html files must be returned.
+
+MULTI-PAGE ITERATION (MANDATORY when site has multiple HTML pages):
+- If user requests a change that affects all pages (e.g. "black background", "new nav item"), update ALL .html pages.
+- If user asks to "complete" or "add" a page, generate the FULL page content (not a placeholder).
+- Never return a page with "coming soon", "under construction", or "page not found" content.
+
+HONEST REPORTING:
+- Only list changes in SATISFIED if they are verifiably present in the files you returned.
+- If a change requires AI image generation or external assets unavailable to you, list it in UNSATISFIED with an explanation.
+- If pages exist but content is not fully implemented, list "incomplete content on [page]" in UNSATISFIED.
+- Do NOT claim SATISFIED if the CSS change is not explicitly present in the returned CSS file.
 
 Rules:
 - Start each file block with ===AMARKTAI_FILE[exact/path.ext]=== on its own line.
@@ -240,7 +301,6 @@ Rules:
 - After ALL file blocks, write one ===AMARKTAI_CHECKLIST=== block listing REQUESTED, SATISFIED, and UNSATISFIED changes.
 - After the checklist block, write one ===AMARKTAI_SUMMARY=== block.
 - Output ONLY the file blocks, the checklist block, and the summary block — no JSON, no other text.
-- Be honest: if a requested change could not be applied (e.g. requires AI media unavailable, specific assets missing), list it in UNSATISFIED.
 """
 
 # ── Amarktai Assistant / Wingman ──────────────────────────────────────────────

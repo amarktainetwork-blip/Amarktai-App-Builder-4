@@ -1320,6 +1320,12 @@ class Orchestrator:
                 else:
                     added.append(f["path"])
 
+            # Emit batch refresh event so the frontend can refetch all files once
+            await self.emit({"type": "files_refreshed", "data": {
+                "changedFiles": changed,
+                "addedFiles": added,
+            }})
+
             project = await self._load_project()
             await self._ensure_contract_files(project.get("prompt", ""), None)
             validation_state = await self._validate_contract(project.get("prompt", ""), None, 0, [])

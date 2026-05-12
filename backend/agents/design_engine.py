@@ -399,13 +399,90 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
     },
 ]
 
+# ── Industry-specific media briefs ────────────────────────────────────────────
+
+# Maps industry keyword → (style_name, media_brief)
+# media_brief describes what image subjects to use and fallback strategy
+_INDUSTRY_MEDIA_BRIEFS: list[tuple[list[str], str, str]] = [
+    (
+        ["bmw", "mercedes", "audi", "lexus", "porsche", "automotive", "dealership",
+         "car dealer", "used car", "luxury car", "vehicle", "automobile"],
+        "premium-monochrome",
+        "BMW vehicles, luxury cars, automotive photography, showroom shots, cinematic wide shots "
+        "of vehicles. Dark dramatic lighting. Use CSS gradient fallbacks (black/charcoal backgrounds "
+        "with white text) if specific car images unavailable. Never use non-automotive images.",
+    ),
+    (
+        ["lingerie", "underwear", "intimate", "bra", "nightwear", "sleepwear"],
+        "editorial-luxury",
+        "Tasteful fashion editorial photography, abstract fabric textures, soft neutral backgrounds, "
+        "studio product shots. Use subtle CSS gradient and texture fallbacks. "
+        "Keep imagery safe, professional, and brand-appropriate.",
+    ),
+    (
+        ["fashion", "clothing", "boutique", "apparel", "dress", "style", "couture"],
+        "editorial-luxury",
+        "Fashion editorial photography, model shots, product flatlay, studio imagery. "
+        "Clean white/neutral backgrounds. Use CSS fade gradients as fallback.",
+    ),
+    (
+        ["restaurant", "cafe", "food", "cuisine", "dining", "menu", "chef", "bakery"],
+        "immersive-gradient-studio",
+        "Food photography, restaurant ambiance, dish close-ups, kitchen shots. "
+        "Warm color tones. Use CSS warm gradient fallbacks (amber/gold tones) if images unavailable.",
+    ),
+    (
+        ["hotel", "resort", "hospitality", "spa", "retreat", "accommodation"],
+        "luxury-black-gold",
+        "Luxury hotel rooms, resort landscapes, spa environments, architectural photography. "
+        "Use CSS dark/gold gradient fallbacks for premium feel.",
+    ),
+    (
+        ["gym", "fitness", "sport", "workout", "training", "health", "wellness"],
+        "industrial-command",
+        "Fitness/gym photography, athletes in action, sports equipment. "
+        "High-energy, high-contrast imagery. Use dark CSS gradient fallbacks.",
+    ),
+    (
+        ["real estate", "property", "homes", "apartment", "architect", "interior"],
+        "premium-startup-minimal",
+        "Real estate photography, interior shots, architectural exteriors, modern living spaces. "
+        "Clean, bright imagery. Use neutral CSS gradient fallbacks.",
+    ),
+    (
+        ["tech", "software", "saas", "startup", "product", "app launch"],
+        "premium-startup-minimal",
+        "Product UI screenshots, dashboard mockups, device frames, abstract tech illustrations. "
+        "Clean isometric graphics or CSS gradient backgrounds with UI card overlays.",
+    ),
+    (
+        ["nature", "eco", "organic", "plant", "garden", "farm", "green", "sustainable"],
+        "organic-nature",
+        "Nature photography, green landscapes, organic product shots, plant close-ups. "
+        "Use earth-tone CSS gradient fallbacks (green/sage tones).",
+    ),
+    (
+        ["finance", "fintech", "bank", "payment", "trading", "crypto", "invest"],
+        "fintech-dashboard",
+        "Abstract data visualizations, blue circuit patterns, financial dashboards. "
+        "Use CSS blue/dark gradient fallbacks with grid overlays.",
+    ),
+]
+
 # ── Audience/context matchers ─────────────────────────────────────────────────
 
 _STYLE_HINTS: list[tuple[list[str], str]] = [
+    (["bmw", "mercedes", "audi", "lexus", "porsche", "automotive", "dealership",
+      "car dealer", "used car", "luxury car", "automobile"], "premium-monochrome"),
+    (["lingerie", "underwear", "intimate", "bra", "nightwear", "sleepwear"], "editorial-luxury"),
+    (["fashion", "clothing", "boutique", "apparel", "dress", "couture"], "editorial-luxury"),
     (["finance", "fintech", "bank", "payment", "trading", "crypto", "invest"], "fintech-dashboard"),
-    (["luxury", "premium", "high-end", "exclusive", "couture", "jewel"], "luxury-black-gold"),
+    (["luxury", "premium", "high-end", "exclusive", "jewel", "gold"], "luxury-black-gold"),
     (["nature", "eco", "organic", "plant", "garden", "farm", "green", "sustainable"], "organic-nature"),
-    (["horse", "equestrian", "stable", "farm"], "organic-nature"),
+    (["horse", "equestrian", "stable"], "organic-nature"),
+    (["restaurant", "cafe", "food", "cuisine", "dining", "menu", "chef", "bakery"], "immersive-gradient-studio"),
+    (["hotel", "resort", "hospitality", "spa", "retreat"], "luxury-black-gold"),
+    (["gym", "fitness", "sport", "workout", "training"], "industrial-command"),
     (["saas", "startup", "product", "app launch", "launch"], "premium-startup-minimal"),
     (["dashboard", "admin", "analytics", "data", "reporting", "metrics"], "fintech-dashboard"),
     (["api", "backend", "developer", "technical", "engineering", "code"], "blueprint-lab"),
@@ -511,13 +588,24 @@ def create_design_direction(
         dict with: name, label, palette, typography, spacing, layout_rhythm,
         visual_motifs, media_direction, motion, mobile, tailwind_config,
         coder_instructions (a human-readable directive for the Coder agent),
-        design_signature (compact signature for diversity tracking).
+        design_signature (compact signature for diversity tracking),
+        industry_media_brief (subject-specific image guidance for Coder).
     """
     style_name = _select_style_name(prompt, project_type, audience, tier, recent_signatures)
     style = next(
         (s for s in _DESIGN_STYLES if s["name"] == style_name),
         _DESIGN_STYLES[0],
     )
+
+    # Determine industry-specific media brief from prompt
+    combined_lower = f"{prompt} {audience}".lower()
+    industry_media_brief: str = ""
+    for keywords, _, brief in _INDUSTRY_MEDIA_BRIEFS:
+        if any(kw in combined_lower for kw in keywords):
+            industry_media_brief = brief
+            break
+    if not industry_media_brief:
+        industry_media_brief = style.get("media_direction", "")
 
     coder_instructions = (
         f"Apply the '{style['label']}' design style consistently across all files. "
@@ -528,12 +616,19 @@ def create_design_direction(
         f"body font = {style['typography']['body']}. "
         f"IMPORTANT — Load the web fonts using this <link> tag in every HTML <head>: "
         f'<link rel="stylesheet" href="{style["font_import"]["link_href"]}">. '
-        f"Set CSS custom properties: {style['font_import']['css_vars']}. "
+        f"Declare CSS custom properties in styles.css :root {{ "
+        f"--font-heading: {style['typography']['heading']}; "
+        f"--font-body: {style['typography']['body']}; "
+        f"--color-bg: {style['palette']['background']}; "
+        f"--color-primary: {style['palette']['accent']}; "
+        f"--color-text: {style['palette']['text_primary']}; "
+        f"--color-muted: {style['palette']['text_secondary']}; "
+        f"}} "
         f"Use font-family: var(--font-heading) for all headings and var(--font-body) for body text. "
         f"Body font-size must be at least 16px; heading font-size at least 2rem. "
         f"Visual motifs: {style['visual_motifs']}. "
         f"Layout rhythm: {style['layout_rhythm']}. "
-        f"Media direction: {style['media_direction']}. "
+        f"Media/image direction: {industry_media_brief}. "
         f"Motion: {style['motion']}. "
         f"Mobile: {style['mobile']}. "
         f"Do NOT use generic purple/teal AI gradients or plain white Tailwind defaults. "
@@ -548,6 +643,7 @@ def create_design_direction(
         "tier": tier,
         "project_type": project_type,
         "design_signature": signature,
+        "industry_media_brief": industry_media_brief,
     }
 
 
