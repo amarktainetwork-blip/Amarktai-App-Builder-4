@@ -89,6 +89,11 @@ def make_empty_memory() -> dict:
         # Preserved design tokens — source of truth across iterations
         "designTokens": {},
         "fontPair": {},
+        # Phase 1B: task history (accepted = keep, rejected = never do again)
+        "acceptedTasks": [],
+        "rejectedTasks": [],
+        # Phase 1B: named design archetype (e.g. 'editorial-luxury')
+        "designArchetype": "",
     }
 
 

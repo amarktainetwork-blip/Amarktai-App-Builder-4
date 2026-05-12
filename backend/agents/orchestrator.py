@@ -55,6 +55,7 @@ from .project_memory import (
     get_design_lock_prompt,
 )
 from .design_dna import build_diversity_context, record_design_choice
+from .creative_director import run_creative_director
 
 # Per-agent timeout in seconds
 AGENT_TIMEOUTS = {
@@ -892,12 +893,31 @@ class Orchestrator:
             tier=project_for_design.get("quality_tier", "balanced"),
             recent_signatures=recent_signatures if recent_signatures else None,
         )
+
+        # Phase 1D: Run Creative Director to produce full design blueprint
+        creative_blueprint = run_creative_director(
+            prompt=user_prompt,
+            mode=mode,
+            audience=scout_data.get("audience", ""),
+            industry=scout_data.get("industry", ""),
+            tier=project_for_design.get("quality_tier", "balanced"),
+            design_direction=design_direction,
+            previous_signatures=recent_signatures if recent_signatures else [],
+        )
+        blueprint_dict = creative_blueprint.to_dict()
+        blueprint_prompt_block = creative_blueprint.to_prompt_block()
+
+        # Persist design archetype into project memory
+        from app.core.project_memory import set_design_archetype
+        memory = set_design_archetype(memory, creative_blueprint.style_name)
+
         # Persist design direction into project memory (Phase 1 & 4)
         memory = update_memory_design(memory, design_direction)
         memory = record_design_choice(memory, design_direction)
         memory = update_memory_agent_decision(memory, "creative_director", "design_selected", {
             "style": design_direction.get("name", ""),
             "layout": design_direction.get("layout_rhythm", ""),
+            "blueprint": blueprint_dict,
         })
 
         sig = design_direction.get("design_signature", {})
@@ -906,10 +926,12 @@ class Orchestrator:
             {"id": self.project_id},
             {"$set": {
                 "design_direction": design_direction,
+                "creative_blueprint": blueprint_dict,
                 "updated_at": _now(),
                 "project_memory.designSignatures": updated_signatures,
                 "project_memory.designTokens": design_direction.get("palette", {}),
                 "project_memory.fontPair": design_direction.get("typography", {}),
+                "project_memory.designArchetype": creative_blueprint.style_name,
             }},
         )
         await self.emit({"type": "design_direction", "data": {
@@ -926,6 +948,9 @@ class Orchestrator:
             "safety_notes": sd.get("safety_notes", []),
             "media_strategy": shared_ctx.get("media_strategy", {}),
             "design_direction": design_direction,
+            # Phase 1D: Creative Director blueprint — MANDATORY for all builds
+            "creative_blueprint": blueprint_dict,
+            "creative_blueprint_prompt": blueprint_prompt_block,
             "shared_context": {**shared_ctx, "design_direction": design_direction},
         }, indent=2)
         coder = await self._run_agent_blocks("coder", CODER_PROMPT, coder_input)
