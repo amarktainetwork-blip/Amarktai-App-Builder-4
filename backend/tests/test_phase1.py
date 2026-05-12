@@ -387,8 +387,19 @@ class TestBuildModeClassifier:
         assert result.confidence == 1.0
 
     def test_all_modes_in_supported_modes(self):
-        for mode in SUPPORTED_MODES:
-            assert mode in SUPPORTED_MODES
+        """All modes returned by the classifier must be valid supported modes."""
+        test_prompts = [
+            "Build a landing page for my product",
+            "Create an online store",
+            "Build a REST API service",
+            "Make a portfolio site",
+        ]
+        for prompt in test_prompts:
+            result = classify_build_mode(prompt)
+            assert result.mode in SUPPORTED_MODES, (
+                f"Classifier returned '{result.mode}' for prompt '{prompt}', "
+                f"which is not in SUPPORTED_MODES"
+            )
 
     def test_result_is_serialisable(self):
         import json
