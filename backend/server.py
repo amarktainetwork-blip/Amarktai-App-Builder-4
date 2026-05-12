@@ -58,6 +58,13 @@ from app.runtime.preview_service import PreviewService
 from app.core.capability_registry import (
     get_registry, capabilities_summary, probe_live_status, models_with_capability,
 )
+from agents.agent_registry import (
+    get_all_agents,
+    get_agent_status_summary,
+    get_agent_routing,
+    needs_motion_agent,
+    MOTION_TRIGGER_KEYWORDS,
+)
 from auth import (
     decode_token,
     hash_password,
@@ -2529,7 +2536,11 @@ async def media_save_generated(body: SaveGeneratedBody, claims: dict = Depends(r
 
 @secured.post("/logo")
 async def generate_logo(body: dict, claims: dict = Depends(require_user)) -> dict:
-    """Run the Logo Agent to generate or retrieve a logo."""
+    """Run the Logo Agent to generate or retrieve a logo.
+
+    Phase 3: If project_id is provided, the logo result is stored in project memory
+    for automatic reuse across iterations.
+    """
     async def _lookup_asset(asset_id: str) -> dict | None:
         user_id = claims["sub"]
         return await db.media_assets.find_one(
@@ -2537,6 +2548,22 @@ async def generate_logo(body: dict, claims: dict = Depends(require_user)) -> dic
         )
 
     result = await run_logo_agent(body, media_library_fn=_lookup_asset)
+
+    # Phase 3: Store logo in project memory for iteration reuse
+    project_id = body.get("project_id")
+    if project_id:
+        try:
+            from agents.project_memory import load_memory, save_memory, update_memory_logo
+            memory = await load_memory(db, project_id)
+            memory = update_memory_logo(memory, {**result, "businessName": body.get("businessName", "")})
+            await save_memory(db, project_id, memory)
+            await db.projects.update_one(
+                {"id": project_id},
+                {"$set": {"logo_result": result, "updated_at": _now()}},
+            )
+        except Exception as mem_err:
+            logger.warning("Failed to persist logo to project memory: %s", mem_err)
+
     return result
 
 
@@ -3123,6 +3150,123 @@ async def runtime_health() -> dict:
         "running_projects": running_count,
         "queued_projects": queued_count,
         "checked_at": _now(),
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 3 — AGENT REGISTRY ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+@api.get("/agents")
+async def list_agents() -> dict:
+    """Return the complete agent registry with roles, tools, and status."""
+    agents = get_all_agents()
+    return {
+        "agents": agents,
+        "total": len(agents),
+        "retrieved_at": _now(),
+    }
+
+
+@api.get("/agents/status")
+async def agents_status() -> dict:
+    """Return a summary of agent status: active, deterministic, partial, planned."""
+    summary = get_agent_status_summary()
+    cap_summary = capabilities_summary()
+    return {
+        **summary,
+        "capabilities": cap_summary,
+        "checked_at": _now(),
+    }
+
+
+@api.get("/orchestration/health")
+async def orchestration_health() -> dict:
+    """Report orchestration health — agents, capabilities, and readiness."""
+    agent_summary = get_agent_status_summary()
+    cap_summary = capabilities_summary()
+
+    # Check required agents
+    required_agents = [
+        "manager", "product_strategist", "creative_director", "ux_architect",
+        "ui_designer", "frontend_coder", "backend_coder", "repo_engineer",
+        "media_director", "logo_agent", "motion_3d", "qa_agent",
+        "visual_qa", "accessibility", "seo_performance", "security",
+        "deployment", "worker",
+    ]
+    agents_registry = get_all_agents()
+    present = [a for a in required_agents if a in agents_registry]
+    missing = [a for a in required_agents if a not in agents_registry]
+
+    # Capability gates
+    image_gen_available = cap_summary.get("image_generation", {}).get("available", False)
+    video_gen_available = cap_summary.get("video_generation", {}).get("available", False)
+    voice_gen_available = cap_summary.get("voice_generation", {}).get("available", False)
+    github_available = cap_summary.get("github_integration", {}).get("available", False)
+    preview_available = cap_summary.get("preview_generation", {}).get("available", False)
+
+    healthy = (
+        len(missing) == 0
+        and agent_summary.get("all_required_present", False)
+        and agent_summary.get("active", 0) >= 7
+    )
+
+    return {
+        "status": "healthy" if healthy else "degraded",
+        "required_agents": len(required_agents),
+        "agents_present": len(present),
+        "agents_missing": missing,
+        "agent_summary": agent_summary,
+        "capability_gates": {
+            "image_generation": image_gen_available,
+            "video_generation": video_gen_available,
+            "voice_generation": voice_gen_available,
+            "github_integration": github_available,
+            "preview_generation": preview_available,
+        },
+        "premium_output_enforced": True,
+        "cheap_mode_still_premium": True,
+        "motion_trigger_keywords": sorted(MOTION_TRIGGER_KEYWORDS),
+        "checked_at": _now(),
+    }
+
+
+@secured.post("/projects/{project_id}/detect-build-mode")
+async def detect_build_mode_for_prompt(
+    project_id: str,
+    body: dict,
+    claims: dict = Depends(require_user),
+) -> dict:
+    """Detect the optimal build mode and agent routing from a user prompt.
+
+    Implements Phase 3 build mode intelligence — AI-decided from the prompt.
+
+    Body: {"prompt": str, "mode_hint": str | null}
+    Returns: {"mode", "agent_routing", "needs_motion", "needs_backend", "needs_security", ...}
+    """
+    await _own(project_id, claims)
+    prompt = body.get("prompt", "")
+    mode_hint = body.get("mode_hint")
+
+    from agents.mode_classifier import classify_build_mode
+    classification = classify_build_mode(prompt, mode_hint)
+
+    mode = classification.mode
+    routing = get_agent_routing(mode, prompt=prompt, auth_required=classification.auth_required)
+
+    return {
+        "mode": mode,
+        "label": classification.label,
+        "complexity": classification.complexity,
+        "auth_required": classification.auth_required,
+        "pages_expected": classification.pages_expected,
+        "agent_routing": routing,
+        "needs_motion": needs_motion_agent(prompt, mode),
+        "needs_backend": bool(classification.auth_required or mode in ("full_stack", "api_service", "dashboard", "admin_panel")),
+        "needs_security": bool(classification.auth_required or mode in ("full_stack", "api_service", "dashboard", "admin_panel")),
+        "premium_required": True,
+        "cheap_mode_design_gated": True,
+        "detected_at": _now(),
     }
 
 

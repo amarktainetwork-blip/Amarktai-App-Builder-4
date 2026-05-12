@@ -70,6 +70,18 @@ def make_empty_memory() -> dict:
             "aspectRatios": [],
             "generatedAssets": [],
         },
+        # Phase 3: logo stored in memory for reuse across iterations
+        "logo": {
+            "logoType": "",       # "svg" | "uploaded" | "ai_generated" | "fallback"
+            "assetId": "",
+            "htmlSnippet": "",
+            "cssSnippet": "",
+            "faviconDataUri": "",
+            "svgContent": "",
+            "faviconSvg": "",
+            "businessName": "",
+            "generatedAt": "",
+        },
         "product": {
             "buildMode": "",
             "stack": "",
@@ -308,6 +320,46 @@ def update_memory_agent_decision(memory: dict, agent: str, decision: str, detail
         decisions = decisions[-_MAX_AGENT_DECISIONS:]
     memory["agentDecisions"] = decisions
     return memory
+
+
+def update_memory_logo(memory: dict, logo_result: dict) -> dict:
+    """Store logo agent output in memory for reuse across iterations.
+
+    The logo is persisted so that:
+    - Iteration agents can reuse the same logo without regenerating it.
+    - The Coder agent receives logo HTML/CSS snippets for consistent placement.
+    - The favicon is available for every page.
+
+    Args:
+        memory: Current project memory dict.
+        logo_result: Output from run_logo_agent().
+
+    Returns:
+        Updated memory dict.
+    """
+    memory = _ensure_schema(memory)
+    from datetime import datetime, timezone as _tz
+    memory["logo"] = {
+        "logoType": logo_result.get("logoType", ""),
+        "assetId": logo_result.get("assetId", ""),
+        "htmlSnippet": logo_result.get("htmlSnippet", ""),
+        "cssSnippet": logo_result.get("cssSnippet", ""),
+        "faviconDataUri": logo_result.get("faviconDataUri", ""),
+        "svgContent": logo_result.get("svgContent", ""),
+        "faviconSvg": logo_result.get("faviconSvg", ""),
+        "businessName": logo_result.get("businessName", ""),
+        "generatedAt": datetime.now(_tz.utc).isoformat(),
+    }
+    return memory
+
+
+def get_logo_from_memory(memory: dict) -> dict | None:
+    """Return the stored logo result from memory, or None if not set."""
+    memory = _ensure_schema(memory)
+    logo = memory.get("logo", {})
+    if logo.get("logoType"):
+        return logo
+    return None
 
 
 def mark_issue_resolved(memory: dict, issue: str) -> dict:

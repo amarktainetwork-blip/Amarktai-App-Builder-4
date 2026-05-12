@@ -64,8 +64,20 @@ class GenXProvider:
             raise RuntimeError("GENX_API_KEY is not configured. Add it in Settings or as an environment variable.")
 
     def route_for_agent(self, agent: str) -> tuple[str, str]:
+        # Phase 3 Premium Output Rule:
+        # Cheap mode uses cheaper models for speed/cost, BUT:
+        # - Creative Director, Coder, and Visual QA always use at least 'research' tier
+        #   to guarantee premium design output even in cheap mode.
+        # - Security agent always uses 'research' tier for reliable analysis.
+        _ALWAYS_RESEARCH = {"creative_director", "coder", "visual_qa", "security", "motion_3d"}
+
         if self.quality_tier == "cheap":
-            tier = "research" if agent == "scout" else "edits"
+            if agent in _ALWAYS_RESEARCH:
+                tier = "research"
+            elif agent == "scout":
+                tier = "research"
+            else:
+                tier = "edits"
         elif self.quality_tier == "balanced":
             tier = "research" if agent in {"scout", "architect", "coder", "reviewer", "iteration", "repair"} else AGENT_TIER.get(agent, "research")
         else:
