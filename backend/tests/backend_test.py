@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import unittest.mock as mock
+import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -4731,3 +4732,579 @@ def test_repair_memory_brand_not_lost_after_update():
         f"Brand audience must survive repair cycle. Got: {mem['brand']}"
     )
     assert "BMW" in mem["brand"]["positioning"] or "luxury" in mem["brand"]["positioning"].lower()
+
+
+# ========== PHASE 7: Runtime Sandbox Tests ==========
+
+from runtime.sandbox_manager import (
+    SandboxManager,
+    SandboxResult,
+    detect_stack,
+    parse_error_output,
+    ParsedError,
+    STACK_TYPES,
+)
+
+
+# ---------- Phase 2: Stack Detection ----------
+
+def test_detect_stack_static_html():
+    """A project with only HTML files must be detected as 'static'."""
+    files = [
+        {"path": "index.html", "content": "<html><body>Hello</body></html>"},
+        {"path": "styles.css", "content": "body{}"},
+    ]
+    assert detect_stack(files) == "static"
+
+
+def test_detect_stack_vite_config():
+    """A project with vite.config.js must be detected as 'vite'."""
+    files = [
+        {"path": "vite.config.js", "content": "export default {}"},
+        {"path": "index.html", "content": "<html></html>"},
+        {"path": "package.json", "content": '{"devDependencies":{"vite":"^5.0"}}'},
+    ]
+    assert detect_stack(files) == "vite"
+
+
+def test_detect_stack_next():
+    """A project with next.config.js must be detected as 'next'."""
+    files = [
+        {"path": "next.config.js", "content": "module.exports = {}"},
+        {"path": "package.json", "content": '{"dependencies":{"next":"^14.0","react":"^18"}}'},
+    ]
+    assert detect_stack(files) == "next"
+
+
+def test_detect_stack_react_no_vite():
+    """React + react-dom without vite/next config must be detected as 'react'."""
+    files = [
+        {
+            "path": "package.json",
+            "content": '{"dependencies":{"react":"^18","react-dom":"^18"}}',
+        }
+    ]
+    assert detect_stack(files) == "react"
+
+
+def test_detect_stack_pwa():
+    """A project with manifest.json + service-worker.js must be detected as 'pwa'."""
+    files = [
+        {"path": "manifest.json", "content": '{"name":"App"}'},
+        {"path": "service-worker.js", "content": "self.addEventListener('fetch',()=>{})"},
+        {"path": "index.html", "content": "<html></html>"},
+    ]
+    assert detect_stack(files) == "pwa"
+
+
+def test_detect_stack_express():
+    """A project with express as a dependency must be detected as 'express'."""
+    files = [
+        {"path": "package.json", "content": '{"dependencies":{"express":"^4"}}'},
+        {"path": "server.js", "content": "const express = require('express')"},
+    ]
+    assert detect_stack(files) == "express"
+
+
+def test_detect_stack_fastapi():
+    """A project with FastAPI import must be detected as 'fastapi'."""
+    files = [
+        {"path": "main.py", "content": "from fastapi import FastAPI\napp = FastAPI()"},
+    ]
+    assert detect_stack(files) == "fastapi"
+
+
+def test_detect_stack_django():
+    """A project with manage.py must be detected as 'django'."""
+    files = [
+        {"path": "manage.py", "content": "#!/usr/bin/env python"},
+        {"path": "myapp/settings.py", "content": "from django.conf import settings"},
+    ]
+    assert detect_stack(files) == "django"
+
+
+def test_detect_stack_flask():
+    """A project with Flask import must be detected as 'flask'."""
+    files = [
+        {"path": "app.py", "content": "from flask import Flask\napp = Flask(__name__)"},
+    ]
+    assert detect_stack(files) == "flask"
+
+
+def test_detect_stack_fullstack():
+    """A project with both HTML and Python files but no specific framework must be 'fullstack'."""
+    files = [
+        {"path": "index.html", "content": "<html></html>"},
+        {"path": "backend/server.py", "content": "# generic server"},
+    ]
+    assert detect_stack(files) == "fullstack"
+
+
+def test_detect_stack_unknown():
+    """A project with no recognised files must return 'unknown'."""
+    files = [
+        {"path": "README.md", "content": "# My project"},
+        {"path": "data.csv", "content": "a,b,c"},
+    ]
+    assert detect_stack(files) == "unknown"
+
+
+def test_detect_stack_next_takes_priority_over_react():
+    """Next.js detection must take priority over plain React."""
+    files = [
+        {"path": "next.config.js", "content": "module.exports = {}"},
+        {
+            "path": "package.json",
+            "content": '{"dependencies":{"next":"^14","react":"^18","react-dom":"^18"}}',
+        },
+    ]
+    assert detect_stack(files) == "next"
+
+
+def test_detect_stack_vite_takes_priority_over_react():
+    """Vite detection must take priority over plain React."""
+    files = [
+        {"path": "vite.config.ts", "content": "export default {}"},
+        {
+            "path": "package.json",
+            "content": '{"devDependencies":{"vite":"^5"},"dependencies":{"react":"^18","react-dom":"^18"}}',
+        },
+    ]
+    assert detect_stack(files) == "vite"
+
+
+def test_detect_stack_all_types_covered():
+    """STACK_TYPES must contain all documented stack names."""
+    expected = {"static", "vite", "react", "next", "express",
+                "fastapi", "django", "flask", "fullstack", "pwa", "unknown"}
+    assert expected <= STACK_TYPES
+
+
+# ---------- Phase 6: Error Intelligence ----------
+
+def test_parse_error_missing_npm_module():
+    """Parse 'Module not found' errors from Webpack/Vite output."""
+    raw = "Module not found: Error: Can't resolve 'lodash'"
+    errors = parse_error_output(raw)
+    assert any(e.category == "missing_module" for e in errors)
+    assert any("lodash" in e.repair_task for e in errors)
+
+
+def test_parse_error_npm_error_code():
+    """Parse npm ERR! code E404 style errors."""
+    raw = "npm ERR! code E404\nnpm ERR! 404 Not Found"
+    errors = parse_error_output(raw)
+    assert any(e.category == "npm_error" for e in errors)
+
+
+def test_parse_error_python_traceback():
+    """Detect Python traceback and produce a human-readable repair task."""
+    raw = (
+        "Traceback (most recent call last):\n"
+        "  File 'main.py', line 5, in <module>\n"
+        "    import numpy\n"
+        "ModuleNotFoundError: No module named 'numpy'\n"
+    )
+    errors = parse_error_output(raw)
+    categories = [e.category for e in errors]
+    assert "python_traceback" in categories or "missing_python_module" in categories
+    repair_tasks = [e.repair_task for e in errors]
+    assert any("numpy" in t for t in repair_tasks)
+
+
+def test_parse_error_missing_python_module():
+    """ModuleNotFoundError must produce a pip install repair task."""
+    raw = "ModuleNotFoundError: No module named 'requests'"
+    errors = parse_error_output(raw)
+    assert any(e.category == "missing_python_module" for e in errors)
+    assert any("pip install" in e.repair_task and "requests" in e.repair_task for e in errors)
+
+
+def test_parse_error_enoent():
+    """ENOENT must produce a missing-file repair task."""
+    raw = "ENOENT: no such file or directory, open '/app/dist/index.html'"
+    errors = parse_error_output(raw)
+    assert any(e.category == "missing_file" for e in errors)
+
+
+def test_parse_error_syntax_error():
+    """SyntaxError lines must produce a syntax_error entry."""
+    raw = "SyntaxError: Unexpected token '<'"
+    errors = parse_error_output(raw)
+    assert any(e.category == "syntax_error" for e in errors)
+
+
+def test_parse_error_empty_input():
+    """Empty input must return an empty list, not raise."""
+    assert parse_error_output("") == []
+
+
+def test_parse_error_clean_output():
+    """Clean build output with no errors must return an empty list."""
+    raw = "Build successful!\n✓ 42 modules transformed.\ndist/index.html  1.2 kB"
+    errors = parse_error_output(raw)
+    assert errors == []
+
+
+def test_parse_error_python_traceback_deduplicated():
+    """Multiple traceback lines must produce at most one python_traceback entry."""
+    raw = (
+        "Traceback (most recent call last):\n"
+        "Traceback (most recent call last):\n"
+        "Traceback (most recent call last):\n"
+    )
+    errors = parse_error_output(raw)
+    traceback_errors = [e for e in errors if e.category == "python_traceback"]
+    assert len(traceback_errors) <= 1
+
+
+def test_parse_error_returns_parsed_error_objects():
+    """parse_error_output must return ParsedError instances."""
+    raw = "Module not found: Error: Can't resolve 'axios'"
+    errors = parse_error_output(raw)
+    assert all(isinstance(e, ParsedError) for e in errors)
+    for e in errors:
+        assert e.category
+        assert e.repair_task
+        assert e.raw_line
+
+
+# ---------- Phase 1: SandboxResult ----------
+
+def test_sandbox_result_defaults():
+    """SandboxResult must have sane defaults."""
+    r = SandboxResult()
+    assert r.success is False
+    assert r.stack == "unknown"
+    assert r.logs == []
+    assert r.errors == []
+    assert r.runtime_status == "idle"
+    assert r.cache_bust  # non-empty UUID
+    assert r.workspace_id  # non-empty UUID
+
+
+def test_sandbox_result_to_dict_keys():
+    """SandboxResult.to_dict() must include all required keys."""
+    r = SandboxResult(success=True, stack="static", runtime_status="running")
+    d = r.to_dict()
+    required = {
+        "success", "stack", "logs", "errors",
+        "previewUrl", "previewHtml", "installOk", "buildOk",
+        "runtimeStatus", "cacheBust", "workspaceId",
+    }
+    assert required <= set(d.keys()), f"Missing keys: {required - set(d.keys())}"
+
+
+def test_sandbox_result_to_dict_errors_serialised():
+    """Errors in SandboxResult.to_dict() must be plain dicts."""
+    r = SandboxResult()
+    r.errors = [ParsedError(
+        category="missing_module",
+        message="Module not found: lodash",
+        repair_task="npm install lodash",
+        raw_line="Module not found: Error: Can't resolve 'lodash'",
+    )]
+    d = r.to_dict()
+    assert isinstance(d["errors"], list)
+    assert d["errors"][0]["category"] == "missing_module"
+    assert d["errors"][0]["repairTask"] == "npm install lodash"
+
+
+# ---------- Phase 1 + 3: SandboxManager safe execution ----------
+
+def test_sandbox_manager_safe_env_no_dangerous_vars():
+    """SandboxManager._safe_env() must not expose dangerous host env vars."""
+    sb = SandboxManager()
+    # Simulate a polluted environment
+    os.environ["DANGEROUS_SECRET"] = "secret-value"
+    os.environ["AWS_SECRET_ACCESS_KEY"] = "aws-key"
+    env = sb._safe_env()
+    assert "DANGEROUS_SECRET" not in env
+    assert "AWS_SECRET_ACCESS_KEY" not in env
+    # Clean up
+    del os.environ["DANGEROUS_SECRET"]
+    del os.environ["AWS_SECRET_ACCESS_KEY"]
+
+
+def test_sandbox_manager_safe_env_has_ci():
+    """SandboxManager._safe_env() must set CI=true to suppress interactive prompts."""
+    sb = SandboxManager()
+    env = sb._safe_env()
+    assert env.get("CI") == "true"
+
+
+def test_sandbox_manager_safe_env_has_node_env():
+    """SandboxManager._safe_env() must set NODE_ENV."""
+    sb = SandboxManager()
+    env = sb._safe_env()
+    assert "NODE_ENV" in env
+
+
+def test_sandbox_manager_workspace_creation():
+    """SandboxManager._create_workspace() must create a real temporary directory."""
+    sb = SandboxManager()
+    wid, ws = sb._create_workspace()
+    try:
+        assert ws.exists()
+        assert ws.is_dir()
+        assert wid in sb._workspaces
+    finally:
+        sb._cleanup_workspace(wid)
+
+
+def test_sandbox_manager_workspace_cleanup():
+    """_cleanup_workspace() must remove the temp directory."""
+    sb = SandboxManager()
+    wid, ws = sb._create_workspace()
+    ws_path = ws
+    sb._cleanup_workspace(wid)
+    assert not ws_path.exists(), "Workspace dir must be removed after cleanup"
+    assert wid not in sb._workspaces
+
+
+def test_sandbox_manager_write_files_safe(tmp_path):
+    """_write_files() must skip paths with directory traversal attempts."""
+    sb = SandboxManager()
+    files = [
+        {"path": "../../../etc/passwd", "content": "evil"},
+        {"path": "safe.txt", "content": "hello"},
+    ]
+    sb._write_files(tmp_path, files)
+    assert not (tmp_path / "../../../etc/passwd").exists()
+    assert (tmp_path / "safe.txt").read_text() == "hello"
+
+
+def test_sandbox_manager_write_files_nested(tmp_path):
+    """_write_files() must create nested directories for deeply nested files."""
+    sb = SandboxManager()
+    files = [
+        {"path": "src/components/App.jsx", "content": "export default function App() {}"},
+    ]
+    sb._write_files(tmp_path, files)
+    assert (tmp_path / "src" / "components" / "App.jsx").exists()
+
+
+# ---------- Phase 4: Static preview ----------
+
+@pytest.mark.asyncio
+async def test_sandbox_static_preview_returns_html():
+    """run_preview() on a static project must return inline HTML."""
+    files = [
+        {"path": "index.html", "content": "<!DOCTYPE html><html><body><h1>Hello</h1></body></html>"},
+        {"path": "styles.css", "content": "body { color: red; }"},
+    ]
+    async with SandboxManager() as sb:
+        result = await sb.run_preview(files)
+
+    assert result.stack == "static"
+    assert result.success is True
+    assert "<html>" in result.preview_html or "<!DOCTYPE html>" in result.preview_html.lower()
+    assert result.runtime_status == "running"
+    assert result.install_ok is True
+    assert result.build_ok is True
+
+
+@pytest.mark.asyncio
+async def test_sandbox_static_preview_no_index_html():
+    """run_preview() on a static project with no index.html must not crash."""
+    files = [
+        {"path": "styles.css", "content": "body{}"},
+    ]
+    async with SandboxManager() as sb:
+        result = await sb.run_preview(files, stack_hint="static")
+
+    # No index.html → preview_html may be empty but must not raise
+    assert result.stack == "static"
+    assert isinstance(result.logs, list)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_pwa_preview():
+    """run_preview() on a PWA project must return inline HTML preview."""
+    files = [
+        {"path": "manifest.json", "content": '{"name":"PWA App","start_url":"/"}'},
+        {"path": "service-worker.js", "content": "self.addEventListener('fetch', () => {})"},
+        {"path": "index.html", "content": "<!DOCTYPE html><html><body>PWA</body></html>"},
+    ]
+    async with SandboxManager() as sb:
+        result = await sb.run_preview(files)
+
+    assert result.stack == "pwa"
+    assert isinstance(result.preview_html, str)
+    assert result.runtime_status in ("running", "error")
+
+
+# ---------- Phase 5: Hot Reload ----------
+
+@pytest.mark.asyncio
+async def test_patch_and_reload_unknown_workspace():
+    """patch_and_reload() with an unknown workspace_id must not raise."""
+    sb = SandboxManager()
+    result = SandboxResult(workspace_id="nonexistent", success=True)
+    updated = await sb.patch_and_reload("nonexistent", [], result)
+    assert updated.success is False
+    assert any("not found" in line for line in updated.logs)
+
+
+@pytest.mark.asyncio
+async def test_patch_and_reload_updates_cache_bust():
+    """patch_and_reload() must update the cache_bust token."""
+    sb = SandboxManager()
+    wid, ws = sb._create_workspace()
+    try:
+        original_bust = str(uuid.uuid4())
+        result = SandboxResult(workspace_id=wid, cache_bust=original_bust)
+        # Register workspace so patch_and_reload can find it
+        sb._workspaces[wid] = ws
+
+        patched = await sb.patch_and_reload(
+            wid,
+            [{"path": "index.html", "content": "<html>updated</html>"}],
+            result,
+        )
+        assert patched.cache_bust != original_bust, "cache_bust must change on hot reload"
+        assert patched.success is True
+    finally:
+        sb._cleanup_workspace(wid)
+
+
+@pytest.mark.asyncio
+async def test_patch_and_reload_writes_files():
+    """patch_and_reload() must actually write the patched files to disk."""
+    import uuid as _uuid
+    sb = SandboxManager()
+    wid, ws = sb._create_workspace()
+    try:
+        sb._workspaces[wid] = ws
+        result = SandboxResult(workspace_id=wid)
+        await sb.patch_and_reload(
+            wid,
+            [{"path": "newfile.txt", "content": "patched content"}],
+            result,
+        )
+        assert (ws / "newfile.txt").read_text() == "patched content"
+    finally:
+        sb._cleanup_workspace(wid)
+
+
+# ---------- Phase 4: Fallback preview object ----------
+
+def test_sandbox_fallback_preview_structure():
+    """_make_fallback_preview() must return the expected API contract keys."""
+    sb = SandboxManager()
+    fb = sb._make_fallback_preview(
+        stack="vite",
+        logs=["[sandbox] npm install failed"],
+        errors=[ParsedError("npm_error", "npm ERR! code E404", "Check network", "npm ERR! code E404")],
+        install_ok=False,
+        build_ok=False,
+        workspace_id="test-id",
+    )
+    assert fb["canPreview"] is False
+    assert fb["type"] == "sandbox-fallback"
+    assert fb["stack"] == "vite"
+    assert isinstance(fb["logs"], list)
+    assert isinstance(fb["errors"], list)
+    assert fb["runtimeStatus"] == "error"
+
+
+# ---------- Phase 1: npm install dep-limit guard ----------
+
+@pytest.mark.asyncio
+async def test_npm_install_refuses_too_many_deps(tmp_path):
+    """npm_install must refuse when package.json has > _MAX_DEPS dependencies."""
+    from runtime.sandbox_manager import _MAX_DEPS
+    # Build a package.json with too many deps
+    deps = {f"pkg-{i}": "^1.0.0" for i in range(_MAX_DEPS + 1)}
+    pkg_json = {"dependencies": deps}
+    (tmp_path / "package.json").write_text(json.dumps(pkg_json))
+
+    sb = SandboxManager()
+    log_lines: list[str] = []
+    ok = await sb.npm_install(tmp_path, log_lines)
+
+    assert ok is False
+    assert any("exceeds limit" in line for line in log_lines)
+
+
+@pytest.mark.asyncio
+async def test_npm_install_skips_when_no_package_json(tmp_path):
+    """npm_install must return True (no-op) when there is no package.json."""
+    sb = SandboxManager()
+    log_lines: list[str] = []
+    ok = await sb.npm_install(tmp_path, log_lines)
+    assert ok is True
+    assert any("skipping" in line.lower() for line in log_lines)
+
+
+@pytest.mark.asyncio
+async def test_pip_install_skips_when_no_requirements(tmp_path):
+    """pip_install must return True (no-op) when there is no requirements.txt."""
+    sb = SandboxManager()
+    log_lines: list[str] = []
+    ok = await sb.pip_install(tmp_path, log_lines)
+    assert ok is True
+    assert any("skipping" in line.lower() for line in log_lines)
+
+
+# ---------- Phase 1: context manager cleanup ----------
+
+@pytest.mark.asyncio
+async def test_sandbox_context_manager_cleanup():
+    """SandboxManager used as async context manager must clean up workspaces on exit."""
+    import uuid as _uuid
+    workspace_paths = []
+
+    async with SandboxManager() as sb:
+        wid, ws = sb._create_workspace()
+        workspace_paths.append(ws)
+        # Don't manually clean up — rely on __aexit__
+
+    for ws_path in workspace_paths:
+        assert not ws_path.exists(), f"Workspace {ws_path} must be cleaned up on context exit"
+
+
+# ---------- Phase 3: safe execution guards ----------
+
+def test_sandbox_write_files_empty_path_skipped(tmp_path):
+    """Files with empty path must be silently skipped."""
+    sb = SandboxManager()
+    files = [
+        {"path": "", "content": "should be skipped"},
+        {"path": "valid.txt", "content": "ok"},
+    ]
+    sb._write_files(tmp_path, files)
+    assert (tmp_path / "valid.txt").exists()
+    # Only valid.txt should exist; no file named "" should have been created
+    written = list(tmp_path.iterdir())
+    assert all(f.name != "" for f in written), "Empty-path file must not be written"
+
+
+def test_detect_stack_ignores_empty_file_list():
+    """detect_stack() on an empty file list must return 'unknown' without raising."""
+    assert detect_stack([]) == "unknown"
+
+
+def test_detect_stack_tolerates_missing_content():
+    """detect_stack() must tolerate files missing 'content' key."""
+    files = [{"path": "index.html"}]  # no 'content' key
+    result = detect_stack(files)
+    assert result in STACK_TYPES
+
+
+# ---------- Phase 6: broken package repair ----------
+
+def test_parse_error_broken_package_npm_missing():
+    """npm ERR! missing must produce a repair task naming the missing package."""
+    raw = "npm ERR! missing: express@^4.18.0, required by myapp@1.0.0"
+    errors = parse_error_output(raw)
+    assert any(e.category == "npm_missing" for e in errors)
+    assert any("express" in e.repair_task for e in errors)
+
+
+def test_parse_error_import_error():
+    """ImportError lines must be captured."""
+    raw = "ImportError: cannot import name 'Router' from 'fastapi'"
+    errors = parse_error_output(raw)
+    assert any(e.category == "import_error" for e in errors)
+    assert any("Router" in e.repair_task or "fastapi" in e.repair_task for e in errors)
