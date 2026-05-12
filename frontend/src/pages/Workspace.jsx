@@ -55,6 +55,10 @@ export default function WorkspacePage() {
   const [iterationResult, setIterationResult] = useState(null);
 
   const wsRef = useRef(null);
+  // Auto-reconnect state: "connecting" = initial attempt, "connected" = live, "reconnecting" = retrying after drop
+  const [wsState, setWsState] = useState("connecting");
+  const wsReconnectTimer = useRef(null);
+  const wsReconnectAttempt = useRef(0);
 
   // ---------- initial load ----------
   useEffect(() => {
@@ -208,11 +212,41 @@ export default function WorkspacePage() {
   }, [projectId]);
 
   useEffect(() => {
-    const ws = openProjectSocket(projectId, handleEvent);
-    wsRef.current = ws;
-    ws.addEventListener("open", () => setConnected(true));
-    ws.addEventListener("close", () => setConnected(false));
-    return () => ws.close();
+    let destroyed = false;
+
+    const connect = () => {
+      if (destroyed) return;
+      setWsState(wsReconnectAttempt.current === 0 ? "connecting" : "reconnecting");
+      const ws = openProjectSocket(projectId, handleEvent);
+      wsRef.current = ws;
+
+      ws.addEventListener("open", () => {
+        // If the component unmounted between connect() and this callback, the effect cleanup
+        // already called ws.close() via wsRef — just bail without touching state.
+        if (destroyed) return;
+        wsReconnectAttempt.current = 0;
+        setConnected(true);
+        setWsState("connected");
+      });
+
+      ws.addEventListener("close", () => {
+        if (destroyed) return;
+        setConnected(false);
+        // Exponential backoff: 2s, 4s, 8s, 16s, 30s max
+        const delay = Math.min(2000 * (2 ** wsReconnectAttempt.current), 30000);
+        wsReconnectAttempt.current += 1;
+        setWsState("reconnecting");
+        wsReconnectTimer.current = setTimeout(connect, delay);
+      });
+    };
+
+    connect();
+
+    return () => {
+      destroyed = true;
+      clearTimeout(wsReconnectTimer.current);
+      if (wsRef.current) wsRef.current.close();
+    };
   }, [projectId, handleEvent]);
 
   // ---------- actions ----------
@@ -460,8 +494,10 @@ export default function WorkspacePage() {
         <aside className="w-[35%] min-w-[360px] border-r border-amk-line bg-amk-base flex flex-col overflow-hidden">
           <AgentTimeline events={events} />
           {!connected && (
-            <div className="border-y border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px] text-agent-scout">
-              WebSocket disconnected. Reopen the workspace or check the backend if updates stop streaming.
+            <div data-testid="ws-status-banner" className="border-y border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px] text-agent-scout">
+              {wsState === "reconnecting"
+                ? "WebSocket reconnecting… Live updates will resume automatically."
+                : "WebSocket disconnected. Reconnecting…"}
             </div>
           )}
           {failed && project?.error && (
