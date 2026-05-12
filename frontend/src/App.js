@@ -9,6 +9,9 @@ import LoginPage from "@/pages/Login";
 import ContactPage from "@/pages/Contact";
 import PrivacyPage from "@/pages/Privacy";
 import TermsPage from "@/pages/Terms";
+import FeaturesPage from "@/pages/Features";
+import PipelinePage from "@/pages/Pipeline";
+import AccessPage from "@/pages/Access";
 import ProjectListPage from "@/pages/ProjectList";
 import WorkspacePage from "@/pages/Workspace";
 import SystemHealthPage from "@/pages/SystemHealth";
@@ -36,11 +39,15 @@ function App() {
         <AuthProvider>
           <Routes>
             <Route path="/" element={<LandingPage />} />
+            <Route path="/features" element={<FeaturesPage />} />
+            <Route path="/pipeline" element={<PipelinePage />} />
+            <Route path="/access" element={<AccessPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/contact" element={<ContactPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/terms" element={<TermsPage />} />
-            <Route path="/app" element={<Protected><ProjectListPage /></Protected>} />
+            <Route path="/dashboard" element={<Protected><ProjectListPage /></Protected>} />
+            <Route path="/app" element={<Navigate to="/dashboard" replace />} />
             <Route path="/system" element={<Protected><SystemHealthPage /></Protected>} />
             <Route path="/admin/users" element={<Protected><AdminUsersPage /></Protected>} />
             <Route path="/workspace/:projectId" element={<Protected><WorkspacePage /></Protected>} />
