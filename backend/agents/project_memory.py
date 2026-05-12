@@ -329,6 +329,8 @@ def update_memory_logo(memory: dict, logo_result: dict) -> dict:
     - Iteration agents can reuse the same logo without regenerating it.
     - The Coder agent receives logo HTML/CSS snippets for consistent placement.
     - The favicon is available for every page.
+    - Brand colors are extracted and stored for design consistency.
+    - Logo version is tracked and incremented on changes.
 
     Args:
         memory: Current project memory dict.
@@ -339,6 +341,13 @@ def update_memory_logo(memory: dict, logo_result: dict) -> dict:
     """
     memory = _ensure_schema(memory)
     from datetime import datetime, timezone as _tz
+
+    # Increment version if logo already exists and is not being reused
+    existing = memory.get("logo", {})
+    current_version = existing.get("logoVersion", 0)
+    is_reused = logo_result.get("reusedFromMemory", False)
+    new_version = current_version if is_reused else current_version + 1
+
     memory["logo"] = {
         "logoType": logo_result.get("logoType", ""),
         "assetId": logo_result.get("assetId", ""),
@@ -348,6 +357,8 @@ def update_memory_logo(memory: dict, logo_result: dict) -> dict:
         "svgContent": logo_result.get("svgContent", ""),
         "faviconSvg": logo_result.get("faviconSvg", ""),
         "businessName": logo_result.get("businessName", ""),
+        "brandColors": logo_result.get("brandColors", {}),
+        "logoVersion": new_version,
         "generatedAt": datetime.now(_tz.utc).isoformat(),
     }
     return memory

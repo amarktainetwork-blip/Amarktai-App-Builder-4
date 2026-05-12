@@ -63,6 +63,8 @@ from .project_memory import (
 from .design_dna import build_diversity_context, record_design_choice
 from .creative_director import run_creative_director
 from .agent_registry import needs_motion_agent, needs_backend_coder, needs_security_agent
+from .deployment_agent import run_deployment_validation
+from .media_director import run_media_director
 
 # Per-agent timeout in seconds
 AGENT_TIMEOUTS = {
@@ -644,6 +646,103 @@ class Orchestrator:
         await self.emit({"type": "agent_event", "data": evt})
         await self.emit({"type": event_type, "data": {"detail": detail, **(meta or {})}})
 
+    async def _manager_completion_gate(
+        self,
+        validation_state: dict,
+        files: list[dict],
+        mode: str,
+        unresolved_tasks: list[str] | None = None,
+    ) -> tuple[bool, list[str]]:
+        """
+        Manager Agent completion gate — Phase 2B hardening.
+
+        The Manager Agent MUST block finalization if:
+        - required pages are missing
+        - visual QA failed
+        - media is missing for media-heavy builds
+        - runtime failed (validation not OK)
+        - repo repair incomplete
+        - unresolved tasks exist
+        - deployment validation failed
+
+        Returns (can_finalize: bool, blocking_reasons: list[str]).
+        """
+        blocking: list[str] = []
+        unresolved_tasks = unresolved_tasks or []
+
+        # 1. Unresolved tasks block completion
+        if unresolved_tasks:
+            blocking.append(
+                f"Manager: {len(unresolved_tasks)} unresolved task(s) remain: "
+                + "; ".join(unresolved_tasks[:3])
+            )
+
+        # 2. Core validation must pass
+        if not validation_state.get("can_finalize", True):
+            blocking.append(
+                "Manager: Build cannot finalize — validator reports canFinalize=false. "
+                f"Missing files: {validation_state.get('required_files_missing', [])}. "
+                f"Errors: {validation_state.get('errors', [])}"
+            )
+
+        # 3. Quality and design thresholds
+        if not validation_state.get("quality_ok", True):
+            blocking.append(
+                f"Manager: Quality score {validation_state.get('quality_score', 0)} below threshold. "
+                "Build quality is insufficient for delivery."
+            )
+
+        if not validation_state.get("design_ok", True):
+            blocking.append(
+                f"Manager: Design score {validation_state.get('design_score', 0)} below threshold. "
+                "Design quality is insufficient for delivery."
+            )
+
+        # 4. Security must pass for auth builds
+        if not validation_state.get("security_ok", True):
+            blocking.append(
+                f"Manager: Security score {validation_state.get('security_score', 0)} below threshold. "
+                "Security issues must be resolved before delivery."
+            )
+
+        # 5. Media validation
+        if not validation_state.get("media_ok", True):
+            media_errors = validation_state.get("media_errors", [])
+            blocking.append(
+                f"Manager: Media validation failed. "
+                + (" ".join(media_errors[:2]) if media_errors else "Media issues detected.")
+            )
+
+        # 6. Minimum file check for HTML builds
+        html_modes = {"landing_page", "website", "pwa", "3d_website", "animated_site", "media_page"}
+        if mode in html_modes:
+            html_files = [f for f in files if f.get("path", "").endswith(".html")]
+            if not html_files:
+                blocking.append(
+                    f"Manager: No HTML files found for '{mode}' build. "
+                    "At least one HTML file is required."
+                )
+
+        can_finalize = len(blocking) == 0
+
+        # Emit manager gate event
+        await self._record_event(
+            "manager",
+            "completion_gate_passed" if can_finalize else "completion_gate_blocked",
+            f"Manager completion gate: {'PASSED' if can_finalize else 'BLOCKED'} "
+            f"({len(blocking)} blocker(s))",
+            meta={"blocking_reasons": blocking, "can_finalize": can_finalize},
+        )
+
+        if not can_finalize:
+            for reason in blocking:
+                await self._record_event(
+                    "manager", "blocked",
+                    reason,
+                    meta={"blocker": reason},
+                )
+
+        return can_finalize, blocking
     async def _ensure_contract_files(self, prompt: str, plan: dict | None) -> tuple[list[dict], list[str]]:
         """Run deterministic required-file repair and persist changed files."""
         project = await self._load_project()
@@ -1312,11 +1411,82 @@ class Orchestrator:
                                          f"Security agent skipped: {sec_err}",
                                          meta={"error": str(sec_err)})
 
+        # ── Phase 2B: Deployment Agent ────────────────────────────────────────
+        # Run deployment validation on the final build files.
+        # Non-fatal: emit results as events/messages but don't block the build.
+        try:
+            await self._record_event("deployment", "started", "Deployment Agent validating build.")
+            deploy_files = await self.fs.list_full()
+            deploy_result = run_deployment_validation(deploy_files, mode, sd)
+            await self.db.projects.update_one(
+                {"id": self.project_id},
+                {"$set": {"deployment_validation": deploy_result, "updated_at": _now()}},
+            )
+            await self.emit({"type": "deployment_validation", "data": deploy_result})
+            deploy_status = "passed" if deploy_result["passed"] else "issues_found"
+            deploy_msg = (
+                f"**Deployment Agent · {'✓ Ready' if deploy_result['passed'] else '⚠ Issues Found'}**\n\n"
+                + "\n".join(f"- {item}" for item in deploy_result.get("deploy_checklist", [])[:5])
+            )
+            if deploy_result.get("warnings"):
+                deploy_msg += (
+                    "\n\n**Warnings:**\n"
+                    + "\n".join(f"- {w}" for w in deploy_result["warnings"][:3])
+                )
+            if deploy_result.get("errors"):
+                deploy_msg += (
+                    "\n\n**Errors:**\n"
+                    + "\n".join(f"- {e}" for e in deploy_result["errors"][:3])
+                )
+            await self._record_message("agent", "deployment", deploy_msg,
+                                        meta={"deployment": deploy_result})
+            await self._record_event(
+                "deployment", deploy_status,
+                f"Deployment validation {deploy_status}. "
+                f"Checklist: {len(deploy_result.get('deploy_checklist', []))} items. "
+                f"Warnings: {len(deploy_result.get('warnings', []))}. "
+                f"Errors: {len(deploy_result.get('errors', []))}.",
+            )
+        except Exception as deploy_err:
+            await self._record_event(
+                "deployment", "skipped",
+                f"Deployment Agent skipped: {deploy_err}",
+                meta={"error": str(deploy_err)},
+            )
+
         await self._set_status("ready", {
             "completed_at": _now(),
             "preview_strategy": preview_strategy,
         })
         await self.emit({"type": "build_complete", "data": {"preview_strategy": preview_strategy}})
+
+        # ── Phase 2B: Manager Agent Completion Gate ──────────────────────────
+        # The Manager Agent runs a completion gate after the build pipeline.
+        # It may emit warnings but does NOT block finalisation here (that was
+        # done in the repair loop). This is a post-hoc audit for reporting.
+        try:
+            project_for_gate = await self._load_project()
+            gate_val_state = project_for_gate.get("validation_state", {})
+            gate_files = await self.fs.list_full()
+            _can_finalize, _blockers = await self._manager_completion_gate(
+                validation_state=gate_val_state,
+                files=gate_files,
+                mode=mode,
+            )
+            if _blockers:
+                await self._record_message(
+                    "agent", "manager",
+                    "**Manager Agent — Build Review**\n\n"
+                    "The following issues were detected post-build:\n"
+                    + "\n".join(f"- {b}" for b in _blockers),
+                    meta={"blockers": _blockers},
+                )
+        except Exception as gate_err:
+            await self._record_event(
+                "manager", "skipped",
+                f"Manager completion gate skipped: {gate_err}",
+                meta={"error": str(gate_err)},
+            )
 
         # ── Phase 2: AI Product Advisor ───────────────────────────────────────
         # Run advisor after build is complete and status is "ready".

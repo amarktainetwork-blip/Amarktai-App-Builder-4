@@ -162,11 +162,51 @@ def generate_favicon_svg(
     return svg
 
 
+# ── Brand color extraction ────────────────────────────────────────────────────
+
+def extract_brand_colors(svg_content: str) -> dict[str, str]:
+    """
+    Extract brand colors from an SVG logo.
+    
+    Returns a dict with 'primary', 'accent', and 'background' color values.
+    """
+    colors: list[str] = re.findall(
+        r'(?:fill|stroke|stop-color)\s*=\s*["\']?(#[0-9a-fA-F]{3,6}|rgb\([^)]+\))["\']?',
+        svg_content,
+    )
+    unique_colors = list(dict.fromkeys(c for c in colors if c not in ("#fff", "#ffffff", "white", "none", "transparent")))
+
+    result = {}
+    if unique_colors:
+        result["primary"] = unique_colors[0]
+    if len(unique_colors) > 1:
+        result["accent"] = unique_colors[1]
+    if len(unique_colors) > 2:
+        result["background"] = unique_colors[2]
+    return result
+
+
+def should_reuse_logo(memory: dict[str, Any], business_name: str) -> bool:
+    """
+    Check if a previously generated logo should be reused for this project.
+    
+    Returns True if memory contains a logo matching the business name.
+    """
+    if not memory:
+        return False
+    logo_mem = memory.get("logo", {})
+    if not logo_mem:
+        return False
+    stored_name = logo_mem.get("businessName", logo_mem.get("business_name", ""))
+    return bool(stored_name and stored_name.lower() == business_name.lower())
+
+
 # ── Logo Agent main function ─────────────────────────────────────────────────
 
 async def run_logo_agent(
     input_data: dict[str, Any],
     media_library_fn: Any | None = None,
+    project_memory: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the logo agent pipeline.
 
@@ -174,6 +214,7 @@ async def run_logo_agent(
         input_data: Logo agent input dict (see module docstring).
         media_library_fn: Optional async callable(asset_id) -> dict to look up
             uploaded asset metadata from the media library.
+        project_memory: Optional project memory dict for logo persistence/reuse.
 
     Returns:
         Logo agent output dict (see module docstring).
@@ -187,6 +228,34 @@ async def run_logo_agent(
 
     warnings: list[str] = []
     files: list[dict] = []
+
+    # ── Logo reuse from memory (brand consistency across iterations) ──────────
+    if project_memory and should_reuse_logo(project_memory, business_name):
+        logo_mem = project_memory.get("logo", {})
+        cached_svg = logo_mem.get("svgContent", logo_mem.get("svg_content", ""))
+        cached_asset_id = logo_mem.get("assetId", logo_mem.get("asset_id", ""))
+        if cached_svg:
+            logger.info("Reusing existing logo from project memory for '%s'", business_name)
+            favicon_svg = generate_favicon_svg(business_name, design_tokens)
+            return {
+                "logoType": logo_mem.get("logoType", "svg"),
+                "assetId": cached_asset_id,
+                "files": [
+                    {"filename": "logo.svg", "content": cached_svg, "media_type": "svg", "mime_type": "image/svg+xml"},
+                    {"filename": "favicon.svg", "content": favicon_svg, "media_type": "svg", "mime_type": "image/svg+xml"},
+                ],
+                "htmlSnippet": logo_mem.get("htmlSnippet", _logo_html_snippet_svg(cached_svg, business_name)),
+                "cssSnippet": logo_mem.get("cssSnippet", _logo_css_snippet_svg()),
+                "faviconDataUri": _svg_data_uri(favicon_svg),
+                "usageNotes": "Logo reused from project memory for brand consistency.",
+                "fallbackUsed": False,
+                "warnings": ["Logo reused from previous iteration to maintain brand consistency."],
+                "svgContent": cached_svg,
+                "faviconSvg": favicon_svg,
+                "reusedFromMemory": True,
+                "logoVersion": logo_mem.get("logoVersion", 1),
+                "brandColors": logo_mem.get("brandColors", {}),
+            }
 
     # ── Case 1: Use uploaded logo ─────────────────────────────────────────────
     if uploaded_asset_id and media_source in ("uploaded", "auto"):
@@ -258,6 +327,9 @@ async def run_logo_agent(
 
     logo_type = "fallback" if (media_source == "ai" and warnings) else "svg"
 
+    # Extract brand colors for memory persistence
+    brand_colors = extract_brand_colors(svg_content)
+
     return {
         "logoType": logo_type,
         "assetId": asset_id,
@@ -273,6 +345,9 @@ async def run_logo_agent(
         "warnings": warnings,
         "svgContent": svg_content,
         "faviconSvg": favicon_svg,
+        "reusedFromMemory": False,
+        "logoVersion": 1,
+        "brandColors": brand_colors,
     }
 
 

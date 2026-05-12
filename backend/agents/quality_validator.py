@@ -233,84 +233,258 @@ def _score_ux(html: str, css: str) -> tuple[int, list[str]]:
 
 
 def _score_accessibility(html: str, css: str) -> tuple[int, list[str]]:
-    """Score accessibility (0-100)."""
-    score = 60
+    """
+    Score accessibility (0-100) — Phase 2B enhanced axe-core-like static analysis.
+    
+    Checks: lang, headings, alt text, ARIA, focus states, skip links,
+    landmarks, form labels, button semantics, reduced motion, tabindex abuse.
+    """
+    score = 45  # Base (lower — must earn points)
     errors: list[str] = []
 
+    # ── Language ──────────────────────────────────────────────────────────────
     if _LANG_PAT.search(html):
         score += 10
     else:
-        errors.append("Missing lang attribute on <html> element (e.g. lang=\"en\").")
+        errors.append("Missing lang attribute on <html> element (e.g. lang=\"en\"). WCAG 3.1.1")
 
+    # ── Heading structure ─────────────────────────────────────────────────────
     if _HEADING_H1_PAT.search(html):
         score += 5
     else:
-        errors.append("No <h1> heading found. Every page needs exactly one <h1>.")
+        errors.append("No <h1> heading found. Every page needs exactly one <h1>. WCAG 1.3.1")
 
+    # Check for multiple h1s (bad practice)
+    h1_count = len(re.findall(r'<h1\b', html, re.IGNORECASE))
+    if h1_count > 1:
+        errors.append(f"Multiple <h1> tags found ({h1_count}). Use only one <h1> per page.")
+        score -= 5
+
+    # ── Image alt text ────────────────────────────────────────────────────────
     imgs = _IMG_PAT.findall(html)
     missing_alt = _ALT_TEXT_MISSING.findall(html)
     if imgs and missing_alt:
         penalty = min(20, len(missing_alt) * 5)
         score -= penalty
-        errors.append(f"{len(missing_alt)} image(s) missing alt text.")
-    elif not imgs:
-        pass  # no images — no penalty
-    else:
-        score += 10
+        errors.append(
+            f"{len(missing_alt)} image(s) missing alt text. WCAG 1.1.1. "
+            "Add descriptive alt text or alt=\"\" for decorative images."
+        )
+    elif imgs:
+        score += 10  # All images have alt text
 
+    # ── ARIA attributes ───────────────────────────────────────────────────────
     if _ARIA_PAT.search(html):
-        score += 10
+        score += 8
     else:
-        errors.append("No ARIA attributes found. Add aria-label/aria-describedby for interactive elements.")
+        errors.append(
+            "No ARIA attributes found. Add aria-label/aria-describedby for interactive elements. WCAG 4.1.2"
+        )
 
+    # ── Focus states ──────────────────────────────────────────────────────────
     if _FOCUS_VISIBLE.search(css):
+        score += 7
+    else:
+        errors.append(
+            "No :focus-visible CSS found. Add visible focus styles for keyboard navigation. WCAG 2.4.7"
+        )
+
+    # ── Skip navigation link ──────────────────────────────────────────────────
+    if _SKIP_LINK_PAT.search(html):
         score += 5
     else:
-        errors.append("No :focus-visible CSS found. Add focus styles for keyboard navigation.")
+        errors.append(
+            "No skip-to-main-content link found. Add for keyboard users. WCAG 2.4.1"
+        )
 
-    if _SKIP_LINK_PAT.search(html):
-        score += 10
+    # ── Landmark regions ──────────────────────────────────────────────────────
+    has_main = bool(re.search(r'<main\b', html, re.IGNORECASE))
+    has_nav = bool(re.search(r'<nav\b', html, re.IGNORECASE))
+    has_header = bool(re.search(r'<header\b', html, re.IGNORECASE))
+    has_footer = bool(re.search(r'<footer\b', html, re.IGNORECASE))
+    landmark_count = sum([has_main, has_nav, has_header, has_footer])
+    if landmark_count >= 3:
+        score += 5
+    elif landmark_count >= 1:
+        score += 2
     else:
-        errors.append("No skip-to-main-content link found.")
+        errors.append(
+            "No HTML5 landmark elements found (<main>, <nav>, <header>, <footer>). WCAG 1.3.6"
+        )
+
+    # ── Form label associations ───────────────────────────────────────────────
+    inputs = re.findall(r'<input\b[^>]*>', html, re.IGNORECASE)
+    labels = re.findall(r'<label\b', html, re.IGNORECASE)
+    for_attrs = re.findall(r'<label\b[^>]+for=["\'][^"\']+["\']', html, re.IGNORECASE)
+    aria_label_inputs = re.findall(r'<input\b[^>]*aria-label=["\'][^"\']+["\']', html, re.IGNORECASE)
+    if inputs and not labels and not aria_label_inputs:
+        errors.append(
+            "Form inputs found but no <label> elements or aria-label attributes. WCAG 1.3.1"
+        )
+        score -= 5
+    elif labels and not for_attrs and not aria_label_inputs:
+        errors.append(
+            "Labels found but missing 'for' attribute association. WCAG 1.3.1"
+        )
+    elif inputs and (labels or aria_label_inputs):
+        score += 3  # Bonus for properly labelled forms
+
+    # ── Button semantics ──────────────────────────────────────────────────────
+    buttons = re.findall(r'<button\b[^>]*>', html, re.IGNORECASE)
+    empty_buttons = re.findall(r'<button\b[^>]*>\s*</button>', html, re.IGNORECASE)
+    if empty_buttons:
+        errors.append(
+            f"{len(empty_buttons)} empty <button> element(s) found. Add text or aria-label. WCAG 4.1.2"
+        )
+        score -= 3
+
+    # ── Tabindex abuse ────────────────────────────────────────────────────────
+    positive_tabindex = re.findall(r'tabindex=["\'][1-9][0-9]*["\']', html, re.IGNORECASE)
+    if positive_tabindex:
+        errors.append(
+            f"{len(positive_tabindex)} element(s) with positive tabindex. Use tabindex=\"0\" instead. WCAG 2.4.3"
+        )
+        score -= 3
+
+    # ── Reduced motion support ────────────────────────────────────────────────
+    if re.search(r'prefers-reduced-motion', css, re.IGNORECASE):
+        score += 5
+    elif re.search(r'@keyframes|animation:|transition:', css, re.IGNORECASE):
+        errors.append(
+            "Animations found but no @media (prefers-reduced-motion) support. WCAG 2.3.3"
+        )
 
     return min(100, max(0, score)), errors
 
 
 def _score_seo(html: str) -> tuple[int, list[str]]:
-    """Score SEO basics (0-100)."""
-    score = 40
+    """
+    Score SEO basics (0-100) — Phase 2B enhanced.
+    
+    Checks: title, meta description, OG tags, Twitter Card, canonical,
+    heading hierarchy, structured data, image alt, robots meta, language.
+    """
+    score = 30  # Base (must earn points)
     errors: list[str] = []
 
+    # ── Title tag ─────────────────────────────────────────────────────────────
     if _TITLE_PAT.search(html):
-        score += 15
+        # Check title length (optimal 30-60 chars)
+        title_match = re.search(r'<title[^>]*>([^<]{5,})</title>', html, re.IGNORECASE)
+        if title_match:
+            title_len = len(title_match.group(1))
+            if 30 <= title_len <= 60:
+                score += 15
+            elif title_len < 30:
+                score += 10
+                errors.append(
+                    f"Title tag is too short ({title_len} chars). Aim for 30-60 characters."
+                )
+            else:
+                score += 10
+                errors.append(
+                    f"Title tag may be too long ({title_len} chars). Keep under 60 characters."
+                )
     else:
-        errors.append("Missing or empty <title> tag.")
+        errors.append("Missing or empty <title> tag. Critical for SEO.")
 
+    # ── Meta description ──────────────────────────────────────────────────────
     if _META_DESCRIPTION.search(html):
-        score += 15
+        # Check description length
+        desc_match = re.search(
+            r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']{10,})["\']'
+            r'|<meta[^>]+content=["\']([^"\']{10,})["\'][^>]+name=["\']description["\']',
+            html, re.IGNORECASE
+        )
+        if desc_match:
+            desc_text = desc_match.group(1) or desc_match.group(2) or ""
+            desc_len = len(desc_text)
+            if 120 <= desc_len <= 160:
+                score += 15
+            elif desc_len < 120:
+                score += 10
+                errors.append(
+                    f"Meta description is short ({desc_len} chars). Aim for 120-160 characters."
+                )
+            else:
+                score += 10
+                errors.append(
+                    f"Meta description may be too long ({desc_len} chars). Keep under 160 characters."
+                )
+        else:
+            score += 12  # Has meta desc but couldn't parse length
     else:
-        errors.append("Missing meta description tag.")
+        errors.append("Missing meta description tag. Add for search result snippets.")
 
+    # ── Open Graph ────────────────────────────────────────────────────────────
     if _META_OG.search(html):
-        score += 10
+        score += 8
+        # Check for og:image specifically
+        if not re.search(r'property=["\']og:image["\']', html, re.IGNORECASE):
+            errors.append("og:image missing from Open Graph tags. Required for social sharing.")
     else:
-        errors.append("No Open Graph meta tags found (og:title, og:description, og:image).")
+        errors.append("No Open Graph meta tags (og:title, og:description, og:image). Hurts social sharing.")
 
+    # ── Twitter Card ──────────────────────────────────────────────────────────
+    if re.search(r'<meta[^>]+name=["\']twitter:', html, re.IGNORECASE):
+        score += 5
+    else:
+        errors.append("No Twitter Card meta tags found. Add for Twitter/X sharing previews.")
+
+    # ── Canonical ─────────────────────────────────────────────────────────────
     if _CANONICAL_PAT.search(html):
         score += 5
     else:
-        errors.append("No canonical link tag found.")
+        errors.append("No canonical link tag found. Add to prevent duplicate content issues.")
 
+    # ── Heading hierarchy ─────────────────────────────────────────────────────
     headings = _HEADING_HIERARCHY.findall(html)
+    heading_levels = sorted(set(int(re.search(r'\d', h).group()) for h in headings if re.search(r'\d', h)))
     if len(headings) >= 3:
         score += 10
+        if 1 in heading_levels:
+            pass  # Good
+        else:
+            errors.append("No h1 in heading hierarchy. Heading structure should start with h1.")
     elif headings:
         score += 5
     else:
-        errors.append("No semantic heading hierarchy (h1-h6) found.")
+        errors.append("No semantic heading hierarchy (h1-h6) found. Critical for SEO structure.")
 
+    # Check for skipped heading levels (e.g. h1 → h3, skipping h2)
+    for i in range(len(heading_levels) - 1):
+        if heading_levels[i + 1] - heading_levels[i] > 1:
+            errors.append(
+                f"Heading hierarchy skips from h{heading_levels[i]} to h{heading_levels[i+1]}. "
+                "Use consecutive heading levels."
+            )
+            score -= 2
+            break
+
+    # ── Structured data ───────────────────────────────────────────────────────
     if _STRUCTURED_DATA.search(html):
         score += 5
+    else:
+        errors.append("No structured data (JSON-LD/Schema.org) found. Add for rich search results.")
+
+    # ── Image alt text (SEO angle) ────────────────────────────────────────────
+    imgs_in_html = _IMG_PAT.findall(html)
+    if imgs_in_html:
+        missing_alt_for_seo = _ALT_TEXT_MISSING.findall(html)
+        if missing_alt_for_seo:
+            errors.append(
+                f"{len(missing_alt_for_seo)} image(s) missing alt text. "
+                "Alt text is used by search engines for image indexing."
+            )
+            score -= min(10, len(missing_alt_for_seo) * 3)
+        else:
+            score += 3  # All images have alt
+
+    # ── Language attribute (SEO angle) ───────────────────────────────────────
+    if _LANG_PAT.search(html):
+        score += 4
+    else:
+        errors.append("Missing lang attribute on <html>. Helps search engines identify language.")
 
     return min(100, max(0, score)), errors
 
