@@ -270,6 +270,31 @@ def capabilities_summary() -> dict:
             "provider": "genx" if genx_available else None,
             "reason": None if genx_available else "GENX_API_KEY not configured",
         },
+        # Phase 3 additions — agent audit requirements
+        "github_integration": {
+            "available": bool(os.environ.get("GITHUB_PAT")),
+            "provider": "github" if os.environ.get("GITHUB_PAT") else None,
+            "reason": (
+                None if os.environ.get("GITHUB_PAT")
+                else "GitHub integration unavailable: GITHUB_PAT not configured."
+            ),
+            "fallback": "File export only — no GitHub push/PR without a PAT.",
+        },
+        "preview_generation": {
+            "available": True,  # Static preview always available; sandbox preview requires filesystem
+            "provider": "sandbox",
+            "reason": None,
+            "fallback": "Static HTML preview always available; Vite/React preview requires server.",
+        },
+        "voice_generation": {
+            "available": bool(qwen_key and qwen_audio_model),
+            "provider": "qwen" if (qwen_key and qwen_audio_model) else None,
+            "reason": (
+                None if (qwen_key and qwen_audio_model)
+                else "Voice generation unavailable: configure QWEN_API_KEY and QWEN_MODEL_AUDIO."
+            ),
+            "fallback": "No voice fallback — voice features are omitted when unavailable.",
+        },
     }
 
 

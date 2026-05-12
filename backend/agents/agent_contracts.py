@@ -324,6 +324,122 @@ AGENT_CONTRACTS: dict[str, dict[str, Any]] = {
         "validation": "no .env files committed; no secrets in code",
         "failure_behavior": "raise HTTPException with clear error message",
     },
+
+    # ── New agents added in Phase 3 agent audit ─────────────────────────────
+
+    "manager": {
+        "name": "Manager Agent",
+        "responsibility": (
+            "Owns the complete build lifecycle. Breaks user prompt into tasks, assigns "
+            "workers, tracks task completion, and blocks final success if any required "
+            "task is skipped, tools are unavailable, or visual QA fails."
+        ),
+        "task_type": "orchestration",
+        "input_schema": {
+            "prompt": "str",
+            "mode": "str",
+            "stack_decision": "dict",
+        },
+        "output_schema": {
+            "build_plan": "dict — complexity, phases, pages, files, risks",
+            "task_checklist": "list[str]",
+            "worker_assignments": "dict[agent → task]",
+        },
+        "validation": "all tasks completed; no worker skipped; no fake success",
+        "failure_behavior": "block finalization; emit manager_blocked event with reason",
+    },
+
+    "motion_3d": {
+        "name": "Motion / 3D Agent",
+        "responsibility": (
+            "Implements particles, Three.js, Framer Motion, GSAP, CSS animations, "
+            "video backgrounds, animated hero sections, and interactive 3D scenes. "
+            "Always respects prefers-reduced-motion. Never breaks layout."
+        ),
+        "task_type": "implementation",
+        "input_schema": {
+            "animation_requirements": "str — what was requested",
+            "design_direction": "dict — design tokens from Creative Director",
+            "files": "list[{path, content}] — current project files",
+        },
+        "output_schema": {
+            "files": "list[{path, content}] — amended/new files",
+            "summary": "str",
+            "techniques_used": "list[str]",
+        },
+        "validation": "prefers-reduced-motion respected; no layout breakage; fallback present",
+        "failure_behavior": "skip motion enhancements and note in summary; never break build",
+    },
+
+    "visual_qa": {
+        "name": "Visual QA Agent",
+        "responsibility": (
+            "Reviews layout quality, typography, contrast, spacing, and mobile responsiveness. "
+            "Checks premium feel — must not look like a generic AI template. "
+            "Blocks completion if design_score < 70."
+        ),
+        "task_type": "review",
+        "input_schema": {
+            "files": "list[{path, content}]",
+            "design_direction": "dict",
+            "mode": "str",
+        },
+        "output_schema": {
+            "passed": "bool",
+            "design_score": "int 0-100",
+            "issues": "list[{severity, file, description, fix}]",
+            "strengths": "list[str]",
+            "summary": "str",
+        },
+        "validation": "design_score >= 70 for passed=true; no critical issues",
+        "failure_behavior": "return passed=false with actionable issue list; trigger repair",
+    },
+
+    "backend_coder": {
+        "name": "Backend Coder Agent",
+        "responsibility": (
+            "Implements backend APIs, auth, database scaffolding, and services for "
+            "full-stack builds. Never hardcodes secrets. Always generates .env.example. "
+            "Produces complete, runnable code."
+        ),
+        "task_type": "implementation",
+        "input_schema": {
+            "requirements": "dict",
+            "arch_plan": "dict",
+            "auth_required": "bool",
+            "database": "str — postgres|mongodb|mariadb|sqlite|none",
+        },
+        "output_schema": {
+            "files": "list[{path, content}]",
+            "summary": "str",
+            "env_vars": "list[str]",
+        },
+        "validation": "no hardcoded secrets; .env.example present; auth uses bcrypt",
+        "failure_behavior": "emit error; never generate code with hardcoded credentials",
+    },
+
+    "security": {
+        "name": "Security Agent",
+        "responsibility": (
+            "Reviews generated code for hardcoded secrets, weak auth patterns, "
+            "SQL injection, XSS, and insecure configurations. "
+            "Blocks completion on critical/high violations."
+        ),
+        "task_type": "review",
+        "input_schema": {
+            "files": "list[{path, content}]",
+            "mode": "str",
+            "auth_required": "bool",
+        },
+        "output_schema": {
+            "passed": "bool",
+            "risk_level": "str — low|medium|high|critical",
+            "violations": "list[{severity, file, category, description, fix}]",
+            "summary": "str",
+        },
+        "validation": "passed=false when any critical or high violation found",
+        "failure_behavior": "block finalization; list all violations with fixes",
+    },
 }
 
 

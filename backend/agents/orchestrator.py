@@ -32,12 +32,16 @@ from .prompts import (
     ARCHITECT_PROMPT,
     ADVISOR_PROMPT,
     BUILD_PLANNER_PROMPT,
+    BACKEND_CODER_PROMPT,
     CODER_PROMPT,
     ITERATION_PROMPT,
+    MOTION_3D_PROMPT,
     REPO_FIX_PROMPT,
     RESEARCH_PROMPT,
     REVIEWER_PROMPT,
     SCOUT_PROMPT,
+    SECURITY_PROMPT,
+    VISUAL_QA_PROMPT,
 )
 from .design_engine import create_design_direction
 from .repo_analyzer import analyze_repo_profile, detect_update_intent
@@ -47,6 +51,8 @@ from .project_memory import (
     save_memory,
     update_memory_brand,
     update_memory_design,
+    update_memory_logo,
+    get_logo_from_memory,
     update_memory_product,
     update_memory_pages,
     update_memory_features,
@@ -56,6 +62,7 @@ from .project_memory import (
 )
 from .design_dna import build_diversity_context, record_design_choice
 from .creative_director import run_creative_director
+from .agent_registry import needs_motion_agent, needs_backend_coder, needs_security_agent
 
 # Per-agent timeout in seconds
 AGENT_TIMEOUTS = {
@@ -66,6 +73,10 @@ AGENT_TIMEOUTS = {
     "iteration": 300,
     "research": 240,
     "repo_fix": 480,
+    "motion_3d": 240,
+    "backend_coder": 480,
+    "security": 120,
+    "visual_qa": 120,
 }
 
 # Maximum number of iteration history entries to keep in project_memory
@@ -328,6 +339,9 @@ class Orchestrator:
     async def _shared_context(self) -> dict:
         """Build the shared context object passed to agents (Phase 2 spec)."""
         proj = await self._load_project()
+        # Phase 3: include logo from project memory for iteration reuse
+        memory = await load_memory(self.db, self.project_id)
+        logo_from_memory = get_logo_from_memory(memory)
         return {
             "project_id": self.project_id,
             "prompt": proj.get("prompt", ""),
@@ -340,6 +354,8 @@ class Orchestrator:
             "github_context": proj.get("github", {}),
             "validation_state": proj.get("validation_state", {}),
             "repair_attempts": self._repair_attempts,
+            # Phase 3: logo reuse across iterations
+            "logo_result": proj.get("logo_result") or logo_from_memory,
         }
 
     async def _is_cancelled(self) -> bool:
@@ -986,6 +1002,84 @@ class Orchestrator:
         await save_memory(self.db, self.project_id, memory)
         await self._ensure_contract_files(user_prompt, arch_data)
 
+        # ── Phase 3: Motion / 3D Agent (conditional) ─────────────────────────
+        # Called when the prompt or mode requires animation, particles, 3D, or video backgrounds.
+        if needs_motion_agent(user_prompt, mode):
+            await self._check_cancel()
+            await self._record_event("motion_3d", "started", "Motion/3D agent enhancing build.")
+            try:
+                post_coder_files = await self.fs.list_full()
+                motion_input = json.dumps({
+                    "animation_requirements": user_prompt,
+                    "design_direction": design_direction,
+                    "files": [{"path": f["path"], "content": f["content"]}
+                               for f in post_coder_files if f["path"] not in _META_FILES],
+                }, indent=2)
+                motion_res = await self._run_agent_blocks("motion_3d", MOTION_3D_PROMPT, motion_input)
+                motion_data = motion_res["data"]
+                motion_files = motion_data.get("files", [])
+                for mf in motion_files:
+                    await self.fs.write(mf["path"], mf["content"], mf.get("language", "text"))
+                    await self.emit({"type": "file_written", "data": {"path": mf["path"]}})
+                await self._record_message(
+                    "agent", "motion_3d",
+                    f"**Motion/3D:** {motion_data.get('summary', 'Animation enhancements applied.')}",
+                    meta={"model": motion_res["model_label"],
+                          "files": [mf["path"] for mf in motion_files]},
+                )
+                await self._record_event("motion_3d", "completed",
+                                         f"Enhanced {len(motion_files)} file(s) with motion/3D.")
+            except Exception as motion_err:
+                # Motion/3D is non-fatal — log and continue
+                await self._record_event("motion_3d", "skipped",
+                                         f"Motion/3D agent skipped: {motion_err}",
+                                         meta={"error": str(motion_err)})
+
+        # ── Phase 3: Backend Coder Agent (conditional) ────────────────────────
+        # Called for full_stack, api_service, dashboard, admin_panel builds.
+        if needs_backend_coder(mode, bool(sd.get("auth_required"))):
+            await self._check_cancel()
+            await self._record_event("backend_coder", "started", "Backend Coder agent running.")
+            try:
+                backend_input = json.dumps({
+                    "requirements": scout_data,
+                    "arch_plan": arch_data,
+                    "auth_required": sd.get("auth_required", False),
+                    "database": sd.get("stack", {}).get("database", "none"),
+                    "mode": mode,
+                }, indent=2)
+                backend_res = await self._run_agent_blocks(
+                    "backend_coder", BACKEND_CODER_PROMPT, backend_input
+                )
+                backend_data = backend_res["data"]
+                backend_files = backend_data.get("files", [])
+                for bf in backend_files:
+                    # Never overwrite files already written by the frontend coder;
+                    # preserving frontend files prevents backend agent from clobbering
+                    # index.html, styles.css, or shared config files.
+                    existing = await self.fs.read(bf["path"])
+                    if not existing:
+                        await self.fs.write(bf["path"], bf["content"], bf.get("language", "text"))
+                        await self.emit({"type": "file_written", "data": {"path": bf["path"]}})
+                    else:
+                        await self._record_event(
+                            "backend_coder", "info",
+                            f"Skipped overwrite of existing file: {bf['path']}",
+                        )
+                await self._record_message(
+                    "agent", "backend_coder",
+                    f"**Backend:** {backend_data.get('summary', 'Backend services implemented.')}",
+                    meta={"model": backend_res["model_label"],
+                          "files": [bf["path"] for bf in backend_files]},
+                )
+                await self._record_event("backend_coder", "completed",
+                                         f"Generated {len(backend_files)} backend file(s).")
+            except Exception as backend_err:
+                # Backend coder failure is non-fatal for non-full_stack modes
+                await self._record_event("backend_coder", "skipped",
+                                         f"Backend Coder skipped: {backend_err}",
+                                         meta={"error": str(backend_err)})
+
         # 4) Reviewer (first pass) — non-fatal: if the Reviewer returns invalid JSON and
         #    repair also fails, record the event but continue to deterministic validation.
         #    The project is only failed if the required files are actually missing.
@@ -1168,6 +1262,55 @@ class Orchestrator:
             {"$set": {"coverage_score": coverage, "updated_at": _now()}},
         )
         await self.emit({"type": "coverage_score", "data": coverage})
+
+        # ── Phase 3: Security Agent (conditional) ────────────────────────────
+        # Called for full_stack, api_service, dashboard, admin_panel, or auth builds.
+        if needs_security_agent(mode, bool(sd.get("auth_required"))):
+            await self._check_cancel()
+            await self._record_event("security", "started", "Security agent reviewing code.")
+            try:
+                sec_files = final_files
+                security_input = json.dumps({
+                    "files": [{"path": f["path"], "content": f["content"]}
+                               for f in sec_files if f["path"] not in _META_FILES],
+                    "mode": mode,
+                    "auth_required": sd.get("auth_required", False),
+                }, indent=2)
+                sec_res = await self._run_agent("security", SECURITY_PROMPT, security_input)
+                sec_data = sec_res["data"]
+                await self.db.projects.update_one(
+                    {"id": self.project_id},
+                    {"$set": {"security_report": sec_data, "updated_at": _now()}},
+                )
+                await self.emit({"type": "security_report", "data": sec_data})
+                violations = sec_data.get("violations", [])
+                critical_violations = [v for v in violations if v.get("severity") in ("critical", "high")]
+                sec_msg = (
+                    f"**Security Review · Risk: {sec_data.get('risk_level', 'unknown')}**\n\n"
+                    f"{sec_data.get('summary', '')}"
+                )
+                if violations:
+                    sec_msg += f"\n\n**Violations found:** {len(violations)}"
+                await self._record_message(
+                    "agent", "security", sec_msg,
+                    meta={"model": sec_res["model_label"], "violations": len(violations)},
+                )
+                if critical_violations:
+                    err = (
+                        f"Security review found {len(critical_violations)} critical/high violation(s). "
+                        f"First: {critical_violations[0].get('description', '')} — "
+                        f"Fix: {critical_violations[0].get('fix', '')}"
+                    )
+                    await self._fail_project("security", err)
+                    await self._record_message("system", None, err, meta={"error": err})
+                    return
+                await self._record_event("security", "completed",
+                                         f"Security review passed. Risk: {sec_data.get('risk_level', 'low')}")
+            except Exception as sec_err:
+                # Security review is non-fatal for non-auth builds; log and continue
+                await self._record_event("security", "skipped",
+                                         f"Security agent skipped: {sec_err}",
+                                         meta={"error": str(sec_err)})
 
         await self._set_status("ready", {
             "completed_at": _now(),
