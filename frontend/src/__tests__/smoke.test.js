@@ -175,3 +175,45 @@ test("root .env.example exists with required placeholders", () => {
   expect(content).toMatch(/MONGO_URL=/);
   expect(content).not.toMatch(/[a-zA-Z0-9]{32,}/); // no real secrets
 });
+
+// ── WebSocket reconnect ───────────────────────────────────────────────────────
+
+test("workspace has WebSocket reconnect state tracking", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  // Must have reconnect attempt counter
+  expect(content).toMatch(/wsReconnectAttempt/);
+  // Must use exponential backoff (** or Math.pow)
+  expect(content).toMatch(/2\s*\*\*\s*wsReconnectAttempt|Math\.pow/);
+  // Must cap reconnect delay
+  expect(content).toMatch(/30000/);
+  // Must clean up on unmount
+  expect(content).toMatch(/clearTimeout/);
+});
+
+test("workspace ws banner shows reconnecting state not static message", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  // Must show contextual reconnect message
+  expect(content).toMatch(/reconnecting/i);
+  // Must NOT say "Reopen the workspace" (old static message)
+  expect(content).not.toMatch(/Reopen the workspace/);
+});
+
+// ── Import cleanliness ────────────────────────────────────────────────────────
+
+test("project list does not import unused Video icon", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/ProjectList.jsx"),
+    "utf8"
+  );
+  // Video is not used anywhere in ProjectList — should not be imported
+  expect(content).not.toMatch(/\bVideo\b/);
+});

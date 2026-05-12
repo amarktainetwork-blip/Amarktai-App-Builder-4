@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Trash2, Sparkles, ArrowRight, Github, LogOut, Activity, ShieldCheck, Users, Image, Video, Palette, Cpu } from "lucide-react";
+import { Trash2, Sparkles, ArrowRight, Github, LogOut, Activity, ShieldCheck, Users, Image, Palette, Cpu } from "lucide-react";
 import { toast } from "sonner";
 
 import Header from "@/components/Header";
