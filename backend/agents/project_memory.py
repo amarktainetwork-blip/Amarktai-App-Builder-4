@@ -36,6 +36,8 @@ from typing import Any
 _MAX_ITERATION_HISTORY = 20
 # Maximum agent decision records to retain
 _MAX_AGENT_DECISIONS = 50
+# Maximum design signatures to retain for diversity tracking
+_MAX_DESIGN_SIGNATURES = 20
 
 
 # ── Schema ───────────────────────────────────────────────────────────────────
@@ -214,7 +216,7 @@ def update_memory_design(memory: dict, design_direction: dict) -> dict:
         existing_style_names = {s.get("styleName") for s in existing_sigs}
         if sig.get("styleName") not in existing_style_names:
             existing_sigs.append(sig)
-        memory["designSignatures"] = existing_sigs[-20:]  # keep last 20
+        memory["designSignatures"] = existing_sigs[-_MAX_DESIGN_SIGNATURES:]  # keep last N
 
     memory["design"] = design
     memory["media"] = media

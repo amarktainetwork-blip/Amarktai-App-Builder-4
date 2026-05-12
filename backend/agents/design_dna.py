@@ -34,6 +34,9 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+# Maximum design signatures to retain per project (matches project_memory._MAX_DESIGN_SIGNATURES)
+_MAX_DESIGN_SIGNATURES = 20
+
 # ── Layout archetype catalogue ────────────────────────────────────────────────
 
 # Canonical set of layout archetypes (mirrors design_engine._DESIGN_STYLES layout_rhythm values)
@@ -232,7 +235,7 @@ def record_design_choice(memory: dict, design_direction: dict) -> dict:
 
     existing_sigs = list(existing_sigs)
     existing_sigs.append(sig)
-    memory["designSignatures"] = existing_sigs[-20:]
+    memory["designSignatures"] = existing_sigs[-_MAX_DESIGN_SIGNATURES:]
     return memory
 
 
