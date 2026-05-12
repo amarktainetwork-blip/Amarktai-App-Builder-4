@@ -79,6 +79,18 @@ _TINY_FONT_SIZE = re.compile(
     r"font-size\s*:\s*([0-9]+)px",
     re.IGNORECASE,
 )
+# Detects CSS custom properties usage (design token proof)
+_CSS_CUSTOM_PROPS = re.compile(
+    r"var\(--[a-zA-Z]",
+    re.IGNORECASE,
+)
+# Detects placeholder/not-found page content that should never appear in production
+_PLACEHOLDER_PAGE_PAT = re.compile(
+    r"\bcoming\s+soon\b|\bunder\s+construction\b|\bdetail\s+not\s+found\b"
+    r"|\bpage\s+not\s+found\b|\bno\s+content\s+yet\b|\bpage\s+in\s+progress\b"
+    r"|\bcontent\s+coming\b|\bplaceholder\s+page\b|\bwork\s+in\s+progress\b",
+    re.IGNORECASE,
+)
 
 # ── Security helpers ────────────────────────────────────────────────────────
 
@@ -110,6 +122,15 @@ _HAS_JWT = re.compile(r"jwt|jsonwebtoken|PyJWT|python-jose", re.IGNORECASE)
 
 _HTML_TAG = re.compile(r"<[^>]+>")
 _WHITESPACE = re.compile(r"\s+")
+# Numeric page count from prompt: "6 pages", "6-page", "six page" etc.
+_PAGE_COUNT_PAT = re.compile(
+    r"\b((?:\d+|two|three|four|five|six|seven|eight|nine|ten))\s*[-–]?\s*page",
+    re.IGNORECASE,
+)
+_WORD_TO_NUM = {
+    "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+}
 
 
 def _strip_html(content: str) -> str:
@@ -124,6 +145,24 @@ def _word_count(content: str) -> int:
 def _count_sections(html_content: str) -> int:
     """Count distinct top-level section-like blocks."""
     return len(_SECTION_TAGS.findall(html_content))
+
+
+def extract_requested_page_count(prompt: str) -> int:
+    """Extract the numeric page count from a prompt string.
+
+    Returns the integer page count if found, else 0.
+    Examples:
+      "Build a 6-page BMW website" → 6
+      "5 page website" → 5
+      "complete website with five pages" → 5
+    """
+    m = _PAGE_COUNT_PAT.search(prompt)
+    if not m:
+        return 0
+    raw = m.group(1).lower().strip()
+    if raw.isdigit():
+        return int(raw)
+    return _WORD_TO_NUM.get(raw, 0)
 
 
 # ── Scoring functions ────────────────────────────────────────────────────────
@@ -289,6 +328,15 @@ def _score_static_landing(
             "Add a <link> to fonts.bunny.net to ensure custom typography renders."
         )
 
+    # Check for CSS custom properties usage (design token contract)
+    # Sites using a design_direction must declare --font-heading, --font-body etc. via var()
+    if css.strip() and not _CSS_CUSTOM_PROPS.search(css):
+        design -= 8
+        design_errors.append(
+            "CSS does not use custom properties (var(--font-heading) etc.). "
+            "Declare :root CSS vars for fonts, colors, and spacing per the design direction."
+        )
+
     # Flag very low opacity text (near-invisible)
     if _LOW_OPACITY_TEXT.search(css):
         design -= 10
@@ -310,6 +358,22 @@ def _score_static_landing(
                 break
         except ValueError:
             pass
+
+    # ── Placeholder page check ────────────────────────────────────────────────
+    # Penalize pages with "coming soon", "under construction", "detail not found" etc.
+    for path, f in files_by_path.items():
+        if path.endswith(".html"):
+            page_content = f.get("content", "")
+            if _PLACEHOLDER_PAGE_PAT.search(page_content):
+                quality -= 10
+                quality_errors.append(
+                    f"Placeholder/not-found content detected in {path}. "
+                    "Generate complete, real page content."
+                )
+                design -= 5
+                design_errors.append(
+                    f"Placeholder content detected in {path} — page is incomplete."
+                )
 
     return max(0, quality), max(0, design), quality_errors, design_errors
 
@@ -499,8 +563,8 @@ def _score_security(
 # ── Public API ───────────────────────────────────────────────────────────────
 
 # Minimum passing thresholds (problem statement spec)
-MIN_QUALITY_SCORE = 75
-MIN_DESIGN_SCORE = 70
+MIN_QUALITY_SCORE = 80
+MIN_DESIGN_SCORE = 80
 MIN_SECURITY_SCORE = 75  # Only enforced when auth/security is relevant
 
 
@@ -539,6 +603,12 @@ def score_project_quality(
                 "service": "services.html",
                 "pricing": "pricing.html",
                 "contact": "contact.html",
+                "inventory": "inventory.html",
+                "vehicle": "vehicle-detail.html",
+                "financ": "finance.html",
+                "team": "team.html",
+                "portfolio": "portfolio.html",
+                "blog": "blog.html",
             }
             for keyword, page_file in page_keywords.items():
                 if keyword in prompt_lower and page_file not in files_by_path:
@@ -546,6 +616,28 @@ def score_project_quality(
                     quality_errors.append(
                         f"Prompt mentions '{keyword}' but {page_file} was not generated."
                     )
+
+            # Strict page count enforcement: if prompt requests N pages, require N .html files
+            html_files = [p for p in files_by_path if p.endswith(".html")]
+            requested_page_count = extract_requested_page_count(prompt)
+            if requested_page_count >= 3 and len(html_files) < requested_page_count:
+                shortage = requested_page_count - len(html_files)
+                penalty = min(40, shortage * 12)
+                quality_score -= penalty
+                quality_errors.append(
+                    f"Prompt requested {requested_page_count} pages but only {len(html_files)} "
+                    f"HTML file(s) generated ({', '.join(html_files[:5])}). "
+                    f"All {requested_page_count} pages must be generated."
+                )
+
+            # If only index.html exists for a multi-page request (3+ pages), fail hard
+            if requested_page_count >= 3 and len(html_files) == 1 and html_files[0] == "index.html":
+                quality_score -= 25
+                quality_errors.append(
+                    f"Only index.html generated for a {requested_page_count}-page request. "
+                    "Multi-page builds require all pages as separate .html files."
+                )
+
             # Multi-page: ensure all generated HTML pages link a stylesheet.
             # Cap total penalty at 16 points to avoid punishing large sites excessively.
             pages_missing_css = [

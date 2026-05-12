@@ -140,6 +140,10 @@ export default function WorkspacePage() {
       });
       Projects.files(projectId).then(setFiles);
       setRefreshKey((k) => k + 1);
+    } else if (evt.type === "files_refreshed") {
+      // Batch refresh after iteration — fetch all files once instead of per-file
+      Projects.files(projectId).then(setFiles);
+      setRefreshKey((k) => k + 1);
     } else if (evt.type === "usage") {
       setLastModel(evt.data.model);
       setProject((p) => p ? {
@@ -199,6 +203,13 @@ export default function WorkspacePage() {
     } else if (evt.type === "iteration_complete") {
       if (evt.data) {
         setIterationResult(evt.data);
+        // Refresh files and project state after iteration
+        Projects.files(projectId).then(setFiles);
+        Projects.get(projectId).then((p) => {
+          setProject(p);
+          if (p?.last_validation) setLastValidation(p.last_validation);
+        });
+        setRefreshKey((k) => k + 1);
         // Notify user if iteration left unsatisfied changes
         const unsatisfied = evt.data.unsatisfiedChanges;
         if (Array.isArray(unsatisfied) && unsatisfied.length > 0) {
@@ -210,6 +221,34 @@ export default function WorkspacePage() {
       }
     }
   }, [projectId]);
+
+  // Polling fallback: while build is running, poll for project state every 5s
+  // in case WebSocket events are missed or connection is unstable.
+  const pollTimerRef = useRef(null);
+  useEffect(() => {
+    const busy = project?.status === "running" || project?.status === "queued";
+    if (!busy) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+      return;
+    }
+    if (!pollTimerRef.current) {
+      pollTimerRef.current = setInterval(() => {
+        Projects.get(projectId).then((p) => {
+          setProject((prev) => {
+            // Only update if status actually changed to avoid unnecessary re-renders
+            if (!prev || prev.status !== p.status) return p;
+            return prev;
+          });
+          if (p?.last_validation) setLastValidation(p.last_validation);
+        }).catch(() => {/* ignore poll errors */});
+      }, 5000);
+    }
+    return () => {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    };
+  }, [projectId, project?.status]);
 
   useEffect(() => {
     let destroyed = false;

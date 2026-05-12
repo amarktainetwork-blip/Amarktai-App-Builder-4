@@ -115,10 +115,64 @@ def get_required_files(project_type: str, build_mode: str | None = None,
         return ["index.html", "styles.css", "README.md", "amarktai.project.json"]
     if project_type == "multi-page-site":
         files = ["index.html", "styles.css", "README.md", "amarktai.project.json"]
-        if any(x in prompt_lower for x in ("5-page", "five page", "multi-page", "pricing", "about", "services", "contact")):
-            files += ["about.html", "services.html", "pricing.html", "contact.html"]
+        # Extract numeric page count from prompt
+        import re as _re
+        _page_count_pat = _re.compile(
+            r"\b((?:\d+|two|three|four|five|six|seven|eight|nine|ten))\s*[-–]?\s*page",
+            _re.IGNORECASE,
+        )
+        _word_to_num = {
+            "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+            "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        }
+        requested_count = 0
+        m = _page_count_pat.search(prompt_lower)
+        if m:
+            raw = m.group(1).lower().strip()
+            requested_count = int(raw) if raw.isdigit() else _word_to_num.get(raw, 0)
+
+        # Domain-specific page sets
+        domain_pages: list[str] = []
+        is_automotive = any(
+            kw in prompt_lower for kw in ["bmw", "mercedes", "audi", "lexus", "porsche",
+                                           "automotive", "dealership", "car dealer",
+                                           "used car", "luxury car", "vehicle", "automobile"]
+        )
+        if is_automotive:
+            domain_pages = ["inventory.html", "vehicle-detail.html", "about.html",
+                            "finance.html", "contact.html"]
         else:
-            files += ["about.html"]
+            # Standard keyword-based pages
+            if any(x in prompt_lower for x in ("5-page", "five page", "multi-page",
+                                                "pricing", "contact", "about", "services")):
+                domain_pages = ["about.html", "services.html", "pricing.html", "contact.html"]
+            elif any(x in prompt_lower for x in ("about",)):
+                domain_pages = ["about.html"]
+            # Collect individual keyword pages not covered by the above
+            keyword_pages = {
+                "about": "about.html",
+                "service": "services.html",
+                "pric": "pricing.html",
+                "contact": "contact.html",
+                "inventory": "inventory.html",
+                "vehicle": "vehicle-detail.html",
+                "financ": "finance.html",
+                "team": "team.html",
+                "blog": "blog.html",
+                "portfolio": "portfolio.html",
+                "faq": "faq.html",
+            }
+            for keyword, page_file in keyword_pages.items():
+                if keyword in prompt_lower and page_file not in domain_pages:
+                    domain_pages.append(page_file)
+
+        # When N pages are explicitly requested, ensure we require enough page files
+        for page in domain_pages:
+            if page not in files:
+                files.append(page)
+
+        # If explicit count requires MORE pages than we've accumulated, note it in README
+        # (we can't auto-generate unknown page names, but we enforce the known ones)
         return files
     if project_type == "react-app":
         return ["package.json", "index.html", "src/main.jsx", "src/App.jsx", "README.md", "amarktai.project.json", ".env.example"]
