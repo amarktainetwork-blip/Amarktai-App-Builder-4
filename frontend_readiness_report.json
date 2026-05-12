@@ -1,0 +1,175 @@
+{
+  "audit_timestamp": "2026-05-12T15:19:04.914Z",
+  "prompt3_readiness": "MOSTLY",
+  "summary": "The frontend is functional and production-capable for the current workspace flow. However, it lacks the dedicated dashboard page structure, public website sub-routes, and animation libraries needed for the full Prompt 3 overhaul.",
+
+  "current_routing": {
+    "routes": [
+      { "path": "/",                      "component": "Landing",       "status": "implemented", "notes": "Full landing page with Nav, Hero, Features (anchor), Pipeline (anchor), CTA, Footer" },
+      { "path": "/login",                 "component": "Login",         "status": "implemented" },
+      { "path": "/contact",               "component": "Contact",       "status": "implemented" },
+      { "path": "/privacy",               "component": "Privacy",       "status": "implemented" },
+      { "path": "/terms",                 "component": "Terms",         "status": "implemented" },
+      { "path": "/app",                   "component": "ProjectList",   "status": "implemented", "notes": "Serves as dashboard home + new build form" },
+      { "path": "/workspace/:projectId",  "component": "Workspace",     "status": "implemented" },
+      { "path": "/system",                "component": "SystemHealth",  "status": "implemented" },
+      { "path": "/admin/users",           "component": "AdminUsers",    "status": "implemented" }
+    ],
+    "missing_routes": [
+      { "route": "/features",   "notes": "Content exists as #features anchor on Landing — not a dedicated route" },
+      { "route": "/pipeline",   "notes": "Content exists as #pipeline anchor on Landing — not a dedicated route" },
+      { "route": "/access",     "notes": "No access/waitlist page exists" },
+      { "route": "/dashboard",  "notes": "Alias needed for /app; current URL is /app which is not intuitive" },
+      { "route": "/projects",   "notes": "Alias for /app; no dedicated projects list page separate from dashboard" },
+      { "route": "/media",      "notes": "Media library is a dialog, not a page/route" },
+      { "route": "/settings",   "notes": "Settings is a dialog, not a dedicated page/route" }
+    ]
+  },
+
+  "dashboard_structure": {
+    "status": "monolithic",
+    "description": "The dashboard is a single /app page (ProjectList.jsx, 588 lines) that combines dashboard home, new build form, project list, and repo import. There are no dedicated sub-pages for Dashboard Home, New Build, Repo Workbench, Media Library, or Settings.",
+    "what_exists": [
+      "Project list with status cards",
+      "New build form (prompt, mode, quality tier, media choice, advanced options)",
+      "Repo import form (GitHub URL + branch)",
+      "System readiness banner",
+      "Settings dialog",
+      "Media Library dialog",
+      "Upgrade modal (tier confirmation)"
+    ],
+    "what_is_missing": [
+      "Dedicated Dashboard Home page with analytics/stats",
+      "Dedicated New Build page (separate route)",
+      "Dedicated Repo Workbench page (currently a panel inside Workspace)",
+      "Dedicated Projects page (separate from dashboard home)",
+      "Dedicated Media Library page",
+      "Dedicated Settings page",
+      "Sidebar navigation"
+    ]
+  },
+
+  "workspace_flow": {
+    "status": "production_ready",
+    "description": "Workspace.jsx (766 lines) is comprehensive: agent timeline, chat, file tree, code viewer, live preview, validation panel, repo workbench, settings dialog, PR dialog, media library, build plan banner, advisor panel.",
+    "implemented": [
+      "Agent timeline with real-time WebSocket events",
+      "Chat/iteration panel",
+      "File tree navigator",
+      "Code viewer",
+      "Live preview (iframe + repo structure view)",
+      "Validation panel (quality/design/security/accessibility/SEO scores)",
+      "Repo workbench panel (stack, coverage, commands)",
+      "Settings dialog",
+      "PR creation dialog",
+      "Media library dialog",
+      "Build plan banner",
+      "AI advisor panel",
+      "Clarification modal",
+      "Repo collision modal",
+      "Cancel, retry, finalize actions"
+    ],
+    "gaps": [
+      "Preview iframe auth token is in URL (security concern, noted as TODO)",
+      "No keyboard shortcuts for common actions",
+      "No diff view for file changes between iterations"
+    ]
+  },
+
+  "websocket_state": {
+    "status": "solid",
+    "hub_implemented": true,
+    "event_buffering": true,
+    "reconnect_replay": true,
+    "auto_reconnect": true,
+    "reconnect_strategy": "exponential backoff, up to 5 attempts",
+    "event_persistence": "MongoDB orchestration_events collection",
+    "connection_states": ["connecting", "connected", "reconnecting"],
+    "gaps": []
+  },
+
+  "preview_embedding": {
+    "status": "implemented",
+    "iframe_preview": true,
+    "repo_structure_view": true,
+    "build_log_display": true,
+    "repair_phase_display": true,
+    "security_concern": "Auth token passed as URL query param — visible in browser history and server logs",
+    "fallback": "Preview-fallback endpoint for failed/incomplete builds"
+  },
+
+  "design_token_readiness": {
+    "status": "production_ready",
+    "tailwind_tokens": "amk-base, amk-surface, amk-panel, amk-fg, amk-fg2, amk-fg3, amk-line, amk-accent (#00E676)",
+    "agent_colors": "scout (#FF5722), architect (#2962FF), coder (#00E676), reviewer (#FFC107), iteration (#FAFAFA)",
+    "typography": "JetBrains Mono (mono), Inter/IBM Plex Sans (sans), Space Grotesk (display)",
+    "animations": "fade-up, float, accordion-up/down (CSS only, via tailwindcss-animate)",
+    "missing_for_prompt3": [
+      "Framer Motion library (not in package.json)",
+      "Three.js / @react-three/fiber (not in package.json)",
+      "Page transition animations",
+      "Scroll-triggered animation system"
+    ]
+  },
+
+  "responsive_state": {
+    "status": "partial",
+    "landing_page": "responsive (md/lg breakpoints used)",
+    "workspace": "desktop-optimized — multiple panels would need responsive rework for mobile",
+    "mobile_workspace": "not suitable for mobile use",
+    "dashboard": "partially responsive"
+  },
+
+  "public_website_readiness": {
+    "landing_page": { "status": "implemented", "quality": "good — full sections, animations, feature chips, pipeline diagram" },
+    "features_page": { "status": "anchor only", "quality": "features section exists on Landing as #features anchor, not a dedicated /features route" },
+    "pipeline_page": { "status": "anchor only", "quality": "pipeline section exists on Landing as #pipeline anchor, not a dedicated /pipeline route" },
+    "access_page": { "status": "missing", "quality": "no waitlist, request-access, or early-access page" },
+    "contact_page": { "status": "implemented", "quality": "basic contact page exists" },
+    "login_page": { "status": "implemented", "quality": "clean login form with auth-context integration" }
+  },
+
+  "component_reuse_opportunities": [
+    "ScoreBar in ValidationPanel could be a shared design token component",
+    "Modal pattern repeated across SettingsDialog, PRDialog, MediaLibraryDialog, RepoCollisionModal — could be unified",
+    "Panel header pattern (border-b, font-mono, icon) repeated across multiple components"
+  ],
+
+  "frontend_blockers": [
+    {
+      "id": "FB-001",
+      "category": "architecture",
+      "severity": "high",
+      "description": "No sidebar navigation — dashboard is a single page with no persistent nav structure. Prompt 3 requires Dashboard Home / New Build / Workspace / Repo Workbench / Projects / Media Library / Settings as distinct navigable sections.",
+      "fix": "Add sidebar nav, convert dialogs to pages, restructure /app routing"
+    },
+    {
+      "id": "FB-002",
+      "category": "animation",
+      "severity": "medium",
+      "description": "Framer Motion not installed in frontend/package.json. Prompt 3 requires rich page transitions and micro-animations.",
+      "fix": "Add framer-motion to frontend/package.json"
+    },
+    {
+      "id": "FB-003",
+      "category": "routing",
+      "severity": "medium",
+      "description": "No dedicated /features, /pipeline, /access routes. These exist only as anchors on the Landing page.",
+      "fix": "Create dedicated pages or React Router routes for each public website section"
+    },
+    {
+      "id": "FB-004",
+      "category": "security",
+      "severity": "medium",
+      "description": "Preview iframe auth token exposed in URL query parameter.",
+      "fix": "Implement short-lived preview tokens via dedicated endpoint"
+    },
+    {
+      "id": "FB-005",
+      "category": "responsive",
+      "severity": "low",
+      "description": "Workspace is desktop-only — not suitable for mobile use.",
+      "fix": "Responsive workspace layout for Prompt 3"
+    }
+  ]
+}

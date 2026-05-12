@@ -1,0 +1,210 @@
+{
+  "audit_timestamp": "2026-05-12T15:19:04.914Z",
+  "prompt3_readiness_verdict": "MOSTLY",
+  "verdict_justification": "The backend, orchestration, runtime, and deployment infrastructure are solid and production-ready. The frontend workspace is functional and proven. What is NOT ready for Prompt 3 is: (1) the frontend dashboard architecture lacks the sidebar/multi-page structure Prompt 3 requires, (2) Framer Motion is not installed for the animations Prompt 3 will add, (3) dedicated public website routes (/features, /pipeline, /access) don't exist, and (4) there is no CI/CD pipeline. These are all solvable in Prompt 3 itself — they are not blockers that prevent starting Prompt 3, but they define what Prompt 3 must deliver.",
+
+  "critical_blockers": [
+    {
+      "id": "CB-001",
+      "title": "No sidebar navigation / multi-page dashboard architecture",
+      "description": "The dashboard is a single /app page (ProjectList). Prompt 3 requires Dashboard Home, New Build, Workspace, Repo Workbench, Projects, Media Library, and Settings as navigable dashboard sections. The current monolithic layout cannot accommodate this without a structural refactor.",
+      "impact": "Prompt 3 cannot implement the required dashboard UX without this foundation",
+      "fix": "Create a DashboardLayout with sidebar, convert dialog-based features to routed pages, restructure /app/* routes",
+      "owner": "frontend",
+      "estimated_effort": "large"
+    },
+    {
+      "id": "CB-002",
+      "title": "No CI/CD GitHub Actions pipeline",
+      "description": "No .github/workflows/ directory exists. Zero automated test runs, zero deployment automation.",
+      "impact": "Code changes cannot be validated automatically; deployment requires manual intervention",
+      "fix": "Add GitHub Actions workflow: test (pytest + frontend build) + deploy (Docker Compose on VPS via SSH)",
+      "owner": "infrastructure",
+      "estimated_effort": "medium"
+    }
+  ],
+
+  "high_priority_blockers": [
+    {
+      "id": "HP-001",
+      "title": "Framer Motion not installed",
+      "description": "Framer Motion is not in frontend/package.json. Prompt 3 animation requirements (page transitions, micro-interactions, scroll-triggered animations) require Framer Motion.",
+      "impact": "Cannot implement Prompt 3 animation layer without installation",
+      "fix": "yarn add framer-motion in frontend/",
+      "owner": "frontend",
+      "estimated_effort": "trivial"
+    },
+    {
+      "id": "HP-002",
+      "title": "No dedicated /features, /pipeline, /access routes",
+      "description": "These exist only as scroll anchors on the Landing page. Prompt 3 requires full dedicated pages.",
+      "impact": "Public website section completeness blocked",
+      "fix": "Create pages/Features.jsx, pages/Pipeline.jsx, pages/Access.jsx with routing",
+      "owner": "frontend",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "HP-003",
+      "title": "Preview auth token exposed in iframe URL",
+      "description": "Bearer token is appended to iframe src as a query param — visible in browser history, server logs, and referrer headers.",
+      "impact": "Security risk for production users",
+      "fix": "Implement short-lived signed preview tokens via /api/projects/:id/preview-token endpoint",
+      "owner": "backend+frontend",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "HP-004",
+      "title": "Playwright / axe-core not installed — real browser accessibility testing unavailable",
+      "description": "Accessibility agent uses regex-based static analysis only. Full browser-rendered WCAG testing requires Playwright + axe-core.",
+      "impact": "Cannot claim real accessibility scores — they are approximations",
+      "fix": "Add playwright + axe-core to requirements; provision headless Chromium in Docker",
+      "owner": "backend+infrastructure",
+      "estimated_effort": "large"
+    },
+    {
+      "id": "HP-005",
+      "title": "Lighthouse not installed — no real Core Web Vitals",
+      "description": "SEO/performance agent uses static HTML analysis only. No real LCP, FID, CLS scores.",
+      "impact": "Performance scores are estimations, not real measurements",
+      "fix": "Integrate Lighthouse CLI or a Node.js sidecar service",
+      "owner": "backend+infrastructure",
+      "estimated_effort": "large"
+    }
+  ],
+
+  "medium_priority_blockers": [
+    {
+      "id": "MP-001",
+      "title": "Visual QA does not capture real screenshots",
+      "description": "Visual QA agent analyzes LLM-generated code text, not actual rendered pages. No screenshot capture is implemented.",
+      "impact": "Visual quality scores are LLM approximations, not real renders",
+      "fix": "Integrate Playwright screenshot into PreviewService.build_preview(); pass screenshot to Visual QA",
+      "owner": "backend",
+      "estimated_effort": "large"
+    },
+    {
+      "id": "MP-002",
+      "title": "ExecutionGraph is a wrapper, not true DAG executor",
+      "description": "The ExecutionGraph in app/orchestrator/execution_graph.py wraps the legacy Orchestrator and provides lifecycle tracking but delegates all execution to the linear pipeline. True parallel DAG execution is not implemented.",
+      "impact": "Build pipeline remains linear — no parallelism, no true dynamic branching",
+      "fix": "For Prompt 3+: implement per-node execution with asyncio.gather for independent nodes",
+      "owner": "backend",
+      "estimated_effort": "large"
+    },
+    {
+      "id": "MP-003",
+      "title": "Workspace not responsive for mobile",
+      "description": "The multi-panel workspace layout is desktop-only. Mobile/tablet users cannot effectively use the workspace.",
+      "impact": "Excludes mobile users from core functionality",
+      "fix": "Responsive workspace: collapsible panels, mobile-first tab layout",
+      "owner": "frontend",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "MP-004",
+      "title": "No diff view for file changes between iterations",
+      "description": "CodeViewer shows current file content only. Users cannot see what changed between iterations.",
+      "impact": "Reduced transparency and trust in iteration system",
+      "fix": "Add diff view to CodeViewer using version store API",
+      "owner": "frontend",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "MP-005",
+      "title": "test_result.md is empty (no test data recorded)",
+      "description": "The test_result.md file contains only the testing protocol header — no actual test results have been recorded for this repo.",
+      "impact": "No documented test coverage state",
+      "fix": "Run backend/tests suite and record results in test_result.md",
+      "owner": "testing",
+      "estimated_effort": "small"
+    }
+  ],
+
+  "polish_items": [
+    {
+      "id": "PI-001",
+      "title": "Brave Search API gives Scout real web research capability — configure and document",
+      "description": "BRAVE_SEARCH_API_KEY is optional. Without it, Scout cannot search the web for competitor/market research.",
+      "fix": "Document in README and onboarding that Brave Search enhances Scout's research depth"
+    },
+    {
+      "id": "PI-002",
+      "title": "Dashboard /app URL is not intuitive — add /dashboard alias",
+      "description": "Power users expect /dashboard, not /app",
+      "fix": "Add <Route path='/dashboard' element={<Navigate to='/app' replace />} />"
+    },
+    {
+      "id": "PI-003",
+      "title": "No keyboard shortcuts in workspace",
+      "description": "Common actions (iterate, finalize, switch tabs) have no keyboard shortcuts",
+      "fix": "Add global keyboard shortcut map"
+    },
+    {
+      "id": "PI-004",
+      "title": "ClarificationModal could be non-blocking",
+      "description": "Currently the modal must be dismissed before viewing anything — could be shown as a sidebar prompt",
+      "fix": "Convert to dismissible sidebar panel"
+    },
+    {
+      "id": "PI-005",
+      "title": "test_reports/ and tests/ directories are placeholder/empty",
+      "description": "Top-level tests/__init__.py is empty; test_reports/pytest/ has only .gitkeep",
+      "fix": "Remove empty stubs or populate with actual test artifacts"
+    }
+  ],
+
+  "future_items": [
+    {
+      "id": "FI-001",
+      "title": "True DAG parallel execution in ExecutionGraph",
+      "description": "Implement per-node asyncio parallelism so independent agents run concurrently"
+    },
+    {
+      "id": "FI-002",
+      "title": "Pricing / billing integration",
+      "description": "quality_tier exists (cheap/balanced/premium) but no payment/subscription layer. Stripe is in requirements.txt but not wired to any endpoint."
+    },
+    {
+      "id": "FI-003",
+      "title": "Three.js / React Three Fiber in builder UI",
+      "description": "3D elements in the builder dashboard itself (not just in generated apps)"
+    },
+    {
+      "id": "FI-004",
+      "title": "Real-time collaboration (multi-user workspace)",
+      "description": "Multiple users editing/reviewing the same project simultaneously"
+    },
+    {
+      "id": "FI-005",
+      "title": "Organization / team support",
+      "description": "Currently only admin/user roles with no team or org concepts"
+    }
+  ],
+
+  "readiness_scorecard": {
+    "backend_intelligence":      { "score": 8, "max": 10, "notes": "Full FastAPI backend, 18 agents, MongoDB, JWT, settings store — production-grade" },
+    "agent_orchestration":       { "score": 7, "max": 10, "notes": "All 18 agents wired, ExecutionGraph tracking added, but linear pipeline only — no true DAG parallelism" },
+    "runtime_previews":          { "score": 7, "max": 10, "notes": "SandboxManager + PreviewService implemented, honest results, but auth token in URL is a security gap" },
+    "repo_repair":               { "score": 8, "max": 10, "notes": "RepairEngine with checkpoints, diffs, targeted fixes, PR creation — solid" },
+    "versioning_rollback":       { "score": 8, "max": 10, "notes": "Full file snapshots, version records, restore API — production ready" },
+    "media_logo_systems":        { "score": 8, "max": 10, "notes": "Media director, Pixabay, logo agent, persistent media library — comprehensive" },
+    "realtime_websocket":        { "score": 9, "max": 10, "notes": "Hub with buffering, reconnect replay, MongoDB persistence, exponential backoff auto-reconnect" },
+    "frontend_readiness":        { "score": 6, "max": 10, "notes": "Functional workspace but monolithic dashboard, no sidebar nav, Framer Motion missing, no dedicated public website routes" },
+    "dashboard_readiness":       { "score": 5, "max": 10, "notes": "ProjectList serves as dashboard — no multi-page structure required for Prompt 3" },
+    "public_website_readiness":  { "score": 6, "max": 10, "notes": "Landing page solid; /features, /pipeline, /access routes missing; Contact/Privacy/Terms exist" },
+    "deployment_readiness":      { "score": 8, "max": 10, "notes": "Docker Compose, Nginx SSL config, go_live_check.sh, cleanup scripts — well prepared; missing CI/CD automation" },
+    "qa_testing_readiness":      { "score": 4, "max": 10, "notes": "Backend test files exist but no CI runs them; no Playwright E2E; no GitHub Actions; Lighthouse/axe-core not installed" },
+    "overall_average":           { "score": 7.0, "max": 10, "notes": "System is production-capable today for current feature set. Prompt 3 can proceed — it IS defining what needs to be built." }
+  },
+
+  "final_answer": {
+    "ready_for_prompt3": "MOSTLY",
+    "can_start_prompt3": true,
+    "explanation": "The backend is solid. The WebSocket system is solid. The orchestration pipeline is solid. The deployment infrastructure is solid. What Prompt 3 will BUILD is the frontend/dashboard architecture that is currently missing — the sidebar, the dedicated pages, the animation layer, the public website routes. These are NOT pre-conditions to starting Prompt 3; they ARE Prompt 3. The only genuine pre-condition fix before Prompt 3 begins is: (1) install framer-motion (trivial, 1 command), and (2) acknowledge that CI/CD will be added as part of Prompt 3 delivery. Everything else is work for Prompt 3 to execute.",
+    "pre_prompt3_actions_required": [
+      "Run: cd frontend && yarn add framer-motion",
+      "Confirm deployment uses NEW repo: https://github.com/amarktainetwork-blip/Amarktai-App-Builder-3.git",
+      "Run backend tests to establish baseline: cd backend && pytest"
+    ]
+  }
+}
