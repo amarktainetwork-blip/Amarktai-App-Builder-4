@@ -92,6 +92,291 @@ _PLACEHOLDER_PAGE_PAT = re.compile(
     re.IGNORECASE,
 )
 
+# ── Extended scoring helpers (Phase 3) ───────────────────────────────────────
+
+# Conversion score patterns
+_CONVERSION_CTA_PAT = re.compile(
+    r'<(a|button)[^>]*>(?:[^<]{1,60})</(a|button)>',
+    re.IGNORECASE | re.DOTALL,
+)
+_STRONG_CTA_VERBS = re.compile(
+    r'\b(start|get started|sign up|try|book|schedule|buy|purchase|download|subscribe'
+    r'|join|claim|unlock|access|request|contact|learn more|see how|discover|explore)\b',
+    re.IGNORECASE,
+)
+_TRUST_SIGNALS = re.compile(
+    r'trustpilot|review|testimonial|rating|star|verified|guarantee|secure|ssl|5\s*star'
+    r'|client|customer|partner|case\s+stud|social\s+proof',
+    re.IGNORECASE,
+)
+_VALUE_PROP = re.compile(
+    r'<h[12][^>]*>[^<]{8,}(?:save|grow|increase|reduce|faster|easier|smarter|better|more)[^<]{0,60}</h[12]>',
+    re.IGNORECASE | re.DOTALL,
+)
+_FORM_PAT = re.compile(r'<form\b', re.IGNORECASE)
+_PRICING_PAT = re.compile(r'pricing|price|\$\d|\d+/mo|per month|per year', re.IGNORECASE)
+
+# UX score patterns
+_NAV_PAT = re.compile(r'<nav\b', re.IGNORECASE)
+_SKIP_LINK_PAT = re.compile(r'skip\s+to\s+(main|content)', re.IGNORECASE)
+_FOOTER_PAT = re.compile(r'<footer\b', re.IGNORECASE)
+_BREADCRUMB_PAT = re.compile(r'breadcrumb|aria-label=["\']breadcrumb', re.IGNORECASE)
+_LOADING_PAT = re.compile(r'loading|spinner|skeleton|placeholder', re.IGNORECASE)
+
+# Accessibility score patterns
+_ALT_TEXT_MISSING = re.compile(r'<img\b(?![^>]*\balt=["\'][^"\']{1,}["\'])', re.IGNORECASE)
+_IMG_PAT = re.compile(r'<img\b', re.IGNORECASE)
+_ARIA_PAT = re.compile(r'\baria-(?:label|labelledby|describedby|role|hidden)\b', re.IGNORECASE)
+_LANG_PAT = re.compile(r'<html[^>]+lang=["\'][a-z]{2}', re.IGNORECASE)
+_HEADING_H1_PAT = re.compile(r'<h1\b', re.IGNORECASE)
+_BUTTON_ARIA = re.compile(r'<button[^>]*(?:aria-label|title)=["\'][^"\']+["\']', re.IGNORECASE)
+_FOCUS_VISIBLE = re.compile(r':focus(?:-visible)?', re.IGNORECASE)
+_CONTRAST_DARK_ON_LIGHT = re.compile(
+    r'(?:color\s*:\s*#(?:000|111|222|333|1a|2a)|color\s*:\s*black|color\s*:\s*rgb\s*\(\s*0)',
+    re.IGNORECASE,
+)
+
+# SEO score patterns
+_META_DESCRIPTION = re.compile(r'<meta[^>]+name=["\']description["\']', re.IGNORECASE)
+_META_OG = re.compile(r'<meta[^>]+property=["\']og:', re.IGNORECASE)
+_CANONICAL_PAT = re.compile(r'<link[^>]+rel=["\']canonical["\']', re.IGNORECASE)
+_TITLE_PAT = re.compile(r'<title[^>]*>[^<]{5,}', re.IGNORECASE)
+_HEADING_HIERARCHY = re.compile(r'<h[1-6]\b', re.IGNORECASE)
+_STRUCTURED_DATA = re.compile(r'application/ld\+json|schema\.org', re.IGNORECASE)
+_ROBOTS_PAT = re.compile(r'<meta[^>]+name=["\']robots["\']', re.IGNORECASE)
+_SITEMAP_PAT = re.compile(r'sitemap\.xml', re.IGNORECASE)
+
+# Responsiveness score patterns
+_VIEWPORT_META = re.compile(
+    r'<meta[^>]+name=["\']viewport["\'][^>]*content=["\'][^"\']*width=device-width',
+    re.IGNORECASE,
+)
+_MEDIA_QUERY_PAT = re.compile(r'@media\s*\(', re.IGNORECASE)
+_FLUID_UNITS = re.compile(r'\b(?:vw|vh|vmin|vmax|%|em|rem|fr)\b', re.IGNORECASE)
+_GRID_FLEX_PAT = re.compile(r'display\s*:\s*(?:grid|flex)\b', re.IGNORECASE)
+_MIN_MAX_WIDTH = re.compile(r'(?:min|max)-width\s*:', re.IGNORECASE)
+
+# Performance score patterns
+_INLINE_SCRIPT_PAT = re.compile(r'<script(?!\s+src=)[^>]*>\s*.{200,}', re.IGNORECASE | re.DOTALL)
+_RENDER_BLOCKING = re.compile(
+    r'<link[^>]+rel=["\']stylesheet["\'][^>]*>(?!\s*<link[^>]+rel=["\']preload)',
+    re.IGNORECASE,
+)
+_PRELOAD_FONT = re.compile(r'<link[^>]+rel=["\']preload["\'][^>]*as=["\']font', re.IGNORECASE)
+_LAZY_LOAD = re.compile(r'loading=["\']lazy["\']', re.IGNORECASE)
+_IMG_DIMENSIONS = re.compile(r'<img[^>]+(?:width|height)=["\']', re.IGNORECASE)
+_DEFER_ASYNC_PAT = re.compile(r'<script[^>]+(?:defer|async)\b', re.IGNORECASE)
+
+def _score_conversion(html: str, css: str) -> tuple[int, list[str]]:
+    """Score conversion potential (0-100)."""
+    score = 60  # baseline
+    errors: list[str] = []
+
+    # Strong CTA verbs in buttons/links
+    ctas = _CONVERSION_CTA_PAT.findall(html)
+    cta_text = " ".join(c[0] if isinstance(c, tuple) else c for c in ctas)
+    if _STRONG_CTA_VERBS.search(html):
+        score += 15
+    else:
+        errors.append("No strong action-verb CTAs found (use 'Start', 'Get started', 'Book', etc.).")
+
+    # Trust signals
+    if _TRUST_SIGNALS.search(html):
+        score += 10
+    else:
+        errors.append("No trust signals detected (add testimonials, ratings, or social proof).")
+
+    # Form presence (lead capture)
+    if _FORM_PAT.search(html):
+        score += 10
+    else:
+        errors.append("No lead-capture form detected (add a contact, signup, or waitlist form).")
+
+    # Pricing information
+    if _PRICING_PAT.search(html):
+        score += 5
+
+    return min(100, max(0, score)), errors
+
+
+def _score_ux(html: str, css: str) -> tuple[int, list[str]]:
+    """Score UX quality (0-100)."""
+    score = 60
+    errors: list[str] = []
+
+    if _NAV_PAT.search(html):
+        score += 10
+    else:
+        errors.append("No <nav> element found. Navigation is required for good UX.")
+
+    if _FOOTER_PAT.search(html):
+        score += 5
+    else:
+        errors.append("No <footer> found. Footer with links improves site completion.")
+
+    if _SKIP_LINK_PAT.search(html):
+        score += 5
+    else:
+        errors.append("No skip-to-content link found. Add for keyboard users.")
+
+    if _RESPONSIVE_PATTERNS.search(css + html):
+        score += 10
+    else:
+        errors.append("No responsive layout detected. Mobile UX will suffer.")
+
+    if _GRID_FLEX_PAT.search(css):
+        score += 10
+    else:
+        errors.append("No CSS grid/flexbox layout found. Use modern layout for better UX.")
+
+    return min(100, max(0, score)), errors
+
+
+def _score_accessibility(html: str, css: str) -> tuple[int, list[str]]:
+    """Score accessibility (0-100)."""
+    score = 60
+    errors: list[str] = []
+
+    if _LANG_PAT.search(html):
+        score += 10
+    else:
+        errors.append("Missing lang attribute on <html> element (e.g. lang=\"en\").")
+
+    if _HEADING_H1_PAT.search(html):
+        score += 5
+    else:
+        errors.append("No <h1> heading found. Every page needs exactly one <h1>.")
+
+    imgs = _IMG_PAT.findall(html)
+    missing_alt = _ALT_TEXT_MISSING.findall(html)
+    if imgs and missing_alt:
+        penalty = min(20, len(missing_alt) * 5)
+        score -= penalty
+        errors.append(f"{len(missing_alt)} image(s) missing alt text.")
+    elif not imgs:
+        pass  # no images — no penalty
+    else:
+        score += 10
+
+    if _ARIA_PAT.search(html):
+        score += 10
+    else:
+        errors.append("No ARIA attributes found. Add aria-label/aria-describedby for interactive elements.")
+
+    if _FOCUS_VISIBLE.search(css):
+        score += 5
+    else:
+        errors.append("No :focus-visible CSS found. Add focus styles for keyboard navigation.")
+
+    if _SKIP_LINK_PAT.search(html):
+        score += 10
+    else:
+        errors.append("No skip-to-main-content link found.")
+
+    return min(100, max(0, score)), errors
+
+
+def _score_seo(html: str) -> tuple[int, list[str]]:
+    """Score SEO basics (0-100)."""
+    score = 40
+    errors: list[str] = []
+
+    if _TITLE_PAT.search(html):
+        score += 15
+    else:
+        errors.append("Missing or empty <title> tag.")
+
+    if _META_DESCRIPTION.search(html):
+        score += 15
+    else:
+        errors.append("Missing meta description tag.")
+
+    if _META_OG.search(html):
+        score += 10
+    else:
+        errors.append("No Open Graph meta tags found (og:title, og:description, og:image).")
+
+    if _CANONICAL_PAT.search(html):
+        score += 5
+    else:
+        errors.append("No canonical link tag found.")
+
+    headings = _HEADING_HIERARCHY.findall(html)
+    if len(headings) >= 3:
+        score += 10
+    elif headings:
+        score += 5
+    else:
+        errors.append("No semantic heading hierarchy (h1-h6) found.")
+
+    if _STRUCTURED_DATA.search(html):
+        score += 5
+
+    return min(100, max(0, score)), errors
+
+
+def _score_responsiveness(html: str, css: str) -> tuple[int, list[str]]:
+    """Score responsiveness (0-100)."""
+    score = 40
+    errors: list[str] = []
+
+    if _VIEWPORT_META.search(html):
+        score += 20
+    else:
+        errors.append("Missing viewport meta tag (required for mobile scaling).")
+
+    mq_count = len(_MEDIA_QUERY_PAT.findall(css))
+    if mq_count >= 3:
+        score += 20
+    elif mq_count >= 1:
+        score += 10
+        errors.append(f"Only {mq_count} media query/queries found. Add breakpoints for mobile, tablet, and desktop.")
+    else:
+        errors.append("No CSS media queries found. Add responsive breakpoints.")
+
+    if _GRID_FLEX_PAT.search(css):
+        score += 10
+    else:
+        errors.append("No CSS grid or flexbox layout detected.")
+
+    if _FLUID_UNITS.search(css):
+        score += 10
+    else:
+        errors.append("No fluid units (%, em, rem, vw) found in CSS.")
+
+    return min(100, max(0, score)), errors
+
+
+def _score_performance(html: str, css: str) -> tuple[int, list[str]]:
+    """Score performance hints (0-100)."""
+    score = 60
+    errors: list[str] = []
+
+    if _DEFER_ASYNC_PAT.search(html):
+        score += 15
+    else:
+        if re.search(r'<script\b(?!.*(?:src\s*=|type\s*=\s*["\'](?:application/ld\+json)))', html, re.IGNORECASE):
+            errors.append("Scripts are not using defer/async attribute (may block rendering).")
+
+    if _LAZY_LOAD.search(html):
+        score += 10
+    elif _IMG_PAT.search(html):
+        errors.append("Images don't use loading='lazy' attribute.")
+
+    if _PRELOAD_FONT.search(html):
+        score += 10
+    elif re.search(r'fonts\.bunny\.net|fonts\.googleapis\.com', html, re.IGNORECASE):
+        errors.append("Web fonts loaded but not preloaded (<link rel='preload' as='font'>).")
+        score -= 5
+
+    if _IMG_DIMENSIONS.search(html) or not _IMG_PAT.search(html):
+        score += 5
+    else:
+        errors.append("Images lack explicit width/height attributes (causes layout shift).")
+
+    return min(100, max(0, score)), errors
+
+
 # ── Security helpers ────────────────────────────────────────────────────────
 
 _HARDCODED_SECRET = re.compile(
@@ -700,6 +985,39 @@ def score_project_quality(
         files_by_path, project_type, auth_required
     )
 
+    # ── extended scoring (Phase 3) ────────────────────────────────────────────
+    # Compute extended scores from HTML/CSS content of the primary page.
+    _primary_html = (
+        files_by_path.get("index.html", {}).get("content", "")
+        or next(
+            (f.get("content", "") for p, f in files_by_path.items() if p.endswith(".html")),
+            "",
+        )
+    )
+    _all_css = "\n".join(
+        f.get("content", "")
+        for p, f in files_by_path.items()
+        if p.endswith(".css")
+    )
+
+    conversion_score, conversion_errors = _score_conversion(_primary_html, _all_css)
+    ux_score, ux_errors = _score_ux(_primary_html, _all_css)
+    accessibility_score, accessibility_errors = _score_accessibility(_primary_html, _all_css)
+    seo_score, seo_errors = _score_seo(_primary_html)
+    responsiveness_score, responsiveness_errors = _score_responsiveness(_primary_html, _all_css)
+    performance_score, performance_errors = _score_performance(_primary_html, _all_css)
+
+    # For non-HTML project types, set extended scores to neutral defaults.
+    if project_type not in {"static-site", "multi-page-site", "pwa", "react-app", "next-app"}:
+        conversion_score = 70
+        ux_score = 70
+        accessibility_score = 70
+        seo_score = 70
+        responsiveness_score = 70
+        performance_score = 70
+        conversion_errors = ux_errors = accessibility_errors = []
+        seo_errors = responsiveness_errors = performance_errors = []
+
     # ── media validation ──────────────────────────────────────────────────────
     # Validate media choices match what was requested
     ms = media_strategy or {}
@@ -758,4 +1076,17 @@ def score_project_quality(
         "designOk": design_ok,
         "securityOk": security_ok,
         "mediaOk": media_ok,
+        # Extended scores (Phase 3)
+        "conversionScore": conversion_score,
+        "uxScore": ux_score,
+        "accessibilityScore": accessibility_score,
+        "seoScore": seo_score,
+        "responsivenessScore": responsiveness_score,
+        "performanceScore": performance_score,
+        "conversionErrors": conversion_errors,
+        "uxErrors": ux_errors,
+        "accessibilityErrors": accessibility_errors,
+        "seoErrors": seo_errors,
+        "responsivenessErrors": responsiveness_errors,
+        "performanceErrors": performance_errors,
     }

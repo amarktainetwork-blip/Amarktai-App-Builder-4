@@ -18,6 +18,38 @@ from agents.build_contract import (
 )
 from config import valid_fernet_key
 
+# Minimal valid build-planner response (Phase 4). Prepend to responses[] lists in any
+# test that exercises the full build pipeline so the new planner agent call is satisfied
+# before the scout/architect/coder/reviewer calls occur.
+_PLANNER_RESP = {
+    "complexity": "Moderate",
+    "estimated_pages": 1,
+    "estimated_files": 4,
+    "recommended_stack": "HTML/CSS/JS",
+    "can_preview": True,
+    "preview_note": "iframe preview",
+    "missing_apis": [],
+    "build_phases": ["Scout", "Architect", "Coder", "Reviewer"],
+    "key_risks": [],
+    "estimated_quality": "Good",
+    "plan_summary": "Building your app.",
+}
+
+# Minimal valid advisor response (Phase 2). Used as the final response in full-pipeline
+# tests so the advisor agent call is satisfied after the build completes.
+_ADVISOR_RESP = {
+    "ux_improvements": ["Improve navigation"],
+    "conversion_improvements": ["Add CTA"],
+    "monetization_suggestions": ["Freemium model"],
+    "seo_suggestions": ["Add meta description"],
+    "scaling_suggestions": ["Use CDN"],
+    "weak_ux_patterns": [],
+    "quick_wins": ["Add skip link"],
+    "priority_action": "Add a strong CTA.",
+    "overall_rating": "Good",
+    "summary": "A solid foundation.",
+}
+
 
 def test_safe_project_path_accepts_relative_files():
     assert safe_project_path("src/app.js") == "src/app.js"
@@ -578,7 +610,8 @@ async def test_full_stack_mode_deterministically_repairs_required_files():
     # Use full_stack mode with reviewer that returns pass
     reviewer_resp = {"verdict": "pass", "issues": [], "patched_files": [], "summary": "OK"}
     call_count_2 = [0]
-    all_responses = responses + [reviewer_resp]
+    # Prepend planner response and append advisor response for the new pipeline steps
+    all_responses = [_PLANNER_RESP] + responses + [reviewer_resp, _ADVISOR_RESP]
 
     async def complete_se2(**kwargs):
         idx = call_count_2[0] % len(all_responses)
@@ -676,6 +709,8 @@ async def test_validation_state_written_after_build():
     db, proj, files, events, messages = _make_db()
     call_count = [0]
     responses = [
+        # planner (Phase 4)
+        _PLANNER_RESP,
         # scout
         {"summary": "App", "audience": "users", "core_features": ["home"], "requirements_md": "# Reqs"},
         # architect
@@ -694,6 +729,8 @@ async def test_validation_state_written_after_build():
         ], "summary": "Done"},
         # reviewer
         {"verdict": "pass", "issues": [], "patched_files": [], "summary": "OK"},
+        # advisor (Phase 2)
+        _ADVISOR_RESP,
     ]
 
     async def complete_se(**kwargs):
@@ -741,6 +778,7 @@ async def test_validation_events_emitted():
     db, proj, files, events, messages = _make_db()
     call_count = [0]
     responses = [
+        _PLANNER_RESP,
         {"summary": "App", "audience": "users", "core_features": [], "requirements_md": "# Reqs"},
         {"tech_stack": {"frontend": "HTML", "styling": "CSS"}, "file_plan": []},
         {"files": [
@@ -750,6 +788,7 @@ async def test_validation_events_emitted():
             {"path": "amarktai.project.json", "language": "json", "content": '{"name":"App"}'},
         ], "summary": "Done"},
         {"verdict": "pass", "issues": [], "patched_files": [], "summary": "OK"},
+        _ADVISOR_RESP,
     ]
 
     async def complete_se(**kwargs):
@@ -794,6 +833,8 @@ async def test_required_file_repair_prevents_expensive_model_repair():
     # First reviewer pass: no patches
     # Second reviewer pass (repair): adds missing files
     all_responses = [
+        # planner (Phase 4)
+        _PLANNER_RESP,
         # scout
         {"summary": "App", "audience": "users", "core_features": [], "requirements_md": "# Reqs"},
         # architect
@@ -808,6 +849,8 @@ async def test_required_file_repair_prevents_expensive_model_repair():
             {"path": "README.md", "language": "markdown", "content": "# App"},
             {"path": "amarktai.project.json", "language": "json", "content": '{"name":"App"}'},
         ], "summary": "Fixed"},
+        # advisor (Phase 2)
+        _ADVISOR_RESP,
     ]
 
     async def complete_se(**kwargs):
@@ -858,6 +901,7 @@ async def test_repair_loop_fails_after_max_attempts():
     # Deterministic repair can add companion files, but it must not overwrite existing app content.
     reviewer_resp = {"verdict": "warn", "issues": ["Possible secret"], "patched_files": [], "summary": "Still unsafe"}
     all_responses = [
+        _PLANNER_RESP,
         {"summary": "App", "audience": "users", "core_features": [], "requirements_md": "# Reqs"},
         {"tech_stack": {"frontend": "HTML", "styling": "CSS"}, "file_plan": []},
         {"files": [{"path": "index.html", "language": "html", "content": "<html><body>API_KEY=abcdef1234567890abcdef</body></html>"}], "summary": "Unsafe"},
@@ -1039,6 +1083,8 @@ async def test_reviewer_invalid_json_is_non_fatal_if_files_present():
     call_count = [0]
     # Scout, Architect, Coder succeed; Reviewer returns bad JSON
     responses = [
+        # planner (Phase 4) — valid JSON
+        _PLANNER_RESP,
         # scout
         {"summary": "App", "audience": "users", "core_features": ["home"], "requirements_md": "# Reqs"},
         # architect
@@ -1054,6 +1100,8 @@ async def test_reviewer_invalid_json_is_non_fatal_if_files_present():
         "NOT VALID JSON AT ALL !!!",
         # repair JSON (also bad so the repair fails too)
         "ALSO NOT VALID",
+        # advisor (Phase 2) — valid JSON
+        _ADVISOR_RESP,
     ]
 
     async def complete_se(**kwargs):
@@ -2301,10 +2349,12 @@ async def test_build_pipeline_emits_coverage_score():
     )
 
     responses = [
+        json.dumps(_PLANNER_RESP),
         json.dumps({"summary": "s", "audience": "a", "core_features": [], "requirements_md": "req", "make_it_better": [], "pain_points": []}),
         json.dumps({"tech_stack": {"frontend": "HTML", "backend": "none", "database": "none", "styling": "CSS", "libraries": []}, "file_plan": [], "design_notes": ""}),
         coder_blocks,
         json.dumps({"verdict": "pass", "issues": [], "patched_files": [], "summary": "ok"}),
+        json.dumps(_ADVISOR_RESP),
     ]
     idx = [0]
 
@@ -4267,6 +4317,8 @@ async def test_project_memory_saved_after_build():
     db, proj, files, events, messages = _make_db()
     call_count = [0]
     responses = [
+        # planner (Phase 4)
+        _PLANNER_RESP,
         # scout
         {"summary": "Invoicing SaaS", "audience": "freelancers", "core_features": ["invoicing", "pdf"], "requirements_md": "# Reqs"},
         # architect
@@ -4282,6 +4334,8 @@ async def test_project_memory_saved_after_build():
         ], "summary": "Done"},
         # reviewer
         {"verdict": "pass", "issues": [], "patched_files": [], "summary": "OK"},
+        # advisor (Phase 2)
+        _ADVISOR_RESP,
     ]
 
     async def complete_se(**kwargs):

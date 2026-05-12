@@ -11,6 +11,8 @@ import CodeViewer from "@/components/CodeViewer";
 import LivePreview from "@/components/LivePreview";
 import StatusBar from "@/components/StatusBar";
 import ValidationPanel from "@/components/ValidationPanel";
+import AdvisorPanel from "@/components/AdvisorPanel";
+import BuildPlanBanner from "@/components/BuildPlanBanner";
 import RepoCollisionModal from "@/components/RepoCollisionModal";
 import RepoWorkbenchPanel from "@/components/RepoWorkbenchPanel";
 import SettingsDialog from "@/components/SettingsDialog";
@@ -53,6 +55,10 @@ export default function WorkspacePage() {
   const [previewFallback, setPreviewFallback] = useState(null);
   // Iteration result: changedFiles, addedFiles
   const [iterationResult, setIterationResult] = useState(null);
+  // Phase 4: Build plan from planner agent
+  const [buildPlan, setBuildPlan] = useState(null);
+  // Phase 2: AI Product Advisor result
+  const [advisorResult, setAdvisorResult] = useState(null);
 
   const wsRef = useRef(null);
   // Auto-reconnect state: "connecting" = initial attempt, "connected" = live, "reconnecting" = retrying after drop
@@ -78,6 +84,9 @@ export default function WorkspacePage() {
         const idx = f.find((x) => x.path === "index.html") || f[0];
         setActivePath(idx.path);
       }
+      // Seed Phase 4 + Phase 2 state from stored project data
+      if (p?.build_plan) setBuildPlan(p.build_plan);
+      if (p?.advisor_result) setAdvisorResult(p.advisor_result);
     }).catch(() => toast.error("Failed to load project"));
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -219,6 +228,12 @@ export default function WorkspacePage() {
           );
         }
       }
+    } else if (evt.type === "build_plan") {
+      // Phase 4: Smart Build Planning
+      if (evt.data) setBuildPlan(evt.data);
+    } else if (evt.type === "advisor_ready") {
+      // Phase 2: AI Product Advisor
+      if (evt.data) setAdvisorResult(evt.data);
     }
   }, [projectId]);
 
@@ -545,8 +560,12 @@ export default function WorkspacePage() {
               {project.error}
             </div>
           )}
-          {/* Phase 2: Quality/design/security validation scores */}
+          {/* Phase 2: Quality/design/security + extended validation scores */}
           <ValidationPanel validation={validation} />
+          {/* Phase 4: Build plan (shown during/after build, collapses by default) */}
+          <BuildPlanBanner plan={buildPlan} />
+          {/* Phase 2: AI Product Advisor (shown after build completes) */}
+          <AdvisorPanel advisor={advisorResult} />
           {/* Phase 4: Repo workbench (shown for imported repos) */}
           {isRepoProject && (
             <RepoWorkbenchPanel

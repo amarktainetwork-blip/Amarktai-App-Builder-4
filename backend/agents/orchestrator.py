@@ -30,6 +30,8 @@ from .build_contract import (
 from .mcp_tools import ProjectFS
 from .prompts import (
     ARCHITECT_PROMPT,
+    ADVISOR_PROMPT,
+    BUILD_PLANNER_PROMPT,
     CODER_PROMPT,
     ITERATION_PROMPT,
     REPO_FIX_PROMPT,
@@ -695,6 +697,19 @@ class Orchestrator:
                     "qualityErrors": validation.get("qualityErrors", []),
                     "designErrors": validation.get("designErrors", []),
                     "securityErrors": validation.get("securityErrors", []),
+                    # Phase 3: extended scores
+                    "conversionScore": validation.get("conversionScore", 0),
+                    "uxScore": validation.get("uxScore", 0),
+                    "accessibilityScore": validation.get("accessibilityScore", 0),
+                    "seoScore": validation.get("seoScore", 0),
+                    "responsivenessScore": validation.get("responsivenessScore", 0),
+                    "performanceScore": validation.get("performanceScore", 0),
+                    "conversionErrors": validation.get("conversionErrors", []),
+                    "uxErrors": validation.get("uxErrors", []),
+                    "accessibilityErrors": validation.get("accessibilityErrors", []),
+                    "seoErrors": validation.get("seoErrors", []),
+                    "responsivenessErrors": validation.get("responsivenessErrors", []),
+                    "performanceErrors": validation.get("performanceErrors", []),
                 },
             }},
         )
@@ -714,6 +729,19 @@ class Orchestrator:
                     "qualityErrors": validation.get("qualityErrors", []),
                     "designErrors": validation.get("designErrors", []),
                     "securityErrors": validation.get("securityErrors", []),
+                    # Phase 3: extended scores
+                    "conversionScore": validation.get("conversionScore", 0),
+                    "uxScore": validation.get("uxScore", 0),
+                    "accessibilityScore": validation.get("accessibilityScore", 0),
+                    "seoScore": validation.get("seoScore", 0),
+                    "responsivenessScore": validation.get("responsivenessScore", 0),
+                    "performanceScore": validation.get("performanceScore", 0),
+                    "conversionErrors": validation.get("conversionErrors", []),
+                    "uxErrors": validation.get("uxErrors", []),
+                    "accessibilityErrors": validation.get("accessibilityErrors", []),
+                    "seoErrors": validation.get("seoErrors", []),
+                    "responsivenessErrors": validation.get("responsivenessErrors", []),
+                    "performanceErrors": validation.get("performanceErrors", []),
                 },
             })
         return validation_state
@@ -725,6 +753,61 @@ class Orchestrator:
 
         # Load project memory at the start of the build (Phase 1)
         memory = await load_memory(self.db, self.project_id)
+
+        # ── Phase 4: Smart Build Planning ────────────────────────────────────
+        # Run a lightweight build planner to estimate complexity and explain the
+        # plan to the user before the agents start coding.
+        try:
+            await self._check_cancel()
+            plan_input = json.dumps({
+                "prompt": user_prompt,
+                "mode": mode,
+                "stack_decision": sd,
+            })
+            plan_result = await self._run_agent("planner", BUILD_PLANNER_PROMPT, plan_input)
+            plan_data = plan_result["data"]
+            await self.db.projects.update_one(
+                {"id": self.project_id},
+                {"$set": {"build_plan": plan_data, "updated_at": _now()}},
+            )
+            await self.emit({"type": "build_plan", "data": plan_data})
+            # Compose a concise plan message for the user
+            plan_msg_parts = [
+                f"**Build Plan · {plan_data.get('complexity', 'Moderate')} complexity**\n\n"
+                f"{plan_data.get('plan_summary', '')}",
+            ]
+            if plan_data.get("estimated_pages"):
+                plan_msg_parts.append(
+                    f"\n**Estimated:** {plan_data['estimated_pages']} page(s) · "
+                    f"{plan_data.get('estimated_files', '?')} files"
+                )
+            if plan_data.get("recommended_stack"):
+                plan_msg_parts.append(f"\n**Stack:** {plan_data['recommended_stack']}")
+            if plan_data.get("missing_apis"):
+                plan_msg_parts.append(
+                    "\n**APIs to simulate:** " + ", ".join(plan_data["missing_apis"])
+                )
+            if plan_data.get("key_risks"):
+                plan_msg_parts.append(
+                    "\n**Key risks:** " + " · ".join(plan_data["key_risks"])
+                )
+            can_preview = plan_data.get("can_preview", True)
+            plan_msg_parts.append(
+                f"\n**Preview:** {'✓ Live iframe preview' if can_preview else '✗ No browser preview — see Code tab'}"
+                + (f" · {plan_data['preview_note']}" if plan_data.get("preview_note") else "")
+            )
+            await self._record_message(
+                "agent", "planner",
+                "\n".join(plan_msg_parts),
+                meta={"model": plan_result["model_label"], "build_plan": plan_data},
+            )
+        except Exception as planner_err:
+            # Build planning is non-fatal — log and continue
+            await self._record_event(
+                "planner", "skipped",
+                f"Build planner skipped: {planner_err}",
+                meta={"error": str(planner_err)},
+            )
 
         # 1) Scout
         await self._check_cancel()
@@ -1066,6 +1149,61 @@ class Orchestrator:
             "preview_strategy": preview_strategy,
         })
         await self.emit({"type": "build_complete", "data": {"preview_strategy": preview_strategy}})
+
+        # ── Phase 2: AI Product Advisor ───────────────────────────────────────
+        # Run advisor after build is complete and status is "ready".
+        # Non-fatal: if advisor fails, the build result is still valid.
+        try:
+            project_for_advisor = await self._load_project()
+            last_val = project_for_advisor.get("last_validation", {})
+            advisor_input = json.dumps({
+                "prompt": user_prompt,
+                "mode": mode,
+                "file_count": len(final_files),
+                "file_paths": [f["path"] for f in final_files],
+                "quality_score": last_val.get("qualityScore", 0),
+                "design_score": last_val.get("designScore", 0),
+                "conversion_score": last_val.get("conversionScore", 0),
+                "ux_score": last_val.get("uxScore", 0),
+                "accessibility_score": last_val.get("accessibilityScore", 0),
+                "seo_score": last_val.get("seoScore", 0),
+                "responsiveness_score": last_val.get("responsivenessScore", 0),
+                "performance_score": last_val.get("performanceScore", 0),
+            })
+            advisor_result = await self._run_agent("advisor", ADVISOR_PROMPT, advisor_input)
+            advisor_data = advisor_result["data"]
+            await self.db.projects.update_one(
+                {"id": self.project_id},
+                {"$set": {"advisor_result": advisor_data, "updated_at": _now()}},
+            )
+            await self.emit({"type": "advisor_ready", "data": advisor_data})
+            # Compose a readable advisor message
+            advisor_parts = [
+                f"**Product Advisor · {advisor_data.get('overall_rating', 'Good')}**\n\n"
+                f"{advisor_data.get('summary', '')}",
+            ]
+            if advisor_data.get("priority_action"):
+                advisor_parts.append(f"\n**Priority action:** {advisor_data['priority_action']}")
+            if advisor_data.get("quick_wins"):
+                advisor_parts.append(
+                    "\n**Quick wins:**\n" + "\n".join(f"- {w}" for w in advisor_data["quick_wins"])
+                )
+            if advisor_data.get("weak_ux_patterns"):
+                advisor_parts.append(
+                    "\n**Weak UX patterns detected:**\n"
+                    + "\n".join(f"- {p}" for p in advisor_data["weak_ux_patterns"])
+                )
+            await self._record_message(
+                "agent", "advisor",
+                "\n".join(advisor_parts),
+                meta={"model": advisor_result["model_label"], "advisor": advisor_data},
+            )
+        except Exception as advisor_err:
+            await self._record_event(
+                "advisor", "skipped",
+                f"Product advisor skipped: {advisor_err}",
+                meta={"error": str(advisor_err)},
+            )
 
     async def _run_research(self, user_prompt: str, stack_decision: dict | None) -> None:
         """Research mode: produce a research brief and build prompt, no code files."""
