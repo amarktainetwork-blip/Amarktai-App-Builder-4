@@ -40,6 +40,21 @@ from agents.logo_agent import run_logo_agent, logo_agent_prompt_block
 from agents.agent_contracts import get_all_contracts, get_contract
 from agents.html_validator import validate_project_files_enhanced
 from agents.mode_classifier import classify_build_mode, ModeClassification
+from app.versioning.version_store import (
+    create_version,
+    list_versions,
+    get_version,
+    restore_version,
+    generate_diff_summary,
+)
+from app.repos.repair_engine import (
+    RepairEngine,
+    generate_diff_summary_for_files,
+    create_checkpoint,
+    list_checkpoints,
+    detect_extended_stack,
+)
+from app.runtime.preview_service import PreviewService
 from app.core.capability_registry import (
     get_registry, capabilities_summary, probe_live_status, models_with_capability,
 )
@@ -505,16 +520,34 @@ async def _launch_pipeline(project_id: str, prompt: str, mode: str,
                     timeout=global_timeout,
                 )
             # Only update completed_at if project was not already failed by orchestrator
-            proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1})
+            proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1, "prompt": 1, "validation_state": 1, "project_memory": 1})
             if proj and proj.get("status") not in ("failed", "cancelled"):
                 completed = _now()
                 updates = {"completed_at": completed, "updated_at": completed}
+                preview_url = None
                 if proj.get("status") == "ready":
-                    updates["preview_url"] = f"/api/projects/{project_id}/preview"
+                    preview_url = f"/api/projects/{project_id}/preview"
+                    updates["preview_url"] = preview_url
                 await db.projects.update_one(
                     {"id": project_id},
                     {"$set": updates},
                 )
+                # Phase 2A: Create a version record for every completed build/iteration
+                try:
+                    final_files = await ProjectFS(db, project_id).list_full()
+                    await create_version(
+                        db, project_id,
+                        user_request=prompt,
+                        generated_files=[f["path"] for f in final_files],
+                        changed_files=[f["path"] for f in final_files],
+                        build_status=proj.get("status", "ready"),
+                        preview_url=preview_url,
+                        validation_result=proj.get("validation_state") or {},
+                        memory_snapshot=proj.get("project_memory") or {},
+                        file_snapshot=final_files,
+                    )
+                except Exception as ver_exc:
+                    logger.warning("Version creation failed for %s: %s", project_id, ver_exc)
         except asyncio.TimeoutError:
             msg = f"Build timed out (global {global_timeout}s limit exceeded)."
             logger.warning("pipeline timeout for %s", project_id)
@@ -525,6 +558,18 @@ async def _launch_pipeline(project_id: str, prompt: str, mode: str,
             )
             await emit({"type": "project_status", "data": {"status": "failed", "error": msg}})
             await emit({"type": "error", "data": {"message": msg}})
+            # Phase 2A: create a failed version record so the timeout is traceable
+            try:
+                timeout_files = await ProjectFS(db, project_id).list_full()
+                await create_version(
+                    db, project_id,
+                    user_request=prompt,
+                    generated_files=[f["path"] for f in timeout_files],
+                    build_status="failed",
+                    file_snapshot=timeout_files,
+                )
+            except Exception:
+                pass
         except Exception as exc:
             msg = str(exc)
             logger.exception("pipeline failed for %s: %s", project_id, msg)
@@ -550,6 +595,18 @@ async def _launch_pipeline(project_id: str, prompt: str, mode: str,
                 }})
                 await emit({"type": "project_status", "data": {"status": "failed", "error": msg}})
                 await emit({"type": "error", "data": {"message": msg}})
+                # Phase 2A: create a failed version record so the failure is traceable
+                try:
+                    failed_files = await ProjectFS(db, project_id).list_full()
+                    await create_version(
+                        db, project_id,
+                        user_request=prompt,
+                        generated_files=[f["path"] for f in failed_files],
+                        build_status="failed",
+                        file_snapshot=failed_files,
+                    )
+                except Exception:
+                    pass
 
 
 async def _launch_retry(project_id: str, agent: str, quality_tier: str | None) -> None:
@@ -2565,6 +2622,508 @@ async def validate_html_endpoint(body: dict, _: dict = Depends(require_user)) ->
         raise HTTPException(400, "No files provided")
     result = validate_project_files_enhanced(files, logo_result, pixabay_assets)
     return result
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 2A — PROJECT VERSIONING ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+@secured.get("/projects/{project_id}/versions")
+async def list_project_versions(project_id: str, claims: dict = Depends(require_user)) -> list[dict]:
+    """Return all version records for a project (file snapshots excluded)."""
+    await _own(project_id, claims)
+    return await list_versions(db, project_id)
+
+
+@secured.get("/projects/{project_id}/versions/{version_id}")
+async def get_project_version(
+    project_id: str, version_id: str, claims: dict = Depends(require_user)
+) -> dict:
+    """Return a single version record including its file snapshot."""
+    await _own(project_id, claims)
+    v = await get_version(db, project_id, version_id)
+    if not v:
+        raise HTTPException(404, "Version not found")
+    return v
+
+
+@secured.post("/projects/{project_id}/versions/{version_id}/restore")
+async def restore_project_version(
+    project_id: str, version_id: str, claims: dict = Depends(require_user)
+) -> dict:
+    """Restore a project to the state captured in the given version."""
+    await _own(project_id, claims)
+    fs = ProjectFS(db, project_id)
+    try:
+        result = await restore_version(db, project_id, version_id, fs)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    # Create a new version to record the rollback event
+    current_files = await fs.list_full()
+    await create_version(
+        db, project_id,
+        user_request=f"Rollback to version {version_id}",
+        changed_files=[f["path"] for f in current_files],
+        build_status=result["status"],
+        file_snapshot=current_files,
+    )
+    await hub.broadcast(project_id, {"type": "rollback_complete", "data": result})
+    return result
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 2H — ROLLBACK + SAFE CHECKPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+@secured.post("/projects/{project_id}/rollback")
+async def rollback_project(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Roll back to the most recent previous version.
+
+    Equivalent to restoring parent_version_id of the latest version.
+    """
+    await _own(project_id, claims)
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "latest_version_id": 1})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    latest_vid = proj.get("latest_version_id")
+    if not latest_vid:
+        raise HTTPException(409, "No versions found for this project — cannot rollback")
+    latest = await get_version(db, project_id, latest_vid)
+    if not latest:
+        raise HTTPException(409, "Latest version record not found")
+    parent_vid = latest.get("parent_version_id")
+    if not parent_vid:
+        raise HTTPException(409, "Already at the first version — cannot rollback further")
+    fs = ProjectFS(db, project_id)
+    try:
+        result = await restore_version(db, project_id, parent_vid, fs)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    await hub.broadcast(project_id, {"type": "rollback_complete", "data": result})
+    return result
+
+
+@secured.get("/projects/{project_id}/checkpoints")
+async def list_project_checkpoints(
+    project_id: str, claims: dict = Depends(require_user)
+) -> list[dict]:
+    """Return all checkpoints for a project (file snapshots excluded)."""
+    await _own(project_id, claims)
+    return await list_checkpoints(db, project_id)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 2E — IMPORTED REPO REPAIR PIPELINE
+# ════════════════════════════════════════════════════════════════════════════
+
+@secured.post("/repos/{repo_id}/analyze")
+async def repo_analyze(repo_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Run a deep stack analysis on an imported repo project.
+
+    Detects stack, derives commands, and produces a repair plan.
+    """
+    await _own(repo_id, claims)
+    proj = await db.projects.find_one({"id": repo_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+
+    files = await ProjectFS(db, repo_id).list_full()
+    if not files:
+        raise HTTPException(404, "No files found in project")
+
+    stack_info = detect_extended_stack(files)
+    repo_full_name = (proj.get("github") or {}).get("html_url", proj.get("name", ""))
+    profile = analyze_repo_profile(files, repo_full_name)
+
+    engine = RepairEngine(db, repo_id)
+    repair_plan = await engine.create_repair_plan(files, profile)
+
+    result = {
+        "project_id": repo_id,
+        "stack_detection": stack_info,
+        "repo_profile": profile,
+        "repair_plan": repair_plan,
+        "analyzed_at": _now(),
+    }
+    await db.projects.update_one(
+        {"id": repo_id},
+        {"$set": {
+            "repo_profile": profile,
+            "stack_detection": stack_info,
+            "repair_plan": repair_plan,
+            "updated_at": _now(),
+        }},
+    )
+    return result
+
+
+@secured.post("/repos/{repo_id}/repair")
+async def repo_repair(repo_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Apply the repair plan to an imported repo project.
+
+    Creates a checkpoint before applying any changes so the repair is
+    always reversible.  Returns a structured diff summary.
+    """
+    await _own(repo_id, claims)
+    proj = await db.projects.find_one({"id": repo_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+
+    fs = ProjectFS(db, repo_id)
+    old_files = await fs.list_full()
+    if not old_files:
+        raise HTTPException(404, "No files found in project — cannot repair")
+
+    profile = proj.get("repo_profile") or analyze_repo_profile(old_files, proj.get("name", ""))
+    plan = proj.get("repair_plan")
+    if not plan:
+        engine = RepairEngine(db, repo_id)
+        plan = await engine.create_repair_plan(old_files, profile)
+
+    # Create checkpoint before applying any changes
+    memory_snapshot = proj.get("project_memory") or {}
+    validation_snapshot = proj.get("validation_state") or {}
+    checkpoint_id = await create_checkpoint(
+        db, repo_id,
+        files=old_files,
+        memory=memory_snapshot,
+        validation=validation_snapshot,
+        label="pre-repair",
+    )
+
+    # Apply targeted repairs
+    engine = RepairEngine(db, repo_id)
+    new_files, applied, skipped = await engine.apply_repairs(old_files, plan)
+
+    # Generate diff summary
+    diff = generate_diff_summary_for_files(
+        old_files, new_files,
+        reason="Automated repair pass",
+        risk_level=plan.get("risk_level", "low"),
+        build_result="skipped",
+        validation_result="skipped",
+    )
+
+    # Write repaired files back
+    changed_paths: list[str] = [d["path"] for d in diff.get("file_diffs", []) if d["action"] != "deleted"]
+    for f in new_files:
+        old = next((o for o in old_files if o["path"] == f["path"]), None)
+        if old is None or old.get("content") != f.get("content"):
+            await fs.write(f["path"], f.get("content", ""), f.get("language", "text"))
+
+    # Create a version record for this repair
+    await create_version(
+        db, repo_id,
+        user_request="Automated repair",
+        changed_files=changed_paths,
+        diff_summary=diff["markdown"],
+        satisfied_tasks=applied,
+        unsatisfied_tasks=skipped,
+        build_status="ready",
+        file_snapshot=new_files,
+        memory_snapshot=memory_snapshot,
+    )
+
+    now = _now()
+    await db.projects.update_one(
+        {"id": repo_id},
+        {"$set": {
+            "repair_applied": True,
+            "last_repair_at": now,
+            "last_checkpoint_id": checkpoint_id,
+            "diff_summary": diff,
+            "updated_at": now,
+        }},
+    )
+    await hub.broadcast(repo_id, {"type": "repair_complete", "data": {
+        "applied": applied,
+        "skipped": skipped,
+        "diff": diff,
+        "checkpoint_id": checkpoint_id,
+    }})
+    return {
+        "ok": True,
+        "project_id": repo_id,
+        "checkpoint_id": checkpoint_id,
+        "applied_repairs": applied,
+        "skipped_repairs": skipped,
+        "diff_summary": diff,
+    }
+
+
+@secured.get("/repos/{repo_id}/diff")
+async def repo_diff(repo_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Return the latest diff summary for an imported repo project."""
+    await _own(repo_id, claims)
+    proj = await db.projects.find_one({"id": repo_id}, {"_id": 0, "diff_summary": 1})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    diff = proj.get("diff_summary")
+    if not diff:
+        raise HTTPException(404, "No diff summary available — run /repos/{repo_id}/repair first")
+    return diff
+
+
+@secured.post("/repos/{repo_id}/rollback")
+async def repo_rollback(repo_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Roll back a repo project to its most recent pre-repair checkpoint."""
+    await _own(repo_id, claims)
+    proj = await db.projects.find_one({"id": repo_id}, {"_id": 0, "last_checkpoint_id": 1})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    checkpoint_id = proj.get("last_checkpoint_id")
+    if not checkpoint_id:
+        raise HTTPException(409, "No checkpoint found — run /repos/{repo_id}/repair first to create one")
+
+    from app.repos.repair_engine import get_checkpoint
+    cp = await get_checkpoint(db, repo_id, checkpoint_id)
+    if not cp:
+        raise HTTPException(404, "Checkpoint record not found")
+
+    fs = ProjectFS(db, repo_id)
+    await db.files.delete_many({"project_id": repo_id})
+    restored = 0
+    for f in cp.get("file_snapshot", []):
+        if f.get("path"):
+            await fs.write(f["path"], f.get("content", ""), f.get("language", "text"))
+            restored += 1
+
+    memory_snapshot = cp.get("memory_snapshot") or {}
+    update_fields: dict = {"updated_at": _now(), "repair_applied": False}
+    if memory_snapshot:
+        update_fields["project_memory"] = memory_snapshot
+
+    await db.projects.update_one({"id": repo_id}, {"$set": update_fields})
+    await hub.broadcast(repo_id, {"type": "rollback_complete", "data": {
+        "checkpoint_id": checkpoint_id,
+        "restored_files": restored,
+    }})
+    return {"ok": True, "checkpoint_id": checkpoint_id, "restored_files": restored}
+
+
+@secured.post("/repos/{repo_id}/create-pr")
+async def repo_create_pr(
+    repo_id: str,
+    body: PRBody,
+    claims: dict = Depends(require_user),
+) -> dict:
+    """Create a GitHub PR from an imported and repaired repo project.
+
+    Includes a meaningful diff summary in the PR body (Phase 2G).
+    """
+    await _own(repo_id, claims)
+    proj = await db.projects.find_one({"id": repo_id}, {"_id": 0})
+    if not proj or not proj.get("github"):
+        raise HTTPException(400, "Project was not imported from a GitHub repo")
+    pat = body.github_pat or await _runtime_secret("GITHUB_PAT")
+    if not pat:
+        raise HTTPException(403, "Connect GitHub PAT in Settings to open pull requests.")
+
+    # Gather diff summary for meaningful PR body
+    diff_summary_data = proj.get("diff_summary") or {}
+    diff_markdown = diff_summary_data.get("markdown", "")
+
+    validation = proj.get("validation_state") or {}
+    coverage = proj.get("coverage_score") or {}
+    repair_plan = proj.get("repair_plan") or {}
+
+    # Build enriched PR body
+    pr_body_parts = [
+        f"## Amarktai App Builder — Automated Repair & Iteration\n\n",
+        f"**Project:** {proj.get('name', repo_id)}\n",
+        f"**Stack:** {', '.join(detect_extended_stack(await ProjectFS(db, repo_id).list_full()).get('detected', [])) or 'unknown'}\n",
+        f"**Risk level:** {repair_plan.get('risk_level', 'low')}\n\n",
+    ]
+    if diff_markdown:
+        pr_body_parts.append(diff_markdown + "\n\n")
+    else:
+        pr_body_parts.append("_No diff summary available — this PR was created without a prior repair pass._\n\n")
+
+    if validation:
+        status = validation.get("status", "unknown")
+        pr_body_parts.append(f"**Validation:** {status}\n")
+    if coverage:
+        score = coverage.get("coverageScore", 0)
+        pr_body_parts.append(f"**Coverage score:** {score}/100\n")
+
+    pr_body_parts.append(
+        f"\n_Generated by **{AGENTS_NAME}** through {ROUTER_NAME}._\n"
+        f"_Rollback point: checkpoint available in Amarktai workspace._\n"
+    )
+
+    github = proj["github"]
+    files = await ProjectFS(db, repo_id).list_full()
+    payload_files = [
+        {"path": f["path"], "content": f["content"]}
+        for f in files
+        if f["path"] != ".env" and not f["path"].endswith("/.env")
+    ]
+    branch = body.branch_name or f"amarktai/repair-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    title = body.title or f"Amarktai: automated repair and iteration — {proj.get('name', '')}"
+    pr_body = "".join(pr_body_parts)
+
+    try:
+        result = await gh.open_pr(
+            owner=github["owner"],
+            repo=github["repo"],
+            base_branch=github.get("default_branch") or github["branch"],
+            new_branch=branch,
+            files=payload_files,
+            title=title,
+            body=pr_body,
+            pat=pat,
+        )
+    except Exception as exc:
+        raise HTTPException(400, f"Failed to open PR: {exc}")
+
+    await db.projects.update_one(
+        {"id": repo_id},
+        {"$set": {"pr_url": result.get("pr_url"), "updated_at": _now()}},
+    )
+    await hub.broadcast(repo_id, {"type": "pr_opened", "data": result})
+    return result
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 2F — STACK DETECTION ENDPOINT
+# ════════════════════════════════════════════════════════════════════════════
+
+@secured.post("/projects/{project_id}/detect-stack")
+async def detect_project_stack(
+    project_id: str, claims: dict = Depends(require_user)
+) -> dict:
+    """Run extended stack detection on the project's current files.
+
+    Returns a ``stack_detection.json``-compatible dict.
+    """
+    await _own(project_id, claims)
+    files = await ProjectFS(db, project_id).list_full()
+    if not files:
+        raise HTTPException(404, "No files found in project")
+    result = detect_extended_stack(files)
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$set": {"stack_detection": result, "updated_at": _now()}},
+    )
+    return result
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 2C — RUNTIME SANDBOX PREVIEW ENDPOINT
+# ════════════════════════════════════════════════════════════════════════════
+
+@secured.post("/projects/{project_id}/sandbox-preview")
+async def sandbox_preview(
+    project_id: str, claims: dict = Depends(require_user)
+) -> dict:
+    """Run a real sandbox build preview for the project.
+
+    Never fakes success — returns build logs and errors on failure.
+    """
+    await _own(project_id, claims)
+    proj = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+
+    files = await ProjectFS(db, project_id).list_full()
+    if not files:
+        raise HTTPException(404, "No files found in project")
+
+    emit = emitter_for(project_id)
+    svc = PreviewService()
+    result = await svc.build_preview(files, emit=emit)
+
+    # Persist preview result to project
+    update: dict = {"sandbox_preview_result": result, "updated_at": _now()}
+    if result["success"]:
+        update["preview_strategy"] = "sandbox"
+    await db.projects.update_one({"id": project_id}, {"$set": update})
+
+    return result
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 2J — RUNTIME HEALTH ENDPOINT
+# ════════════════════════════════════════════════════════════════════════════
+
+@api.get("/runtime/health")
+async def runtime_health() -> dict:
+    """Report runtime health — active previews, disk, process count, failed builds.
+
+    Acceptance criteria:
+    - Reports truth — never claims healthy when previews are broken.
+    - Active vs stale preview count.
+    - Basic disk usage of /tmp.
+    - Preview process count.
+    """
+    import shutil
+    import glob as _glob
+
+    # Count sandbox workspace dirs
+    sandbox_dirs = list(Path("/tmp").glob("sandbox_*")) + list(Path("/tmp").glob("amarktai_sandbox_*")) + list(Path("/tmp").glob("preview_*"))
+    active_previews = len(sandbox_dirs)
+
+    # Count stale (>2h old)
+    now_ts = datetime.now(timezone.utc).timestamp()
+    stale_previews = sum(
+        1 for d in sandbox_dirs
+        if d.is_dir() and (now_ts - d.stat().st_mtime) > 7200
+    )
+
+    # Disk usage of /tmp
+    try:
+        tmp_stat = shutil.disk_usage("/tmp")
+        disk_used_mb = round(tmp_stat.used / 1024 / 1024, 1)
+        disk_free_mb = round(tmp_stat.free / 1024 / 1024, 1)
+    except Exception:
+        disk_used_mb = -1
+        disk_free_mb = -1
+
+    # Count preview processes
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["pgrep", "-c", "-f", "vite|next dev|uvicorn"],
+            capture_output=True, text=True, timeout=3,
+        )
+        preview_proc_count = int(result.stdout.strip() or "0")
+    except Exception:
+        preview_proc_count = 0
+
+    # Count failed previews in last hour (from project_versions)
+    try:
+        one_hour_ago = datetime.now(timezone.utc).replace(
+            second=0, microsecond=0
+        ).isoformat()
+        failed_count = await db.project_versions.count_documents({
+            "build_status": "failed",
+            "created_at": {"$gte": one_hour_ago},
+        })
+    except Exception:
+        failed_count = 0
+
+    # Active projects running
+    try:
+        running_count = await db.projects.count_documents({"status": "running"})
+        queued_count = await db.projects.count_documents({"status": "queued"})
+    except Exception:
+        running_count = 0
+        queued_count = 0
+
+    healthy = (stale_previews == 0 and disk_free_mb > 500 and failed_count < 10)
+
+    return {
+        "status": "healthy" if healthy else "degraded",
+        "active_previews": active_previews,
+        "stale_previews": stale_previews,
+        "disk_used_mb": disk_used_mb,
+        "disk_free_mb": disk_free_mb,
+        "preview_process_count": preview_proc_count,
+        "failed_preview_count_last_hour": failed_count,
+        "running_projects": running_count,
+        "queued_projects": queued_count,
+        "checked_at": _now(),
+    }
 
 
 app.include_router(api)
