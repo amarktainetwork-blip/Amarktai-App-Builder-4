@@ -18,7 +18,10 @@ export default function RepoWorkbenchPage() {
     System.capabilitiesStatus().then(setCapabilities).catch(() => setCapabilities(null));
   }, []);
 
-  const githubConfigured = !!settings.GITHUB_PAT?.configured || !!capabilities?.summary?.github_integration?.available;
+  const githubCap = capabilities?.summary?.github_integration;
+  const githubConfigured = !!settings.GITHUB_PAT?.configured || !!githubCap?.configured;
+  const githubLive = githubCap?.live_status === "live_ok" || githubCap?.live_status === "key_present_live_ok";
+  const githubLabel = githubLive ? "Available" : githubConfigured ? "Configured" : "Missing";
 
   const importRepo = async (e) => {
     e.preventDefault();
@@ -61,7 +64,7 @@ export default function RepoWorkbenchPage() {
 
           <div className="grid gap-3 md:grid-cols-2">
             <TruthBox title="Public import" value="Available" ok copy="Imports public repos and creates a workspace for analysis." />
-            <TruthBox title="Private repo / PR" value={githubConfigured ? "Available" : "Requires setup"} ok={githubConfigured} copy="Needs GITHUB_PAT in Settings before private operations can run." />
+            <TruthBox title="Private repo / PR" value={githubLabel} ok={githubConfigured} copy={githubCap?.reason || "Needs GITHUB_PAT in Settings before private operations can run."} />
           </div>
 
           <Button type="submit" disabled={busy} data-testid="import-repo-btn" className="h-11 w-full bg-white font-mono text-xs uppercase tracking-wider text-black hover:bg-zinc-200">
@@ -75,7 +78,7 @@ export default function RepoWorkbenchPage() {
           <LockKeyhole className="h-5 w-5 text-amk-accent" />
           <h2 className="mt-3 font-display text-xl text-white">GitHub PAT state</h2>
           <div className="mt-2 font-mono text-xs uppercase tracking-wider" style={{ color: githubConfigured ? "#00E676" : "#FFC107" }}>
-            {githubConfigured ? "Available" : "Requires setup"}
+            {githubLabel}
           </div>
           <p className="mt-2 text-xs leading-5 text-amk-fg3">
             Missing PAT is not treated as success. The workbench will still allow public import, but private repo and PR actions remain setup-dependent.

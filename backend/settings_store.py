@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+import logging
 from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet, InvalidToken
 
 from config import SECRET_KEYS, effective_fernet_key
+
+logger = logging.getLogger("amarktai.settings")
 
 
 def _now() -> str:
@@ -38,27 +41,89 @@ def decrypt_value(value: str) -> str:
         raise RuntimeError("Stored setting cannot be decrypted with the configured key") from exc
 
 
-async def get_secret(db, key: str) -> str | None:
+async def safe_get_secret(db, key: str, env_fallback: bool = True) -> dict:
+    """Resolve a secret without letting bad encrypted settings crash runtime status.
+
+    Returns a structured result and never exposes encrypted values.
+    """
     if key not in SECRET_KEYS:
         raise ValueError(f"Unsupported secret key: {key}")
-    doc = await db.settings.find_one({"key": key}, {"_id": 0})
+
+    env_value = os.environ.get(key) or None
+    try:
+        doc = await db.settings.find_one({"key": key}, {"_id": 0})
+    except Exception as exc:
+        if env_fallback and env_value:
+            return {
+                "value": env_value,
+                "source": "env",
+                "configured": True,
+                "error": "settings_lookup_failed",
+            }
+        return {
+            "value": None,
+            "source": "missing",
+            "configured": False,
+            "error": f"settings_lookup_failed: {type(exc).__name__}",
+        }
+
     if doc and doc.get("encrypted_value"):
-        value = decrypt_value(doc["encrypted_value"])
-        if value:
-            return value
-    return os.environ.get(key) or None
+        try:
+            value = decrypt_value(doc["encrypted_value"])
+            if value:
+                return {
+                    "value": value,
+                    "source": "settings",
+                    "configured": True,
+                    "updated_at": doc.get("updated_at"),
+                }
+        except Exception:
+            logger.warning("Stored setting for %s could not be decrypted; falling back to env", key)
+            try:
+                await db.settings.update_one(
+                    {"key": key},
+                    {"$set": {"status": "decrypt_failed", "decrypt_failed_at": _now()}},
+                )
+            except Exception:
+                pass
+            if env_fallback and env_value:
+                return {
+                    "value": env_value,
+                    "source": "env",
+                    "configured": True,
+                    "updated_at": doc.get("updated_at"),
+                    "error": "decrypt_failed",
+                    "stored_status": "decrypt_failed",
+                }
+            return {
+                "value": None,
+                "source": "decrypt_failed",
+                "configured": False,
+                "updated_at": doc.get("updated_at"),
+                "error": "Stored setting cannot be decrypted with the configured key",
+                "stored_status": "decrypt_failed",
+            }
+
+    if env_fallback and env_value:
+        return {"value": env_value, "source": "env", "configured": True}
+    return {"value": None, "source": "missing", "configured": False}
+
+
+async def get_secret(db, key: str) -> str | None:
+    return (await safe_get_secret(db, key, env_fallback=True)).get("value") or None
 
 
 async def settings_status(db, key: str) -> dict:
-    value = await get_secret(db, key)
-    stored = await db.settings.find_one({"key": key}, {"_id": 0, "updated_at": 1})
-    source = "settings" if stored else ("env" if os.environ.get(key) else None)
+    resolved = await safe_get_secret(db, key, env_fallback=True)
+    value = resolved.get("value")
     return {
         "configured": bool(value),
         "set": bool(value),
         "preview": mask_secret(value),
-        "source": source,
-        "updated_at": stored.get("updated_at") if stored else None,
+        "source": resolved.get("source"),
+        "status": resolved.get("stored_status") or resolved.get("source"),
+        "error": resolved.get("error"),
+        "updated_at": resolved.get("updated_at"),
     }
 
 

@@ -52,6 +52,11 @@ export default function CapabilityStatus({ compact = false }) {
               <div className="mt-1 font-mono text-[10px] uppercase tracking-wider" style={{ color: status.color }}>
                 {status.label}
               </div>
+              {!compact && cap?.provider && (
+                <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-amk-fg3">
+                  {cap.provider} / {cap.live_status || "not_tested"}
+                </p>
+              )}
               {!compact && cap?.reason && <p className="mt-2 text-xs leading-5 text-amk-fg3">{cap.reason}</p>}
             </div>
           );
@@ -62,15 +67,16 @@ export default function CapabilityStatus({ compact = false }) {
 }
 
 function getStatus(capability, key) {
-  if (capability?.live_status === "key_present_live_ok") return { label: "Available", color: "#00E676" };
-  if (capability?.live_status === "key_present_live_fail" || capability?.live_status === "provider_timeout") {
+  if (capability?.live_status === "decrypt_failed") return { label: "Needs settings cleanup", color: "#FF5722" };
+  if (capability?.live_status === "live_ok" || capability?.live_status === "key_present_live_ok" || capability?.provider === "sandbox") return { label: "Available", color: "#00E676" };
+  if (capability?.live_status === "live_fail" || capability?.live_status === "key_present_live_fail" || capability?.live_status === "provider_timeout") {
     return { label: "Live check failed", color: "#FF5722" };
   }
-  if (capability?.configured && capability?.live_status === "key_present_not_tested") {
-    return { label: "Configured / not live tested", color: "#FFC107" };
+  if (capability?.configured && (capability?.live_status === "not_tested" || capability?.live_status === "key_present_not_tested" || !capability?.live_status)) {
+    return { label: "Configured", color: "#FFC107" };
   }
   if (capability?.available) return { label: "Available", color: "#00E676" };
   if (capability?.coming_soon) return { label: "Coming soon", color: "#A1A1AA" };
   if (key === "preview_generation") return { label: "Available", color: "#00E676" };
-  return { label: key === "text_generation" || key === "repo_analysis" ? "Requires setup" : "Not configured", color: "#FFC107" };
+  return { label: key === "text_generation" || key === "repo_analysis" ? "Missing" : "Missing", color: "#FFC107" };
 }

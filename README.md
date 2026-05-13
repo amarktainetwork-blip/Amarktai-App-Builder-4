@@ -63,8 +63,9 @@ Deployment target:
 - `DB_NAME`
 - `REACT_APP_BACKEND_URL`
 - `CORS_ORIGINS`
+- `BUILDS_STORAGE_ROOT`
 
-Production startup fails if critical secrets are missing or weak. `JWT_SECRET` must be at least 32 characters, `ADMIN_PASSWORD` at least 12 characters, `SETTINGS_ENCRYPTION_KEY` must be a Fernet-compatible key, and `CORS_ORIGINS` cannot be `*`.
+Production startup fails if critical secrets are missing or weak. `JWT_SECRET` must be at least 32 characters, `ADMIN_PASSWORD` at least 12 characters, `SETTINGS_ENCRYPTION_KEY` must be a Fernet-compatible key, `GENX_API_KEY` must be present, `BUILDS_STORAGE_ROOT` must be writable, and `CORS_ORIGINS` cannot be `*`.
 
 ## Optional Environment
 
@@ -73,8 +74,23 @@ Production startup fails if critical secrets are missing or weak. `JWT_SECRET` m
 - `GENX_BASE_URL`: defaults to `https://query.genx.sh/v1`.
 - `GENX_MODEL_REASONING`, `GENX_MODEL_RESEARCH`, `GENX_MODEL_EDITS`.
 - `JWT_TTL_HOURS`, `BACKEND_PORT`, `FRONTEND_PORT`.
+- `QWEN_API_KEY`, `QWEN_BASE_URL`, `QWEN_MODEL_CHAT`, `QWEN_MODEL_CODE`, `QWEN_MODEL_IMAGE`, `QWEN_MODEL_VIDEO`, `QWEN_MODEL_AUDIO`.
+- `PIXABAY_API_KEY`: enables stock media.
 
-When GitHub PAT is missing, GitHub write actions are disabled and readiness warns. When Brave Search is missing, web research is disabled and readiness warns. When GenX is missing or invalid, readiness fails and AI actions are disabled.
+When GitHub PAT, Qwen, Brave Search, or Pixabay are missing, their provider-backed actions are disabled and readiness warns. When GenX is missing or invalid, readiness fails and AI actions are disabled.
+
+## Settings Encryption Recovery
+
+Saved provider settings are encrypted with `SETTINGS_ENCRYPTION_KEY`. Do not generate a new key for an existing Mongo database unless you are intentionally rotating settings. If the key changes, old saved settings become undecryptable. The app reports this as `decrypt_failed` and falls back to environment variables where available.
+
+Cleanup tools:
+
+```bash
+python scripts/cleanup_bad_settings.py --dry-run
+python scripts/cleanup_bad_settings.py --delete-bad
+```
+
+See `docs/production-settings-recovery.md`.
 
 ## Readiness
 
@@ -156,8 +172,8 @@ sudo nginx -t && sudo systemctl reload nginx
 1. SSH into your VPS.
 2. Clone the repository:
    ```bash
-   git clone https://github.com/amarktainetwork-blip/Amarktai-App-Builder.git
-   cd Amarktai-App-Builder
+   git clone https://github.com/amarktainetwork-blip/Amarktai-App-Builder-4.git
+   cd Amarktai-App-Builder-4
    ```
 3. Generate secrets and fill in `.env`:
    ```bash
@@ -181,4 +197,7 @@ sudo nginx -t && sudo systemctl reload nginx
    ```bash
    curl https://builder.amarktai.com/api/health
    curl https://builder.amarktai.com/api/readiness
+   curl https://builder.amarktai.com/api/capabilities
    ```
+
+For the current VPS path and full redeploy checklist, see `docs/deploy.md`.

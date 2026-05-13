@@ -225,31 +225,33 @@ function ProviderSummary({ settings, capabilities }) {
 }
 
 function capabilityStatusLabel(capability, configured, required = false) {
-  if (capability?.live_status === "key_present_live_ok") return "Available";
-  if (capability?.live_status === "key_present_live_fail" || capability?.live_status === "provider_timeout") return "Live check failed";
-  if (configured || capability?.configured) return "Configured / not live tested";
+  if (capability?.live_status === "decrypt_failed" || capability?.source === "decrypt_failed") return "Needs settings cleanup";
+  if (capability?.live_status === "live_ok" || capability?.live_status === "key_present_live_ok") return "Available";
+  if (capability?.live_status === "live_fail" || capability?.live_status === "key_present_live_fail" || capability?.live_status === "provider_timeout") return "Live check failed";
+  if (configured || capability?.configured) return "Configured";
   if (capability?.available) return "Available";
-  return required ? "Requires setup" : "Not configured";
+  return required ? "Missing" : "Missing";
 }
 
 function StatusText({ status }) {
-  const color = status === "Available" ? "#00E676" : status === "Live check failed" ? "#FF5722" : status === "Coming soon" ? "#A1A1AA" : "#FFC107";
+  const color = status === "Available" ? "#00E676" : status === "Live check failed" || status === "Needs settings cleanup" ? "#FF5722" : status === "Coming soon" ? "#A1A1AA" : "#FFC107";
   return <div className="mt-1 font-mono text-xs uppercase tracking-wider" style={{ color }}>{status}</div>;
 }
 
 function CapabilityRow({ name, capability }) {
-  const status = capability?.available ? "Available" : capability?.coming_soon ? "Coming soon" : "Requires setup";
+  const status = capabilityStatusLabel(capability, capability?.configured);
   return (
     <div className="border border-amk-line bg-amk-base p-3">
       <div className="font-mono text-[11px] uppercase tracking-wider text-white">{name.replace(/_/g, " ")}</div>
       <StatusText status={status} />
+      {(capability?.provider || capability?.live_status) && <p className="mt-1 font-mono text-[10px] text-amk-fg3">{capability.provider || "none"} / {capability.live_status || "not_tested"}</p>}
       {capability?.reason && <p className="mt-2 text-xs leading-5 text-amk-fg3">{capability.reason}</p>}
     </div>
   );
 }
 
 function CapabilityNote({ label, capability }) {
-  const status = capability?.available ? "Available" : "Requires setup";
+  const status = capabilityStatusLabel(capability, capability?.configured);
   return (
     <div className="border border-amk-line bg-amk-base p-3">
       <div className="font-mono text-xs text-amk-fg">{label}</div>
