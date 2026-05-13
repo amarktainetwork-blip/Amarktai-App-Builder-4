@@ -499,12 +499,12 @@ async def async_capabilities_summary(get_secret_fn) -> dict:
     video_gen_available = bool(qwen_key and qwen_video_model)
     audio_available = bool(qwen_key and qwen_audio_model)
 
-    def _qwen_detail(model_key: str, model_val: str) -> str:
+    def _qwen_detail(model_key: str, model_val: str) -> str | None:
         if not qwen_key:
             return "QWEN_API_KEY not configured"
         if not model_val:
             return f"QWEN_API_KEY is set but {model_key} is not configured"
-        return None  # type: ignore[return-value]
+        return None
 
     return {
         "text_generation": {

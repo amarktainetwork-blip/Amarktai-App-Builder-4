@@ -1630,7 +1630,7 @@ async def import_from_repo(body: RepoImportBody, claims: dict = Depends(require_
         # Link the project_id to the workspace metadata
         update_workspace_metadata(
             Path(ws_meta["local_path"]),
-            {"linked_project_id": proj.id, "build_status": "cloned"},
+            {"mongodb_project_id": proj.id, "build_status": "cloned"},
         )
         logger.info(
             "Saved repo workspace for %s/%s@%s at %s",

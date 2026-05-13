@@ -112,22 +112,30 @@ def _read_json(path: Path) -> dict:
 
 def repo_workspace_path(owner: str, repo: str, branch_or_id: str) -> Path:
     root = get_storage_root()
-    return root / "repos" / _safe_segment(owner) / _safe_segment(repo) / _safe_segment(branch_or_id)
+    path = root / "repos" / _safe_segment(owner) / _safe_segment(repo) / _safe_segment(branch_or_id)
+    _assert_inside_root(path, root)
+    return path
 
 
 def generated_workspace_path(project_id: str) -> Path:
     root = get_storage_root()
-    return root / "generated" / _safe_segment(project_id)
+    path = root / "generated" / _safe_segment(project_id)
+    _assert_inside_root(path, root)
+    return path
 
 
 def incomplete_workspace_path(project_id: str) -> Path:
     root = get_storage_root()
-    return root / "incomplete" / _safe_segment(project_id)
+    path = root / "incomplete" / _safe_segment(project_id)
+    _assert_inside_root(path, root)
+    return path
 
 
 def release_workspace_path(project_id: str, version: str) -> Path:
     root = get_storage_root()
-    return root / "releases" / _safe_segment(project_id) / _safe_segment(version)
+    path = root / "releases" / _safe_segment(project_id) / _safe_segment(version)
+    _assert_inside_root(path, root)
+    return path
 
 
 # ── Metadata schema ───────────────────────────────────────────────────────────
@@ -305,15 +313,16 @@ def create_release_workspace(project_id: str, version: str) -> dict:
 def update_workspace_metadata(workspace_path: Path, updates: dict) -> dict:
     """Merge updates into build.json for a workspace."""
     root = get_storage_root()
-    _assert_inside_root(workspace_path, root)
-    meta_path = workspace_path / "build.json"
+    resolved = workspace_path.resolve()
+    _assert_inside_root(resolved, root)
+    meta_path = resolved / "build.json"
     meta = _read_json(meta_path)
     meta.update(updates)
     meta["updated_at"] = _now()
     _write_json(meta_path, meta)
     # Also update status.json if build_status changed
     if "build_status" in updates:
-        _write_json(workspace_path / "status.json", {
+        _write_json(resolved / "status.json", {
             "build_status": updates["build_status"],
             "updated_at": _now(),
         })
@@ -322,30 +331,34 @@ def update_workspace_metadata(workspace_path: Path, updates: dict) -> dict:
 
 def save_audit_report(workspace_path: Path, report: dict) -> None:
     root = get_storage_root()
-    _assert_inside_root(workspace_path, root)
-    _write_json(workspace_path / "audit_report.json", {**report, "saved_at": _now()})
-    update_workspace_metadata(workspace_path, {"last_audit_status": report.get("status", "audited")})
+    resolved = workspace_path.resolve()
+    _assert_inside_root(resolved, root)
+    _write_json(resolved / "audit_report.json", {**report, "saved_at": _now()})
+    update_workspace_metadata(resolved, {"last_audit_status": report.get("status", "audited")})
 
 
 def save_repair_plan(workspace_path: Path, plan: dict) -> None:
     root = get_storage_root()
-    _assert_inside_root(workspace_path, root)
-    _write_json(workspace_path / "repair_plan.json", {**plan, "saved_at": _now()})
+    resolved = workspace_path.resolve()
+    _assert_inside_root(resolved, root)
+    _write_json(resolved / "repair_plan.json", {**plan, "saved_at": _now()})
 
 
 def save_deploy_report(workspace_path: Path, report: dict) -> None:
     root = get_storage_root()
-    _assert_inside_root(workspace_path, root)
-    _write_json(workspace_path / "deploy_report.json", {**report, "saved_at": _now()})
-    update_workspace_metadata(workspace_path, {"last_deploy_status": report.get("status", "deployed")})
+    resolved = workspace_path.resolve()
+    _assert_inside_root(resolved, root)
+    _write_json(resolved / "deploy_report.json", {**report, "saved_at": _now()})
+    update_workspace_metadata(resolved, {"last_deploy_status": report.get("status", "deployed")})
 
 
 def save_env_example(workspace_path: Path, env_vars: list[str]) -> None:
     root = get_storage_root()
-    _assert_inside_root(workspace_path, root)
+    resolved = workspace_path.resolve()
+    _assert_inside_root(resolved, root)
     content = "# Auto-detected environment variables\n# Fill in values before deploying.\n\n"
     content += "\n".join(f"{v}=" for v in sorted(env_vars))
-    (workspace_path / "env.example").write_text(content, encoding="utf-8")
+    (resolved / "env.example").write_text(content, encoding="utf-8")
 
 
 # ── Listing / discovery ───────────────────────────────────────────────────────
@@ -362,6 +375,10 @@ def list_workspaces(workspace_type: str | None = None) -> list[dict]:
     """Return all workspace metadata dicts, optionally filtered by type."""
     root = get_storage_root()
     results: list[dict] = []
+
+    # Validate workspace_type against the whitelist before using as path component
+    if workspace_type is not None and workspace_type not in BUILD_TYPES:
+        raise ValueError(f"Invalid workspace_type: {workspace_type!r}. Must be one of: {sorted(BUILD_TYPES)}")
 
     types_to_scan = BUILD_TYPES if not workspace_type else {workspace_type}
 
@@ -407,10 +424,11 @@ def list_workspaces(workspace_type: str | None = None) -> list[dict]:
 def get_workspace(workspace_path: Path) -> dict:
     """Load metadata for a specific workspace directory."""
     root = get_storage_root()
-    _assert_inside_root(workspace_path, root)
-    meta = _load_workspace_meta(workspace_path)
+    resolved = workspace_path.resolve()
+    _assert_inside_root(resolved, root)
+    meta = _load_workspace_meta(resolved)
     if not meta:
-        raise FileNotFoundError(f"No build.json found at {workspace_path}")
+        raise FileNotFoundError(f"No build.json found at {resolved}")
     return meta
 
 
@@ -442,17 +460,18 @@ def archive_workspace(workspace_path: Path, confirmed: bool = False) -> dict:
     if not confirmed:
         return {"ok": False, "error": "Archive requires confirmed=True."}
     root = get_storage_root()
-    _assert_inside_root(workspace_path, root)
-    if not workspace_path.exists():
+    resolved = workspace_path.resolve()
+    _assert_inside_root(resolved, root)
+    if not resolved.exists():
         return {"ok": False, "error": "Workspace not found."}
     archive_root = root / "archived"
     archive_root.mkdir(exist_ok=True)
-    dest = archive_root / workspace_path.name
+    dest = archive_root / resolved.name
     # Avoid name collisions
     if dest.exists():
-        dest = archive_root / f"{workspace_path.name}_{_now().replace(':', '-').replace('.', '-')}"
-    shutil.move(str(workspace_path), str(dest))
-    logger.info("Archived workspace %s → %s", workspace_path, dest)
+        dest = archive_root / f"{resolved.name}_{_now().replace(':', '-').replace('.', '-')}"
+    shutil.move(str(resolved), str(dest))
+    logger.info("Archived workspace %s → %s", resolved, dest)
     return {"ok": True, "archived_to": str(dest)}
 
 
@@ -461,10 +480,11 @@ def delete_workspace(workspace_path: Path, confirmed: bool = False) -> dict:
     if not confirmed:
         return {"ok": False, "error": "Delete requires confirmed=True."}
     root = get_storage_root()
-    _assert_inside_root(workspace_path, root)
-    if not workspace_path.exists():
+    resolved = workspace_path.resolve()
+    _assert_inside_root(resolved, root)
+    if not resolved.exists():
         return {"ok": False, "error": "Workspace not found."}
-    shutil.rmtree(str(workspace_path))
+    shutil.rmtree(str(resolved))
     logger.info("Deleted workspace: %s", workspace_path)
     return {"ok": True, "deleted": str(workspace_path)}
 
@@ -475,7 +495,8 @@ def detect_and_save_stack(workspace_path: Path, files: list[dict[str, Any]]) -> 
     """Run stack detection on workspace files and persist the result."""
     from agents.stack_engine import decide_stack
     root = get_storage_root()
-    _assert_inside_root(workspace_path, root)
+    resolved = workspace_path.resolve()
+    _assert_inside_root(resolved, root)
 
     try:
         stack = decide_stack("", "auto")
@@ -502,21 +523,22 @@ def detect_and_save_stack(workspace_path: Path, files: list[dict[str, Any]]) -> 
         if any("backend/" in p for p in paths):
             backend_path = "backend"
 
-        update_workspace_metadata(workspace_path, {
+        update_workspace_metadata(resolved, {
             "detected_stack": stack_info,
             "frontend_path": frontend_path,
             "backend_path": backend_path,
         })
         return stack_info
     except Exception as exc:
-        logger.warning("Stack detection failed for %s: %s", workspace_path, exc)
+        logger.warning("Stack detection failed for %s: %s", resolved, exc)
         return {}
 
 
 def detect_missing_env_vars(workspace_path: Path, files: list[dict[str, Any]]) -> list[str]:
     """Scan files for env var references and compare to env.example."""
     root = get_storage_root()
-    _assert_inside_root(workspace_path, root)
+    resolved = workspace_path.resolve()
+    _assert_inside_root(resolved, root)
 
     env_re = re.compile(r'(?:process\.env\.|os\.environ\.get\(|os\.getenv\()["\']?([A-Z_][A-Z0-9_]{2,})')
     found: set[str] = set()
@@ -524,7 +546,7 @@ def detect_missing_env_vars(workspace_path: Path, files: list[dict[str, Any]]) -
         content = f.get("content", "")
         found.update(env_re.findall(content))
 
-    env_example_path = workspace_path / "env.example"
+    env_example_path = resolved / "env.example"
     declared: set[str] = set()
     if env_example_path.exists():
         for line in env_example_path.read_text(encoding="utf-8").splitlines():
@@ -534,5 +556,5 @@ def detect_missing_env_vars(workspace_path: Path, files: list[dict[str, Any]]) -
 
     missing = sorted(found - declared)
     if missing:
-        update_workspace_metadata(workspace_path, {"missing_env_vars": missing})
+        update_workspace_metadata(resolved, {"missing_env_vars": missing})
     return missing

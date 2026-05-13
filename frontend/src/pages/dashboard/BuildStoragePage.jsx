@@ -307,7 +307,6 @@ export default function BuildStoragePage() {
                 key={ws.local_path || ws.project_id}
                 workspace={ws}
                 onArchive={handleArchive}
-                archiving={archiving === ws.local_path}
               />
             ))}
           </div>
