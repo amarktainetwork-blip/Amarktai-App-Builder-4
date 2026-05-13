@@ -15,7 +15,7 @@ import httpx
 import jwt
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Query
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -88,6 +88,11 @@ from app.services import live_probe_service as _probe_svc
 from app.services import genx_model_sync as _genx_sync
 from app.services.model_router import route_task, get_router_status, TASK_ROUTING
 from app.services.quality_gate_service import run_quality_gate
+from app.services.preview_process_service import (
+    load_preview_state,
+    start_preview,
+    stop_preview,
+)
 from app.services.continue_build_service import (
     load_workspace as load_build_workspace,
     detect_workspace_stack,
@@ -964,6 +969,30 @@ async def capabilities_status() -> dict:
     Returns instantly without a live provider call.
     """
     summary = await async_capabilities_summary(_runtime_secret)
+    cached_probes = _probe_svc._CACHE.get("all_providers", {})
+    provider_to_capability = {
+        "github": "github_integration",
+        "brave": "web_research",
+        "pixabay": "stock_media",
+        "genx": "text_generation",
+        "qwen": "qwen",
+    }
+    for provider, cap_key in provider_to_capability.items():
+        probe = cached_probes.get(provider) if isinstance(cached_probes, dict) else None
+        cap = summary.get(cap_key)
+        if not probe or not isinstance(cap, dict):
+            continue
+        live_status = probe.get("status")
+        cap["live_status"] = live_status
+        cap["last_live_probe"] = probe.get("probed_at")
+        if live_status == "key_present_live_ok":
+            cap["available"] = True
+            cap["configured"] = True
+            cap["reason"] = None
+        elif live_status in {"key_present_live_fail", "provider_timeout"}:
+            cap["available"] = False
+            cap["configured"] = True
+            cap["reason"] = probe.get("error") or f"{provider} live validation did not pass."
     available_caps = [k for k, v in summary.items() if v.get("available")]
     unavailable_caps = {
         k: v["reason"]
@@ -3454,9 +3483,6 @@ async def detect_build_mode_for_prompt(
     }
 
 
-app.include_router(api)
-app.include_router(secured)
-app.include_router(admin_api)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -3496,15 +3522,21 @@ async def list_builds(
     """
     try:
         workspaces = list_workspaces(workspace_type)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     except Exception as exc:
         raise HTTPException(500, f"Failed to list builds: {exc}")
     try:
         usage = storage_usage()
     except Exception:
         usage = {}
+    storage_root = usage.get("root") or str(get_builds_storage_root())
     return {
+        "items": workspaces,
         "workspaces": workspaces,
         "total": len(workspaces),
+        "storage_root": storage_root,
+        "workspace_types": ["repos", "generated", "incomplete", "releases"],
         "storage": usage,
         "retrieved_at": _now(),
     }
@@ -3568,6 +3600,18 @@ async def builds_update_meta(
     except Exception as exc:
         raise HTTPException(500, f"Metadata update failed: {exc}")
     return {"ok": True, "meta": result}
+
+
+@secured.get("/builds/{project_id}")
+async def get_build_by_project_id(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Return a saved build workspace by project_id."""
+    try:
+        for workspace in list_workspaces():
+            if workspace.get("project_id") == project_id:
+                return {"ok": True, "item": workspace, "retrieved_at": _now()}
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to load build: {exc}")
+    raise HTTPException(404, "Build workspace not found")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -3739,27 +3783,89 @@ async def builds_detect_frontend(project_id: str, body: dict, claims: dict = Dep
     return {**result, "file_list": files[:50], "detected_at": _now()}
 
 
+def _workspace_path_for_project(project_id: str, body: dict | None = None) -> str:
+    body = body or {}
+    if body.get("workspace_path"):
+        return str(body["workspace_path"])
+    for workspace in list_workspaces():
+        if workspace.get("project_id") == project_id:
+            return workspace.get("local_path", "")
+    raise HTTPException(404, "Build workspace not found. Provide workspace_path or import/generate the workspace first.")
+
+
+@secured.post("/builds/{project_id}/preview/start")
+async def builds_preview_start(project_id: str, body: dict | None = None, claims: dict = Depends(require_user)) -> dict:
+    """Start a real static or dev-server preview for a workspace."""
+    workspace_path = _workspace_path_for_project(project_id, body)
+    try:
+        result = start_preview(project_id, workspace_path, backend_base_url="/api")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"Preview start failed: {exc}")
+    return result
+
+
+@secured.post("/builds/{project_id}/preview/stop")
+async def builds_preview_stop(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Stop a running workspace preview."""
+    try:
+        return stop_preview(project_id)
+    except Exception as exc:
+        raise HTTPException(500, f"Preview stop failed: {exc}")
+
+
 @secured.get("/builds/{project_id}/preview/status")
 async def builds_preview_status(project_id: str, claims: dict = Depends(require_user)) -> dict:
     """Get the preview status for a project workspace."""
-    return {
-        "project_id": project_id,
-        "status": "not_started",
-        "note": "Preview is started via POST /builds/{project_id}/preview/start",
-        "checked_at": _now(),
-    }
+    return {**load_preview_state(project_id), "checked_at": _now()}
 
 
 @secured.get("/builds/{project_id}/preview/url")
 async def builds_preview_url(project_id: str, claims: dict = Depends(require_user)) -> dict:
     """Get the preview URL for a project workspace."""
+    state = load_preview_state(project_id)
     return {
         "project_id": project_id,
-        "url": None,
-        "status": "not_started",
-        "note": "Start the preview with POST /builds/{project_id}/preview/start",
+        "url": state.get("url"),
+        "status": state.get("status", "not_started"),
+        "kind": state.get("kind"),
+        "note": "Start the preview with POST /builds/{project_id}/preview/start" if not state.get("url") else None,
         "checked_at": _now(),
     }
+
+
+@api.get("/builds/{project_id}/preview/static/{file_path:path}")
+async def builds_static_preview_file(
+    project_id: str,
+    file_path: str,
+    workspace_path: str = Query(min_length=1, max_length=1024),
+) -> FileResponse:
+    """Serve static preview files from a path-safe build workspace."""
+    root = get_builds_storage_root().resolve()
+    workspace = Path(workspace_path).resolve()
+    try:
+        workspace.relative_to(root)
+    except ValueError:
+        raise HTTPException(400, "Preview workspace must be inside build storage.")
+    detection = detect_frontend(workspace)
+    static_root = (workspace / (detection.get("frontend_root") or ".")).resolve()
+    try:
+        static_root.relative_to(workspace)
+    except ValueError:
+        raise HTTPException(400, "Unsafe static preview root.")
+    target = (static_root / file_path).resolve()
+    try:
+        target.relative_to(static_root)
+    except ValueError:
+        raise HTTPException(400, "Unsafe preview path.")
+    if target.is_dir():
+        target = target / "index.html"
+    if not target.exists() or not target.is_file():
+        raise HTTPException(404, "Preview file not found.")
+    return FileResponse(target)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -4113,3 +4219,11 @@ async def dashboard_status(claims: dict = Depends(require_user)) -> dict:
         ),
         "retrieved_at": _now(),
     }
+
+
+# Routers must be mounted after all route decorators have executed. FastAPI
+# copies router routes at include time, so mounting earlier silently drops later
+# endpoints such as /api/builds.
+app.include_router(api)
+app.include_router(secured)
+app.include_router(admin_api)

@@ -212,7 +212,7 @@ function ProviderSummary({ settings, capabilities }) {
       {STATUS_KEYS.map(({ key, label, capability }) => {
         const configured = !!settings[key]?.configured;
         const cap = capabilities?.summary?.[capability];
-        const status = configured || cap?.available ? "Available" : key === "GENX_API_KEY" ? "Requires setup" : "Not configured";
+        const status = capabilityStatusLabel(cap, configured, key === "GENX_API_KEY");
         return (
           <div key={key} className="bg-amk-panel px-4 py-3">
             <div className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3">{label}</div>
@@ -224,8 +224,16 @@ function ProviderSummary({ settings, capabilities }) {
   );
 }
 
+function capabilityStatusLabel(capability, configured, required = false) {
+  if (capability?.live_status === "key_present_live_ok") return "Available";
+  if (capability?.live_status === "key_present_live_fail" || capability?.live_status === "provider_timeout") return "Live check failed";
+  if (configured || capability?.configured) return "Configured / not live tested";
+  if (capability?.available) return "Available";
+  return required ? "Requires setup" : "Not configured";
+}
+
 function StatusText({ status }) {
-  const color = status === "Available" ? "#00E676" : status === "Coming soon" ? "#A1A1AA" : "#FFC107";
+  const color = status === "Available" ? "#00E676" : status === "Live check failed" ? "#FF5722" : status === "Coming soon" ? "#A1A1AA" : "#FFC107";
   return <div className="mt-1 font-mono text-xs uppercase tracking-wider" style={{ color }}>{status}</div>;
 }
 

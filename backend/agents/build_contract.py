@@ -46,7 +46,7 @@ BUILD_MODES = (
 QUALITY_TIERS = ("cheap", "balanced", "premium")
 
 MODE_PROJECT_TYPE = {
-    "landing_page": ("static-site", "landing-page"),
+    "landing_page": ("react-app", "landing-page"),
     "landing-page": ("static-site", "landing-page"),
     "website": ("multi-page-site", "multi-page-website"),
     "multi-page-website": ("multi-page-site", "multi-page-website"),
@@ -175,9 +175,9 @@ def get_required_files(project_type: str, build_mode: str | None = None,
         # (we can't auto-generate unknown page names, but we enforce the known ones)
         return files
     if project_type == "react-app":
-        return ["package.json", "index.html", "src/main.jsx", "src/App.jsx", "README.md", "amarktai.project.json", ".env.example"]
+        return ["package.json", "index.html", "src/main.jsx", "src/App.jsx", "src/App.css", "styles.css", "README.md", "amarktai.project.json", ".env.example", "preview-manifest.json"]
     if project_type == "pwa":
-        return ["package.json", "index.html", "src/main.jsx", "src/App.jsx", "README.md", "amarktai.project.json", ".env.example", "manifest.json", "service-worker.js"]
+        return ["package.json", "index.html", "src/main.jsx", "src/App.jsx", "src/App.css", "styles.css", "README.md", "amarktai.project.json", ".env.example", "manifest.json", "service-worker.js", "preview-manifest.json"]
     if project_type == "next-app":
         return ["package.json", "README.md", "amarktai.project.json", ".env.example", "app/page.jsx"]
     if project_type == "fullstack-app":
@@ -316,6 +316,8 @@ def _fallback_content(path: str, project_type: str, build_mode: str, prompt: str
         return _manifest(project_type, build_mode, prompt, files)
     if path == ".env.example":
         return _env_example(project_type)
+    if path == "index.html" and project_type in {"react-app", "pwa", "dashboard"}:
+        return "<!doctype html><html><head><meta charset=\"UTF-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" /><link rel=\"stylesheet\" href=\"styles.css\" /><title>Amarktai App</title></head><body><div id=\"root\"></div><script type=\"module\" src=\"/src/main.jsx\"></script></body></html>\n"
     if path in {"index.html", "about.html", "services.html", "pricing.html", "contact.html"}:
         return _static_index(prompt if path == "index.html" else f"{path[:-5]} - {prompt}", multi=project_type == "multi-page-site")
     if path == "styles.css":
@@ -325,9 +327,13 @@ def _fallback_content(path: str, project_type: str, build_mode: str, prompt: str
     if path == "package.json":
         return json.dumps({"scripts": {"dev": "vite --host 0.0.0.0", "build": "vite build"}, "dependencies": {"@vitejs/plugin-react": "latest", "vite": "latest", "react": "latest", "react-dom": "latest"}, "devDependencies": {}}, indent=2)
     if path == "src/main.jsx":
-        return "import React from 'react';\nimport { createRoot } from 'react-dom/client';\nimport App from './App.jsx';\ncreateRoot(document.getElementById('root')).render(<App />);\n"
+        return "import React from 'react';\nimport { createRoot } from 'react-dom/client';\nimport App from './App.jsx';\nimport './App.css';\ncreateRoot(document.getElementById('root')).render(<App />);\n"
     if path == "src/App.jsx":
         return "export default function App(){return <main style={{fontFamily:'system-ui',padding:24}}><h1>Amarktai App</h1><p>Preview this generated app, request changes, then publish after validation.</p></main>}\n"
+    if path == "src/App.css":
+        return ":root{font-family:Inter,system-ui,sans-serif;color:#f8fafc;background:#08090c}body{margin:0}main{min-height:100vh;background:radial-gradient(circle at top left,#1f3b73,#08090c 45%);display:grid;place-items:center}a,button{cursor:pointer}\n"
+    if path == "preview-manifest.json":
+        return json.dumps({"required": True, "strategy": "vite", "status": "pending", "entry": "index.html"}, indent=2)
     if path == "manifest.json":
         return json.dumps({"name": _project_name(prompt), "short_name": "Amarktai", "start_url": ".", "display": "standalone", "theme_color": "#08090c", "background_color": "#08090c", "icons": []}, indent=2)
     if path == "service-worker.js":

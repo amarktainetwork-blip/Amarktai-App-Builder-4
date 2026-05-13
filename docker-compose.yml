@@ -16,7 +16,7 @@ services:
       context: ./backend
     restart: unless-stopped
     environment:
-      APP_ENV: ${APP_ENV:-development}
+      APP_ENV: ${APP_ENV:-production}
       MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017}
       DB_NAME: ${DB_NAME:-amarktai_builder}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://builder.amarktai.com}
@@ -35,6 +35,7 @@ services:
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
       MEDIA_STORAGE_PATH: ${MEDIA_STORAGE_PATH:-/app/storage/media}
       MEDIA_MAX_UPLOAD_MB: ${MEDIA_MAX_UPLOAD_MB:-25}
+      BUILDS_STORAGE_ROOT: ${BUILDS_STORAGE_ROOT:-/var/www/amarktai/builds}
     depends_on:
       mongo:
         condition: service_healthy
@@ -43,6 +44,7 @@ services:
       - "${BACKEND_PORT:-8001}:8001"
     volumes:
       - media_data:/app/storage/media
+      - ${BUILDS_STORAGE_ROOT:-/var/www/amarktai/builds}:/var/www/amarktai/builds
 
   frontend:
     build:
