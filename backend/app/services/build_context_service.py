@@ -197,6 +197,7 @@ def normalize_build_context(
 
     return {
         "audience": audience,
+        "target_audience": audience,
         "brand_name": _infer_brand(project_name, prompt),
         "product_type": mode.replace("_", " "),
         "goal": _first_text(scout.get("goal"), planner.get("goal"), default=_infer_goal(prompt)),
@@ -215,6 +216,45 @@ def normalize_build_context(
         "planner": planner,
         "scout": scout,
     }
+
+
+def ensure_build_context_defaults(
+    context: Any,
+    *,
+    prompt: str = "",
+    project_name: str | None = None,
+    build_mode: str | None = None,
+    settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return context with the required builder defaults enforced.
+
+    This is intentionally small and boring: it preserves existing values, but
+    guarantees both audience aliases and the shared normalized keys exist before
+    a pipeline stage receives the context.
+    """
+    base = normalize_build_context(
+        prompt,
+        project_name=project_name,
+        build_mode=build_mode,
+        planner_output={},
+        scout_output={},
+        settings=settings or {},
+    )
+    supplied = _as_dict(context)
+    merged = {**base, **supplied}
+    audience = _first_text(
+        merged.get("audience"),
+        merged.get("target_audience"),
+        default=DEFAULT_AUDIENCE,
+    )
+    merged["audience"] = audience
+    merged["target_audience"] = audience
+    for key in ["sections", "features", "constraints", "required_files", "integrations"]:
+        merged[key] = _as_list(merged.get(key))
+    merged["seo_required"] = bool(merged.get("seo_required", base["seo_required"]))
+    merged["accessibility_required"] = bool(merged.get("accessibility_required", True))
+    merged["preview_required"] = bool(merged.get("preview_required", True))
+    return merged
 
 
 def parse_best_effort_agent_output(value: Any) -> dict[str, Any]:

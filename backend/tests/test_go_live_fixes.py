@@ -11,7 +11,7 @@ if _BACKEND not in sys.path:
 
 
 def test_normalize_build_context_missing_audience_does_not_crash():
-    from app.services.build_context_service import DEFAULT_AUDIENCE, normalize_build_context
+    from app.services.build_context_service import DEFAULT_AUDIENCE, ensure_build_context_defaults, normalize_build_context
 
     ctx = normalize_build_context(
         "Create a premium production-ready landing page for Amarktai Builder.",
@@ -23,10 +23,15 @@ def test_normalize_build_context_missing_audience_does_not_crash():
     )
 
     assert ctx["audience"] == DEFAULT_AUDIENCE
+    assert ctx["target_audience"] == DEFAULT_AUDIENCE
     assert ctx["brand_name"] == "Amarktai Builder"
     assert ctx["mode"] == "landing_page"
     assert ctx["seo_required"] is True
     assert ctx["preview_required"] is True
+
+    partial = ensure_build_context_defaults({"brand_name": "Amarktai Builder"})
+    assert partial["audience"] == DEFAULT_AUDIENCE
+    assert partial["target_audience"] == DEFAULT_AUDIENCE
 
 
 def test_landing_page_required_files_are_react_contract():

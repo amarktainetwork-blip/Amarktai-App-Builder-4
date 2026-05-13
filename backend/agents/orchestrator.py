@@ -16,6 +16,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path, PurePosixPath
 from typing import Any, Awaitable, Callable
 
 from .genx_provider import GenXProvider
@@ -65,7 +66,14 @@ from .creative_director import run_creative_director
 from .agent_registry import needs_motion_agent, needs_backend_coder, needs_security_agent
 from .deployment_agent import run_deployment_validation
 from .media_director import run_media_director
-from app.services.build_context_service import normalize_build_context, parse_best_effort_agent_output
+from app.services.build_context_service import (
+    DEFAULT_AUDIENCE,
+    ensure_build_context_defaults,
+    normalize_build_context,
+    parse_best_effort_agent_output,
+)
+from app.services.build_storage_service import create_generated_workspace, update_workspace_metadata
+from app.services.quality_gate_service import run_quality_gate
 
 # Per-agent timeout in seconds
 AGENT_TIMEOUTS = {
@@ -176,6 +184,21 @@ def _parse_checklist_line(body: str, label: str) -> list[str]:
                 return []
             return [item.strip() for item in raw.split(",") if item.strip()]
     return []
+
+
+def _ensure_stage_audience(data: Any, context: dict[str, Any]) -> dict[str, Any]:
+    """Ensure agent payloads carry both audience aliases."""
+    payload = data if isinstance(data, dict) else {}
+    audience = (
+        context.get("audience")
+        or context.get("target_audience")
+        or payload.get("audience")
+        or payload.get("target_audience")
+        or DEFAULT_AUDIENCE
+    )
+    payload.setdefault("audience", audience)
+    payload.setdefault("target_audience", audience)
+    return payload
 
 
 def _parse_amarktai_blocks(text: str) -> dict:
@@ -876,6 +899,92 @@ class Orchestrator:
             })
         return validation_state
 
+    async def _persist_generated_workspace(
+        self,
+        files: list[dict],
+        *,
+        preview_strategy: str,
+        coverage: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Mirror generated Mongo files to build storage and run quality reporting."""
+        meta = create_generated_workspace(self.project_id)
+        workspace = Path(meta["local_path"]).resolve()
+        written: list[str] = []
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            raw_path = str(item.get("path") or "").replace("\\", "/")
+            if not raw_path:
+                continue
+            candidate = PurePosixPath(raw_path)
+            if candidate.is_absolute() or ".." in candidate.parts:
+                await self._record_event(
+                    "validator",
+                    "warn",
+                    f"Skipped unsafe generated file path while syncing build storage: {raw_path}",
+                )
+                continue
+            target = (workspace / str(candidate)).resolve()
+            try:
+                target.relative_to(workspace)
+            except ValueError:
+                await self._record_event(
+                    "validator",
+                    "warn",
+                    f"Skipped generated file outside build storage: {raw_path}",
+                )
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(str(item.get("content") or ""), encoding="utf-8")
+            written.append(str(candidate))
+
+        preview_manifest = {
+            "project_id": self.project_id,
+            "status": "ready" if written else "empty",
+            "preview_strategy": preview_strategy,
+            "preview_url": f"/api/projects/{self.project_id}/preview",
+            "entry_candidates": [p for p in ("index.html", "public/index.html", "src/App.jsx", "src/App.js") if p in written],
+            "generated_files": written,
+            "updated_at": _now(),
+        }
+        (workspace / "preview-manifest.json").write_text(
+            json.dumps(preview_manifest, indent=2),
+            encoding="utf-8",
+        )
+        quality_report = run_quality_gate(workspace)
+        update_workspace_metadata(
+            workspace,
+            {
+                "build_status": "built",
+                "generated_files": written,
+                "preview_url": preview_manifest["preview_url"],
+                "quality_score": quality_report.get("score"),
+                "quality_pass": quality_report.get("pass"),
+                "coverage_score": coverage.get("coverageScore"),
+            },
+        )
+        await self.db.projects.update_one(
+            {"id": self.project_id},
+            {"$set": {
+                "build_workspace": meta,
+                "workspace_path": str(workspace),
+                "generated_files": written,
+                "preview_manifest": preview_manifest,
+                "quality_report": quality_report,
+                "quality_report_path": str(workspace / "quality-report.json"),
+                "updated_at": _now(),
+            }},
+        )
+        await self.emit({"type": "preview_manifest", "data": preview_manifest})
+        await self.emit({"type": "quality_report", "data": quality_report})
+        await self._record_event(
+            "validator",
+            "quality_report_generated",
+            f"Quality report generated with score {quality_report.get('score', 0)}.",
+            meta={"workspace_path": str(workspace), "quality_pass": quality_report.get("pass")},
+        )
+        return {"workspace": str(workspace), "files": written, "quality_report": quality_report}
+
     async def _run_build_pipeline(self, user_prompt: str, mode: str,
                                    stack_decision: dict | None) -> None:
         """Standard Scout → Architect → Coder → Reviewer → Validate → Repair loop pipeline."""
@@ -898,6 +1007,13 @@ class Orchestrator:
             scout_output={},
             settings=project_settings,
         )
+        normalized_context = ensure_build_context_defaults(
+            normalized_context,
+            prompt=user_prompt,
+            project_name=project_name,
+            build_mode=mode,
+            settings=project_settings,
+        )
         await self.emit({"type": "build_context", "data": normalized_context})
 
         # ── Phase 4: Smart Build Planning ────────────────────────────────────
@@ -913,7 +1029,7 @@ class Orchestrator:
                 "context": normalized_context,
             })
             plan_result = await self._run_agent("planner", BUILD_PLANNER_PROMPT, plan_input)
-            plan_data = plan_result["data"]
+            plan_data = _ensure_stage_audience(plan_result["data"], normalized_context)
             normalized_context = normalize_build_context(
                 user_prompt,
                 project_name=project_name,
@@ -922,6 +1038,14 @@ class Orchestrator:
                 scout_output={},
                 settings=project_settings,
             )
+            normalized_context = ensure_build_context_defaults(
+                normalized_context,
+                prompt=user_prompt,
+                project_name=project_name,
+                build_mode=mode,
+                settings=project_settings,
+            )
+            plan_data = _ensure_stage_audience(plan_data, normalized_context)
             await self.db.projects.update_one(
                 {"id": self.project_id},
                 {"$set": {"build_plan": plan_data, "build_context": normalized_context, "updated_at": _now()}},
@@ -978,7 +1102,7 @@ class Orchestrator:
         })
         scout = await self._run_agent("scout", SCOUT_PROMPT, scout_user)
         await self._check_cancel()
-        scout_data = scout["data"]
+        scout_data = _ensure_stage_audience(scout["data"], normalized_context)
         normalized_context = normalize_build_context(
             user_prompt,
             project_name=project_name,
@@ -987,9 +1111,16 @@ class Orchestrator:
             scout_output=scout_data,
             settings=project_settings,
         )
-        scout_data.setdefault("audience", normalized_context["audience"])
-        scout_data.setdefault("core_features", normalized_context["features"])
-        scout_data.setdefault("summary", normalized_context["goal"])
+        normalized_context = ensure_build_context_defaults(
+            normalized_context,
+            prompt=user_prompt,
+            project_name=project_name,
+            build_mode=mode,
+            settings=project_settings,
+        )
+        scout_data = _ensure_stage_audience(scout_data, normalized_context)
+        scout_data.setdefault("core_features", normalized_context.get("features", []))
+        scout_data.setdefault("summary", normalized_context.get("goal", "Create a production-ready digital experience from the supplied brief."))
         await self.db.projects.update_one(
             {"id": self.project_id},
             {"$set": {"build_context": normalized_context, "updated_at": _now()}},
@@ -1034,7 +1165,7 @@ class Orchestrator:
         }, indent=2)
         arch = await self._run_agent("architect", ARCHITECT_PROMPT, arch_input)
         await self._check_cancel()
-        arch_data = arch["data"]
+        arch_data = _ensure_stage_audience(arch["data"], normalized_context)
         await self.fs.write("tech_stack.json", json.dumps(arch_data, indent=2), "json")
         await self.emit({"type": "file_written", "data": {"path": "tech_stack.json"}})
         await self._record_message(
@@ -1063,7 +1194,7 @@ class Orchestrator:
         design_direction = create_design_direction(
             prompt=user_prompt,
             project_type=project_type_for_design,
-            audience=normalized_context["audience"],
+            audience=normalized_context.get("audience", DEFAULT_AUDIENCE),
             tier=project_for_design.get("quality_tier", "balanced"),
             recent_signatures=recent_signatures if recent_signatures else None,
         )
@@ -1072,7 +1203,7 @@ class Orchestrator:
         creative_blueprint = run_creative_director(
             prompt=user_prompt,
             mode=mode,
-            audience=normalized_context["audience"],
+            audience=normalized_context.get("audience", DEFAULT_AUDIENCE),
             industry=scout_data.get("industry", ""),
             tier=project_for_design.get("quality_tier", "balanced"),
             design_direction=design_direction,
@@ -1424,6 +1555,20 @@ class Orchestrator:
             {"$set": {"coverage_score": coverage, "updated_at": _now()}},
         )
         await self.emit({"type": "coverage_score", "data": coverage})
+
+        try:
+            await self._persist_generated_workspace(
+                final_files,
+                preview_strategy=preview_strategy,
+                coverage=coverage,
+            )
+        except Exception as qa_err:
+            await self._record_event(
+                "validator",
+                "warn",
+                f"Generated workspace/quality report sync skipped: {qa_err}",
+                meta={"error": str(qa_err)},
+            )
 
         # ── Phase 3: Security Agent (conditional) ────────────────────────────
         # Called for full_stack, api_service, dashboard, admin_panel, or auth builds.

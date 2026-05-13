@@ -2320,10 +2320,11 @@ async def test_repo_fix_emits_repo_analysis_complete():
 
 
 @pytest.mark.asyncio
-async def test_build_pipeline_emits_coverage_score():
+async def test_build_pipeline_emits_coverage_score(monkeypatch, tmp_path):
     """Standard build pipeline must emit coverage_score event on completion."""
     import json
     from unittest.mock import AsyncMock, MagicMock
+    monkeypatch.setenv("BUILDS_STORAGE_ROOT", str(tmp_path))
 
     db, _project, _files, _events, _messages = _make_db()
     _project.update({"mode": "landing_page", "quality_tier": "balanced"})
@@ -2382,10 +2383,89 @@ async def test_build_pipeline_emits_coverage_score():
     event_types = [e.get("type") for e in emitted]
     assert "coverage_score" in event_types, \
         f"Expected coverage_score event in emitted, got: {event_types}"
+    assert "preview_manifest" in event_types, \
+        f"Expected preview_manifest event in emitted, got: {event_types}"
+    assert "quality_report" in event_types, \
+        f"Expected quality_report event in emitted, got: {event_types}"
 
     cov_event = next(e for e in emitted if e.get("type") == "coverage_score")
     assert "coverageScore" in cov_event["data"]
     assert isinstance(cov_event["data"]["coverageScore"], int)
+    workspace = tmp_path / "generated" / "proj1"
+    assert (workspace / "index.html").exists()
+    assert (workspace / "preview-manifest.json").exists()
+    assert (workspace / "quality-report.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_build_pipeline_missing_audience_reaches_architect_and_coder(monkeypatch, tmp_path):
+    """Planner/Scout outputs without audience aliases must not stop the pipeline."""
+    import json
+    from unittest.mock import AsyncMock, MagicMock
+
+    monkeypatch.setenv("BUILDS_STORAGE_ROOT", str(tmp_path))
+    db, _project, _files, _events, _messages = _make_db()
+    _project.update({"mode": "website", "quality_tier": "premium", "name": "Amarktai Builder"})
+
+    emitted = []
+    async def emit(event):
+        emitted.append(event)
+
+    coder_blocks = (
+        "===AMARKTAI_FILE[index.html]===\n"
+        "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'><title>Amarktai Builder</title></head>"
+        "<body><main><section class='hero'><h1>Amarktai Builder</h1><a href='/contact'>Start build</a></section>"
+        "<section>AI software factory</section><section>Pipeline</section><section>Quality gates</section></main><footer>Ready</footer></body></html>\n"
+        "===END_AMARKTAI_FILE[index.html]===\n"
+        "===AMARKTAI_FILE[styles.css]===\nbody{margin:0;font-family:Inter,sans-serif}@media(max-width:768px){main{padding:16px}}\n===END_AMARKTAI_FILE[styles.css]===\n"
+        "===AMARKTAI_FILE[README.md]===\n# Amarktai Builder\n\nGenerated premium website.\n===END_AMARKTAI_FILE[README.md]===\n"
+        "===AMARKTAI_FILE[amarktai.project.json]===\n"
+        '{"name":"Amarktai Builder","mode":"website","generated_by":"Amarktai App Builder","version":"1.0.0","media_strategy":{"mode":"css_svg","confirmed":true,"models_used":[],"notes":"fallback visuals"}}\n'
+        "===END_AMARKTAI_FILE[amarktai.project.json]===\n"
+        "===AMARKTAI_SUMMARY===\nWebsite generated.\n===END_AMARKTAI_SUMMARY===\n"
+    )
+    responses = [
+        json.dumps({**_PLANNER_RESP, "plan_summary": "No explicit audience field here."}),
+        json.dumps({"summary": "Premium builder site", "core_features": ["preview", "quality"], "requirements_md": "# Requirements"}),
+        json.dumps({"tech_stack": {"frontend": "HTML", "backend": "none", "database": "none", "styling": "CSS", "libraries": []}, "file_plan": [{"path": "index.html"}]}),
+        coder_blocks,
+        json.dumps({"verdict": "pass", "issues": [], "patched_files": [], "summary": "ok"}),
+        json.dumps(_ADVISOR_RESP),
+    ]
+    idx = [0]
+    calls = []
+
+    provider = MagicMock()
+    async def complete(**kw):
+        calls.append(kw.get("agent"))
+        i = idx[0]
+        idx[0] += 1
+        return {"text": responses[i] if i < len(responses) else responses[-1], "model_label": "test", "session_id": "s", "usage": {}}
+    provider.complete = AsyncMock(side_effect=complete)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    written = []
+
+    async def fake_write(path, content, lang="text"):
+        written.append({"path": path, "content": content, "language": lang})
+
+    orch.fs.write = fake_write
+    orch.fs.list_full = AsyncMock(side_effect=lambda: list(written))
+    orch.fs.list = AsyncMock(return_value=[])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    from agents.stack_engine import decide_stack
+    sd = decide_stack(mode="website", quality_tier="premium")
+    await orch.run_full_build("Create an elite website for Amarktai Builder.", mode="website", stack_decision=sd)
+
+    assert "architect" in calls
+    assert "coder" in calls
+    assert _project["status"] == "ready"
+    assert _project["build_context"]["audience"]
+    assert _project["build_context"]["target_audience"] == _project["build_context"]["audience"]
+    assert _project["generated_files"]
+    assert _project["quality_report"]["score"] >= 0
+    assert not _project.get("error")
 
 
 

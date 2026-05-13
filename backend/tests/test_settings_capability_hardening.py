@@ -187,6 +187,38 @@ def test_readiness_missing_genx_returns_structured_fail(monkeypatch):
     assert "providers" in result
 
 
+def test_readiness_refreshes_provider_probe_cache(monkeypatch):
+    import asyncio
+    import server
+
+    calls = []
+
+    async def fake_probe_all_providers(**kwargs):
+        calls.append(kwargs)
+        server._probe_svc._CACHE["all_providers"] = {
+            "genx": {"provider": "genx", "status": "key_present_live_ok", "probed_at": "2026-05-13T00:00:00+00:00"},
+            "github": {"provider": "github", "status": "key_missing", "probed_at": "2026-05-13T00:00:00+00:00"},
+            "brave": {"provider": "brave", "status": "key_missing", "probed_at": "2026-05-13T00:00:00+00:00"},
+            "pixabay": {"provider": "pixabay", "status": "key_missing", "probed_at": "2026-05-13T00:00:00+00:00"},
+            "qwen": {"provider": "qwen", "status": "key_missing", "probed_at": "2026-05-13T00:00:00+00:00"},
+        }
+        return server._probe_svc._CACHE["all_providers"]
+
+    clear_provider_env(monkeypatch)
+    monkeypatch.setenv("GENX_API_KEY", "env-genx-key")
+    monkeypatch.setattr(server, "db", FakeDB())
+    monkeypatch.setattr(server.GenXProvider, "list_models", lambda self: asyncio.sleep(0, result=["model"]))
+    monkeypatch.setattr(server._probe_svc, "probe_all_providers", fake_probe_all_providers)
+    server._probe_svc._CACHE.clear()
+
+    result = asyncio.run(server.readiness())
+
+    assert calls
+    assert calls[0]["force_refresh"] is True
+    assert result["providers"]["genx"]["live_status"] == "live_ok"
+    server._probe_svc._CACHE.clear()
+
+
 def test_readiness_mongo_issue_returns_structured_error(monkeypatch):
     import asyncio
     import server
