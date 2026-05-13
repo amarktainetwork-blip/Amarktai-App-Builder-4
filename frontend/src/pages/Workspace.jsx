@@ -465,15 +465,15 @@ export default function WorkspacePage() {
             {/* Workspace navigation */}
             <button
               data-testid="back-to-projects-btn"
-              onClick={() => nav("/app")}
-              title="Back to Projects"
+              onClick={() => nav("/dashboard/projects")}
+              title="Back to Dashboard"
               className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white"
             >
-              <Home className="w-3 h-3" strokeWidth={1.5} /> Projects
+              <Home className="w-3 h-3" strokeWidth={1.5} /> Dashboard
             </button>
             <button
               data-testid="new-build-btn"
-              onClick={() => nav("/app")}
+              onClick={() => nav("/dashboard/new")}
               title="Start a new build"
               className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white"
             >
@@ -543,7 +543,7 @@ export default function WorkspacePage() {
       />
 
       {/* Workspace */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
         {/* LEFT 35% — chat & timeline */}
         <aside className="w-[35%] min-w-[360px] border-r border-amk-line bg-amk-base flex flex-col overflow-hidden">
           <AgentTimeline events={events} />
@@ -751,6 +751,87 @@ export default function WorkspacePage() {
             </TabsContent>
           </Tabs>
         </section>
+      </div>
+
+      <div className="flex lg:hidden flex-1 min-h-0 overflow-hidden bg-amk-panel">
+        <Tabs defaultValue="preview" className="flex min-h-0 flex-1 flex-col">
+          <div className="shrink-0 overflow-x-auto border-b border-amk-line bg-amk-base px-2">
+            <TabsList className="h-10 min-w-max gap-0 rounded-none bg-transparent p-0">
+              {[
+                ["chat", "Chat"],
+                ["preview", "Preview"],
+                ["timeline", "Timeline"],
+                ["files", "Files"],
+                ["qa", "QA"],
+              ].map(([value, label]) => (
+                <TabsTrigger
+                  key={value}
+                  value={value}
+                  className="h-10 rounded-none border-r border-amk-line px-4 font-mono text-[10px] uppercase tracking-wider text-amk-fg3 data-[state=active]:bg-amk-panel data-[state=active]:text-white data-[state=active]:shadow-none"
+                >
+                  {label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
+
+          <TabsContent value="chat" className="m-0 min-h-0 flex-1">
+            <ChatPanel messages={messages} onSend={send} disabled={busy} busy={busy} />
+          </TabsContent>
+
+          <TabsContent value="preview" className="m-0 min-h-0 flex-1">
+            <LivePreview
+              projectId={projectId}
+              refreshKey={refreshKey}
+              projectStatus={project?.status}
+              projectError={project?.error}
+              failedAgent={project?.failed_agent}
+              projectMode={project?.mode}
+              previewStrategy={project?.preview_strategy}
+              buildPhase={buildPhase}
+              previewFallback={previewFallback}
+            />
+          </TabsContent>
+
+          <TabsContent value="timeline" className="m-0 min-h-0 flex-1 overflow-y-auto bg-amk-base">
+            <AgentTimeline events={events} />
+          </TabsContent>
+
+          <TabsContent value="files" className="m-0 min-h-0 flex-1">
+            <div className="grid h-full grid-rows-[220px,1fr] overflow-hidden">
+              <FileTree files={files} activePath={activePath} onSelect={setActivePath} />
+              <CodeViewer projectId={projectId} path={activePath} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="qa" className="m-0 min-h-0 flex-1 overflow-y-auto bg-amk-base">
+            {!connected && (
+              <div data-testid="ws-status-banner-mobile" className="border-b border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px] text-agent-scout">
+                {wsState === "reconnecting" ? "WebSocket reconnecting..." : "WebSocket disconnected. Reconnecting..."}
+              </div>
+            )}
+            {failed && project?.error && (
+              <div className="border-b border-red-900 bg-red-950/30 px-3 py-2 font-mono text-[10px] text-red-400">
+                {project.failed_agent && <span className="font-semibold">{project.failed_agent}: </span>}
+                {project.error}
+              </div>
+            )}
+            <ValidationPanel validation={validation} />
+            <BuildPlanBanner plan={buildPlan} />
+            <AdvisorPanel advisor={advisorResult} />
+            {isRepoProject && (
+              <RepoWorkbenchPanel
+                projectId={projectId}
+                project={project}
+                repoAnalysis={repoAnalysis}
+                coverage={coverageResult}
+                onRunPreview={runPreviewFallback}
+                onContinueMissing={continueMissingRequirements}
+                busy={busy}
+              />
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
 
       <StatusBar project={project} lastModel={lastModel} connected={connected} />

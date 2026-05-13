@@ -108,3 +108,9 @@ html, body, #root {
 }
 
 @layer base { body { @apply bg-background text-foreground; } }
+
+@layer components {
+  .field-input {
+    @apply w-full border border-amk-line bg-amk-base px-3 py-2.5 font-mono text-sm text-amk-fg outline-none placeholder:text-amk-fg3 focus:border-white;
+  }
+}

@@ -24,7 +24,7 @@ export default function SystemHealthPage() {
   return (
     <div className="min-h-screen bg-amk-base">
       <Header rightExtra={
-        <button onClick={() => nav("/app")} className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white">
+        <button onClick={() => nav("/dashboard")} className="inline-flex items-center gap-1.5 px-3 h-8 border border-amk-line hover:bg-amk-surface font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:text-white">
           <ArrowLeft className="w-3 h-3" /> dashboard
         </button>
       } />

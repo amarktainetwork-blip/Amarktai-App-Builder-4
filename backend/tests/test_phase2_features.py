@@ -621,6 +621,9 @@ def test_check_runtime_health_script_exists():
 def test_cleanup_previews_dry_run():
     """Dry-run cleanup must not error."""
     import subprocess
+    import shutil
+    if shutil.which("bash") is None:
+        pytest.skip("bash is not available in this test environment")
     script = SCRIPTS_DIR / "cleanup_previews.sh"
     result = subprocess.run(
         ["bash", str(script), "--dry-run"],
@@ -632,6 +635,9 @@ def test_cleanup_previews_dry_run():
 def test_cleanup_build_cache_dry_run():
     """Dry-run cache cleanup must not error."""
     import subprocess
+    import shutil
+    if shutil.which("bash") is None:
+        pytest.skip("bash is not available in this test environment")
     script = SCRIPTS_DIR / "cleanup_build_cache.sh"
     result = subprocess.run(
         ["bash", str(script), "--dry-run"],

@@ -1,50 +1,56 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, BrainCircuit, Code2, GitBranch, Image, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Boxes, Code2, Eye, GitBranch, Image, ShieldCheck } from "lucide-react";
+import CapabilityStatus from "@/components/CapabilityStatus";
 
 const features = [
-  { icon: BrainCircuit, title: "Agent production team", copy: "Manager, strategist, creative director, designer, coders, repo engineer, media, QA, security and deployment agents coordinate the build instead of acting like disconnected prompts." },
-  { icon: Code2, title: "Apps, SaaS and websites", copy: "Create landing pages, multi-page sites, PWAs, dashboards, admin systems, APIs and full-stack scaffolds through one guided workspace." },
-  { icon: GitBranch, title: "Repo workbench", copy: "Import GitHub repos, detect stacks, analyse gaps, repair builds, review diffs and prepare PRs without leaving the dashboard." },
-  { icon: Image, title: "Media and brand engine", copy: "Generate or reuse logos, SVGs, stock media, AI media where configured, icons and brand assets with honest capability states." },
-  { icon: ShieldCheck, title: "Runtime truth and QA", copy: "Sandbox previews, validation, security checks, accessibility/SEO scoring and repair loops keep the system honest about what actually works." },
-  { icon: Sparkles, title: "Premium by default", copy: "Cheap mode optimises routing cost, not design quality. Every product still has to pass premium layout, typography and responsiveness standards." },
+  { icon: Boxes, title: "Agent workspace", copy: "Manager and specialist agents coordinate planning, code, QA, repair, media, runtime, memory, versioning, and deployment tasks." },
+  { icon: Code2, title: "Prompt-first build flow", copy: "Create websites, web apps, dashboards, APIs, full-stack scaffolds, and repo-fix workspaces through the routed dashboard." },
+  { icon: GitBranch, title: "Repo workbench", copy: "Public repo import, stack analysis, preview fallback, coverage, and PR workflows. Private repo and PR actions require GITHUB_PAT." },
+  { icon: Image, title: "Media library", copy: "Uploads are always real assets. GenX, Qwen, Brave, and Pixabay features are shown according to configured provider keys." },
+  { icon: Eye, title: "Live preview", copy: "Preview generation is available for previewable builds through a scoped preview token and honest fallback panels." },
+  { icon: ShieldCheck, title: "QA, versioning, rollback", copy: "Validation, repair loops, project memory, versions, and rollback support keep iteration auditable." },
 ];
 
 export default function FeaturesPage() {
   return (
-    <main className="min-h-screen bg-amk-base text-amk-fg overflow-hidden">
-      <section className="border-b border-amk-line bg-[radial-gradient(circle_at_top_right,rgba(0,230,118,0.14),transparent_34%),linear-gradient(180deg,#07110d,#050706)]">
-        <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-          <Link to="/" className="font-display text-lg tracking-tight text-white">Amarktai Builder</Link>
-          <div className="flex items-center gap-3 font-mono text-xs uppercase tracking-[0.18em] text-amk-fg3">
-            <Link to="/pipeline" className="hover:text-white">Pipeline</Link>
-            <Link to="/access" className="border border-amk-line px-3 py-2 text-amk-fg hover:border-amk-accent hover:text-white">Request Access</Link>
-          </div>
-        </nav>
-        <div className="mx-auto max-w-7xl px-6 py-20 md:py-28">
-          <p className="font-mono text-xs uppercase tracking-[0.28em] text-amk-accent">Private capability showcase</p>
+    <main className="min-h-screen bg-amk-base text-amk-fg">
+      <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
+        <Link to="/" className="font-display text-lg tracking-tight text-white">Amarktai App Builder</Link>
+        <div className="flex items-center gap-3 font-mono text-xs uppercase tracking-[0.18em] text-amk-fg3">
+          <Link to="/pipeline" className="hover:text-white">Pipeline</Link>
+          <Link to="/access" className="border border-amk-line px-3 py-2 text-amk-fg hover:border-amk-accent hover:text-white">Request Access</Link>
+        </div>
+      </nav>
+
+      <section className="border-y border-amk-line">
+        <div className="mx-auto max-w-7xl px-6 py-16 md:py-24">
+          <p className="font-mono text-xs uppercase tracking-[0.28em] text-amk-accent">Truthful capabilities</p>
           <h1 className="mt-5 max-w-4xl font-display text-4xl font-semibold leading-tight text-white md:text-6xl">
-            Everything the builder can actually do, shown without fake claims.
+            What the private software factory can actually do.
           </h1>
           <p className="mt-6 max-w-2xl text-base leading-7 text-amk-fg2 md:text-lg">
-            Amarktai coordinates specialist AI agents, real runtime previews, repo repair, media tooling, versioning and strict validation inside one product-building command center.
+            Core workspace, runtime, preview, repo import, agents, settings, memory, and versioning are real product surfaces. Provider-backed claims stay setup-aware.
           </p>
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-6 py-16">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <section className="mx-auto max-w-7xl px-6 py-14">
+        <div className="grid gap-px border border-amk-line bg-amk-line md:grid-cols-2 xl:grid-cols-3">
           {features.map(({ icon: Icon, title, copy }) => (
-            <article key={title} className="group border border-amk-line bg-amk-panel/70 p-6 transition hover:-translate-y-1 hover:border-amk-accent/60 hover:bg-amk-panel">
+            <article key={title} className="bg-amk-panel p-6">
               <Icon className="h-6 w-6 text-amk-accent" strokeWidth={1.5} />
               <h2 className="mt-5 font-display text-xl text-white">{title}</h2>
               <p className="mt-3 text-sm leading-6 text-amk-fg2">{copy}</p>
-              <div className="mt-5 inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-amk-fg3">
-                Capability-aware <ArrowRight className="h-3 w-3" />
-              </div>
             </article>
           ))}
         </div>
+      </section>
+
+      <section className="mx-auto max-w-7xl px-6 pb-20">
+        <CapabilityStatus />
+        <Link to="/access" className="mt-8 inline-flex h-11 items-center gap-2 bg-amk-accent px-5 font-mono text-xs uppercase tracking-wider text-black hover:bg-emerald-300">
+          Request Access <ArrowRight className="h-4 w-4" />
+        </Link>
       </section>
     </main>
   );

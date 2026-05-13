@@ -58,7 +58,8 @@ _ENV_PLACEHOLDER = re.compile(
 )
 _ENV_REAL_SECRET = re.compile(
     r"^(?:JWT_SECRET|SECRET_KEY|API_KEY|DATABASE_URL|POSTGRES_PASSWORD|REDIS_PASSWORD"
-    r"|STRIPE_SECRET|SENDGRID_API|OPENAI_API|ANTHROPIC_API)\s*=[^\s$]",
+    r"|STRIPE_SECRET|SENDGRID_API|OPENAI_API|ANTHROPIC_API)\s*=\s*"
+    r"(?!(?:your_|change_me|replace_|example_|<[^>]+>|\"\"$|''$))[^\s$]",
     re.MULTILINE | re.IGNORECASE,
 )
 

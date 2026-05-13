@@ -2052,3 +2052,6 @@ class Orchestrator:
             await self._fail_project(target, err)
             await self._record_message("system", None, f"Retry failed: {err}", meta={"error": err})
             raise
+
+
+BuildOrchestrator = Orchestrator

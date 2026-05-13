@@ -18,7 +18,6 @@ import json
 import logging
 import os
 import re
-import resource
 import shutil
 import sys
 import tempfile
@@ -30,6 +29,11 @@ from typing import Any
 from agents.preview import render_preview
 
 logger = logging.getLogger(__name__)
+
+try:
+    import resource
+except ImportError:  # Windows does not expose Unix resource limits.
+    resource = None
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -455,6 +459,8 @@ class SandboxManager:
         multi-threaded deployments, enforce memory limits at the container or
         cgroup level instead.
         """
+        if resource is None:
+            return
         try:
             resource.setrlimit(
                 resource.RLIMIT_AS,
@@ -480,13 +486,14 @@ class SandboxManager:
         - Raises asyncio.TimeoutError if timeout is exceeded.
         """
         env = self._safe_env()
+        preexec_fn = self._memory_limit_preexec if os.name != "nt" and resource is not None else None
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(cwd),
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            preexec_fn=self._memory_limit_preexec,
+            preexec_fn=preexec_fn,
         )
         try:
             stdout_bytes, _ = await asyncio.wait_for(
