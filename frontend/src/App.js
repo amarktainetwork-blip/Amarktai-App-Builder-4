@@ -12,10 +12,16 @@ import TermsPage from "@/pages/Terms";
 import FeaturesPage from "@/pages/Features";
 import PipelinePage from "@/pages/Pipeline";
 import AccessPage from "@/pages/Access";
-import ProjectListPage from "@/pages/ProjectList";
 import WorkspacePage from "@/pages/Workspace";
 import SystemHealthPage from "@/pages/SystemHealth";
 import AdminUsersPage from "@/pages/AdminUsers";
+import DashboardShell from "@/components/dashboard/DashboardShell";
+import DashboardHome from "@/pages/dashboard/DashboardHome";
+import NewBuildPage from "@/pages/dashboard/NewBuildPage";
+import ProjectsPage from "@/pages/dashboard/ProjectsPage";
+import RepoWorkbenchPage from "@/pages/dashboard/RepoWorkbenchPage";
+import MediaPage from "@/pages/dashboard/MediaPage";
+import SettingsPage from "@/pages/dashboard/SettingsPage";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -46,7 +52,14 @@ function App() {
             <Route path="/contact" element={<ContactPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/terms" element={<TermsPage />} />
-            <Route path="/dashboard" element={<Protected><ProjectListPage /></Protected>} />
+            <Route path="/dashboard" element={<Protected><DashboardShell /></Protected>}>
+              <Route index element={<DashboardHome />} />
+              <Route path="new" element={<NewBuildPage />} />
+              <Route path="projects" element={<ProjectsPage />} />
+              <Route path="repo" element={<RepoWorkbenchPage />} />
+              <Route path="media" element={<MediaPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+            </Route>
             <Route path="/app" element={<Navigate to="/dashboard" replace />} />
             <Route path="/system" element={<Protected><SystemHealthPage /></Protected>} />
             <Route path="/admin/users" element={<Protected><AdminUsersPage /></Protected>} />

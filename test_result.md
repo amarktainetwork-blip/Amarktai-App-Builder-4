@@ -101,3 +101,107 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Final frontend and dashboard UX rebuild for private beta using only https://github.com/amarktainetwork-blip/Amarktai-App-Builder-3.git"
+commit_hash:
+  base_before_changes: "46986564b593ab26444e24fbae587acae390b742"
+  final_pr_commit: "Recorded in GitHub PR metadata after commit creation"
+frontend:
+  - task: "Top-nav dashboard shell and routed dashboard pages"
+    implemented: true
+    working: true
+    file: "frontend/src/components/dashboard/DashboardShell.jsx"
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added /dashboard, /dashboard/new, /dashboard/projects, /dashboard/repo, /dashboard/media, /dashboard/settings with /app redirect preserved. Route fetches returned 200 from production build."
+  - task: "Settings full page"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/dashboard/SettingsPage.jsx"
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Extracted SettingsPanel and reused it in SettingsDialog and SettingsPage. Provider key states and /api/capabilities/status are surfaced."
+  - task: "Workspace mobile/tablet tabs"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/Workspace.jsx"
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Desktop multi-panel layout preserved. Mobile layout now exposes Chat, Preview, Timeline, Files, and QA tabs."
+  - task: "Scoped live preview token"
+    implemented: true
+    working: true
+    file: "frontend/src/components/LivePreview.jsx"
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "LivePreview now requests a short-lived preview token and no longer appends the normal auth JWT to iframe/open URLs."
+  - task: "Public website and login UX"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/Landing.jsx"
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Landing, Features, and Pipeline were rewritten around private AI software factory positioning. Login now says Approved users only and shows clear 401/403 messages."
+backend:
+  - task: "Preview token endpoint"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added POST /api/projects/{project_id}/preview-token and changed preview routes to require scoped preview_token."
+  - task: "Backend test portability"
+    implemented: true
+    working: true
+    file: "backend/runtime/sandbox_manager.py"
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Made Unix resource limit import optional on Windows and skipped bash-only cleanup tests when bash is unavailable."
+commands_run:
+  - command: "yarn install"
+    result: "SKIPPED/FAILED: yarn was not installed on PATH in this environment."
+  - command: "corepack.cmd enable; corepack.cmd prepare yarn@1.22.22 --activate"
+    result: "FAILED: corepack could not write shims under Program Files without permission."
+  - command: "npm.cmd exec --yes --package yarn@1.22.22 -- yarn install --ignore-scripts"
+    result: "PASS: Yarn 1.22.22 install completed through npm exec because yarn was not globally installed."
+  - command: "npm.cmd install --legacy-peer-deps"
+    result: "PASS: installed frontend dependencies and repaired lockfile consistency."
+  - command: "npm.cmd install ajv@^8.17.1 --save-dev --legacy-peer-deps"
+    result: "PASS: fixed existing ajv/ajv-keywords build resolution error."
+  - command: "npm.cmd run build"
+    result: "PASS: production build compiled successfully."
+  - command: "npm.cmd test -- --watchAll=false"
+    result: "PASS: 30 frontend smoke tests passed."
+  - command: "python -m pytest backend\\tests -q"
+    result: "PASS: 608 passed, 2 skipped, 1 warning."
+  - command: "route fetches against http://localhost:4173"
+    result: "PASS: /, /features, /pipeline, /access, /login, /dashboard, /dashboard/new, /dashboard/projects, /dashboard/repo, /dashboard/media, /dashboard/settings, /system all returned 200."
+known_skips:
+  - "backend/tests/test_phase2_features.py cleanup shell dry-run tests skip on Windows when bash is unavailable."
+remaining_blockers:
+  critical: []
+  high: []
+  medium:
+    - "Provider keys may still require operator setup: GENX_API_KEY, QWEN_API_KEY, GITHUB_PAT, BRAVE_SEARCH_API_KEY, PIXABAY_API_KEY."
+final_verdict: "PRIVATE BETA READY WITH SETUP LIMITATIONS"

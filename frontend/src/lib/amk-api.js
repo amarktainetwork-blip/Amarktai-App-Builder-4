@@ -66,7 +66,12 @@ export const Projects = {
   finalize: (id, opts = {}) => api.post(`/projects/${id}/finalize`, opts).then((r) => r.data),
   finalizeAsBranch: (id) => api.post(`/projects/${id}/finalize/branch-pr`).then((r) => r.data),
   openPR: (id, body) => api.post(`/projects/${id}/pr`, body).then((r) => r.data),
-  previewUrl: (id) => `${API}/projects/${id}/preview?token=${encodeURIComponent(getToken() || "")}`,
+  previewToken: (id) => api.post(`/projects/${id}/preview-token`).then((r) => r.data),
+  previewUrl: (id, previewToken) => {
+    const params = new URLSearchParams();
+    if (previewToken) params.set("preview_token", previewToken);
+    return `${API}/projects/${id}/preview${params.toString() ? `?${params.toString()}` : ""}`;
+  },
   repoAnalysis: (id) => api.get(`/projects/${id}/repo-analysis`).then((r) => r.data),
   coverage: (id) => api.get(`/projects/${id}/coverage`).then((r) => r.data),
   previewFallback: (id) => api.get(`/projects/${id}/preview-fallback`).then((r) => r.data),
@@ -119,6 +124,7 @@ export const System = {
   health: () => api.get("/health").then((r) => r.data),
   readiness: () => api.get("/readiness").then((r) => r.data),
   githubStatus: () => api.get("/integrations/github/status").then((r) => r.data),
+  capabilitiesStatus: () => api.get("/capabilities/status").then((r) => r.data),
 };
 
 export const Admin = {

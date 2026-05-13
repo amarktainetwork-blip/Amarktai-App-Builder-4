@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional, List
 
 import httpx
+import jwt
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Query
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
@@ -1531,6 +1532,39 @@ async def _own(project_id: str, claims: dict) -> None:
         raise HTTPException(404, "Project not found")
 
 
+def _make_preview_token(project_id: str, claims: dict) -> dict:
+    ttl_seconds = int(os.environ.get("PREVIEW_TOKEN_TTL_SECONDS", "300"))
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(seconds=ttl_seconds)
+    payload = {
+        "typ": "preview",
+        "sub": claims["sub"],
+        "email": claims.get("email"),
+        "role": claims.get("role", "user"),
+        "project_id": project_id,
+        "iat": now,
+        "exp": exp,
+    }
+    token = jwt.encode(payload, os.environ["JWT_SECRET"], algorithm=os.environ.get("JWT_ALGO", "HS256"))
+    return {"preview_token": token, "expires_at": exp.isoformat(), "ttl_seconds": ttl_seconds}
+
+
+async def _preview_claims(project_id: str, request: Request) -> dict:
+    token = request.query_params.get("preview_token")
+    if not token:
+        raise HTTPException(401, "Missing preview token")
+    try:
+        claims = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=[os.environ.get("JWT_ALGO", "HS256")])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Preview token expired")
+    except jwt.PyJWTError:
+        raise HTTPException(401, "Invalid preview token")
+    if claims.get("typ") != "preview" or claims.get("project_id") != project_id:
+        raise HTTPException(403, "Preview token scope mismatch")
+    await _own(project_id, claims)
+    return claims
+
+
 @secured.get("/projects/{project_id}", response_model=Project)
 async def get_project(project_id: str, claims: dict = Depends(require_user)) -> Project:
     query = {"id": project_id} if claims.get("role") == "admin" else {"id": project_id, "owner_id": claims["sub"]}
@@ -1656,6 +1690,12 @@ async def project_preview_fallback(project_id: str, claims: dict = Depends(requi
     event_type = "preview_ready" if result.get("canPreview") else "preview_fallback_ready"
     await hub.broadcast(project_id, {"type": event_type, "data": result})
     return result
+
+
+@secured.post("/projects/{project_id}/preview-token")
+async def project_preview_token(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    await _own(project_id, claims)
+    return _make_preview_token(project_id, claims)
 
 
 @secured.delete("/projects/{project_id}")
@@ -1944,9 +1984,9 @@ async def stack_decide(
     return decide_stack(prompt=prompt, mode=mode, quality_tier=tier)
 
 
-@secured.get("/projects/{project_id}/preview", response_class=HTMLResponse)
-async def project_preview(project_id: str, claims: dict = Depends(require_user)) -> HTMLResponse:
-    await _own(project_id, claims)
+@api.get("/projects/{project_id}/preview", response_class=HTMLResponse)
+async def project_preview(project_id: str, request: Request) -> HTMLResponse:
+    await _preview_claims(project_id, request)
     proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1, "error": 1,
                                                              "failed_agent": 1, "mode": 1,
                                                              "preview_strategy": 1})
@@ -1978,9 +2018,9 @@ _PREVIEW_MIME: dict[str, str] = {
 }
 
 
-@secured.get("/projects/{project_id}/preview/{file_path:path}")
+@api.get("/projects/{project_id}/preview/{file_path:path}")
 async def project_preview_file(
-    project_id: str, file_path: str, claims: dict = Depends(require_user)
+    project_id: str, file_path: str, request: Request
 ):
     """Serve an individual project file from the preview with the correct MIME type.
 
@@ -1990,7 +2030,7 @@ async def project_preview_file(
     """
     from fastapi.responses import Response
     from pathlib import PurePosixPath
-    await _own(project_id, claims)
+    await _preview_claims(project_id, request)
     # Reject any path that contains traversal components after normalization.
     # PurePosixPath handles URL-decoded values; reject absolute paths and any
     # path that resolves outside the root (indicated by '..' in its parts).

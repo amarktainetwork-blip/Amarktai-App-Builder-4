@@ -13,7 +13,7 @@ export default function LoginPage() {
   const [err, setErr] = useState("");
 
   if (loading) return null;
-  if (user) return <Navigate to="/app" replace />;
+  if (user) return <Navigate to="/dashboard" replace />;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -22,9 +22,15 @@ export default function LoginPage() {
     try {
       await login(email.trim().toLowerCase(), password);
       toast.success("Welcome back.");
-      nav("/app");
+      nav("/dashboard");
     } catch (e) {
-      setErr(e.response?.data?.detail || "Login failed");
+      if (e.response?.status === 401) {
+        setErr("Approved users only. The email or password was not accepted.");
+      } else if (e.response?.status === 403) {
+        setErr(e.response?.data?.detail || "This account is not currently approved for access.");
+      } else {
+        setErr(e.response?.data?.detail || "Login failed. Check the backend connection and try again.");
+      }
     } finally {
       setBusy(false);
     }
@@ -43,15 +49,14 @@ export default function LoginPage() {
           </span>
         </Link>
         <div className="relative z-10 max-w-md">
-          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3 mb-4">[ secure access ]</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3 mb-4">[ approved users only ]</div>
           <h1 className="font-display font-semibold text-4xl tracking-tight leading-[1.05] mb-6">
             Single-tenant.<br />
             Single-key.<br />
             <span className="text-amk-accent">Single-admin.</span>
           </h1>
           <p className="text-sm text-amk-fg2 leading-relaxed">
-            Your VPS, your AI credits, your code. The agents wait inside. Sign in to start a
-            new build or pull in a public GitHub repo and let them iterate.
+            Private beta users can start builds, import repos, preview work, and configure provider keys from the dashboard.
           </p>
         </div>
         <div className="relative z-10 font-mono text-[10px] text-amk-fg3 uppercase tracking-wider">
@@ -70,9 +75,9 @@ export default function LoginPage() {
               Amarktai <span className="text-amk-accent">App Builder</span>
             </span>
           </Link>
-          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3 mb-3">[ sign in ]</div>
-          <h2 className="font-display font-semibold text-3xl tracking-tight mb-2">Welcome back</h2>
-          <p className="text-sm text-amk-fg2 mb-8">Enter your admin credentials to continue.</p>
+          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3 mb-3">[ approved users only ]</div>
+          <h2 className="font-display font-semibold text-3xl tracking-tight mb-2">Login to the private beta</h2>
+          <p className="text-sm text-amk-fg2 mb-8">Use the credentials issued after approval. Not approved yet? Request access below.</p>
 
           <form onSubmit={submit} className="space-y-4" data-testid="login-form">
             <div>
@@ -124,8 +129,7 @@ export default function LoginPage() {
             </button>
           </form>
           <p className="font-mono text-[10px] text-amk-fg3 mt-8 leading-relaxed">
-            Use the admin account configured with <code className="text-amk-fg2">ADMIN_EMAIL</code> and{" "}
-            <code className="text-amk-fg2">ADMIN_PASSWORD</code>.
+            Need access? <Link to="/access" className="text-amk-accent hover:text-white">Request Access</Link>.
           </p>
         </div>
       </div>

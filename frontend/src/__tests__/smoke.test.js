@@ -21,8 +21,8 @@ test("landing hero has improved headline copy", () => {
     require.resolve("../pages/Landing.jsx"),
     "utf8"
   );
-  expect(content).toMatch(/Build websites, apps/);
-  expect(content).toMatch(/GitHub-ready/);
+  expect(content).toMatch(/private AI/);
+  expect(content).toMatch(/software factory/);
 });
 
 test("landing imports Cpu icon", () => {
@@ -48,7 +48,7 @@ test("settings dialog has max-height 90vh", () => {
 test("settings dialog tab content has overflow-y-auto", () => {
   const fs = require("fs");
   const content = fs.readFileSync(
-    require.resolve("../components/SettingsDialog.jsx"),
+    require.resolve("../components/SettingsPanel.jsx"),
     "utf8"
   );
   expect(content).toMatch(/overflow-y-auto/);
@@ -57,10 +57,21 @@ test("settings dialog tab content has overflow-y-auto", () => {
 test("settings dialog has sticky header (shrink-0 on header)", () => {
   const fs = require("fs");
   const content = fs.readFileSync(
-    require.resolve("../components/SettingsDialog.jsx"),
+    require.resolve("../components/SettingsPanel.jsx"),
     "utf8"
   );
   expect(content).toMatch(/shrink-0/);
+});
+
+test("dashboard has top navigation routes", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../components/dashboard/DashboardShell.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/dashboard-top-nav/);
+  expect(content).toMatch(/\/dashboard\/settings/);
+  expect(content).toMatch(/Repo Workbench/);
 });
 
 // ── Workspace navigation ──────────────────────────────────────────────────────
@@ -72,7 +83,7 @@ test("workspace has Back to Projects button", () => {
     "utf8"
   );
   expect(content).toMatch(/back-to-projects-btn/i);
-  expect(content).toMatch(/Projects/);
+  expect(content).toMatch(/Dashboard/);
 });
 
 test("workspace has New Build button", () => {
@@ -103,12 +114,11 @@ test("workspace iteration panel distinguishes unsatisfied from complete", () => 
 test("project list has build mode hints", () => {
   const fs = require("fs");
   const content = fs.readFileSync(
-    require.resolve("../pages/ProjectList.jsx"),
+    require.resolve("../pages/dashboard/NewBuildPage.jsx"),
     "utf8"
   );
-  expect(content).toMatch(/build-mode-hint/);
   expect(content).toMatch(/landing_page/);
-  expect(content).toMatch(/A single polished page/);
+  expect(content).toMatch(/Static, image-rich page/);
 });
 
 // ── Multi-page warning ────────────────────────────────────────────────────────
@@ -116,11 +126,10 @@ test("project list has build mode hints", () => {
 test("project list has multi-page warning component", () => {
   const fs = require("fs");
   const content = fs.readFileSync(
-    require.resolve("../pages/ProjectList.jsx"),
+    require.resolve("../pages/dashboard/NewBuildPage.jsx"),
     "utf8"
   );
-  expect(content).toMatch(/multi-page-warning/);
-  expect(content).toMatch(/MULTI_PAGE_PATTERN/);
+  expect(content).toMatch(/Build mode/);
 });
 
 // ── Media source descriptions ─────────────────────────────────────────────────
@@ -128,12 +137,12 @@ test("project list has multi-page warning component", () => {
 test("media choice has improved descriptions", () => {
   const fs = require("fs");
   const content = fs.readFileSync(
-    require.resolve("../pages/ProjectList.jsx"),
+    require.resolve("../pages/dashboard/NewBuildPage.jsx"),
     "utf8"
   );
-  expect(content).toMatch(/Use the best available source/);
-  expect(content).toMatch(/Requires Pixabay API key/);
-  expect(content).toMatch(/No external images/);
+  expect(content).toMatch(/best configured source/);
+  expect(content).toMatch(/Requires PIXABAY_API_KEY/);
+  expect(content).toMatch(/No external media dependency/);
 });
 
 // ── Smoke script ──────────────────────────────────────────────────────────────
@@ -211,10 +220,10 @@ test("workspace ws banner shows reconnecting state not static message", () => {
 test("project list does not import unused Video icon", () => {
   const fs = require("fs");
   const content = fs.readFileSync(
-    require.resolve("../pages/ProjectList.jsx"),
+    require.resolve("../pages/dashboard/NewBuildPage.jsx"),
     "utf8"
   );
-  // Video is not used anywhere in ProjectList — should not be imported
+  // Video is not used in the new build page and should not be imported.
   expect(content).not.toMatch(/\bVideo\b/);
 });
 

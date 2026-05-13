@@ -10,12 +10,24 @@ const REPO_STRUCTURE_MODES = new Set([
 
 export default function LivePreview({ projectId, refreshKey, projectStatus, projectError, failedAgent, projectMode, previewStrategy, buildPhase, previewFallback }) {
   const [bust, setBust] = useState(0);
-  // NOTE: The preview URL contains a bearer token as a query parameter for iframe auth.
-  // TODO: Move to a short-lived preview token or use a dedicated preview origin to reduce
-  //       token exposure in browser history and server logs.
-  const url = `${Projects.previewUrl(projectId)}&v=${refreshKey || 0}-${bust}`;
+  const [previewToken, setPreviewToken] = useState("");
+  const [tokenError, setTokenError] = useState("");
+  const version = `${refreshKey || 0}-${bust}`;
+  const url = previewToken ? `${Projects.previewUrl(projectId, previewToken)}&v=${version}` : "";
 
   useEffect(() => { setBust((b) => b + 1); }, [refreshKey]);
+  useEffect(() => {
+    let alive = true;
+    setTokenError("");
+    Projects.previewToken(projectId)
+      .then((res) => {
+        if (alive) setPreviewToken(res.preview_token || "");
+      })
+      .catch((err) => {
+        if (alive) setTokenError(err.response?.data?.detail || "Could not create preview token.");
+      });
+    return () => { alive = false; };
+  }, [projectId, refreshKey]);
 
   const isFailed = projectStatus === "failed" || projectStatus === "cancelled";
   const isRunning = projectStatus === "running" || projectStatus === "queued";
@@ -113,6 +125,32 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
             <p className="font-mono text-[11px] text-amk-fg3 leading-relaxed">
               Open the <strong className="text-white">Code</strong> tab to view the file tree, README.md, and deployment files.
             </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!previewToken) {
+    return (
+      <div data-testid="live-preview" className="h-full flex flex-col">
+        <div className="h-9 border-b border-amk-line bg-amk-base flex items-center px-3 shrink-0">
+          <Cpu className="w-3.5 h-3.5 text-amk-fg3 mr-2" strokeWidth={1.5} />
+          <span className="font-mono text-[11px] text-amk-fg">Live Preview</span>
+        </div>
+        <div className="flex-1 bg-amk-panel flex items-center justify-center p-6">
+          <div className="border border-amk-line bg-amk-base p-5 max-w-md text-center">
+            {tokenError ? (
+              <>
+                <AlertTriangle className="w-7 h-7 text-agent-scout mx-auto mb-3" />
+                <p className="font-mono text-[12px] text-amk-fg2">{tokenError}</p>
+              </>
+            ) : (
+              <>
+                <Loader2 className="w-7 h-7 text-amk-fg3 mx-auto mb-3 animate-spin" />
+                <p className="font-mono text-[12px] text-amk-fg2">Preparing scoped preview access...</p>
+              </>
+            )}
           </div>
         </div>
       </div>

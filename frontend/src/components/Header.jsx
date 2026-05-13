@@ -6,7 +6,7 @@ export default function Header({ projectName, status, onOpenSettings, onFinalize
   return (
     <header
       data-testid="app-header"
-      className="h-14 border-b border-amk-line flex items-center justify-between px-4 bg-amk-base/90 backdrop-blur-md sticky top-0 z-50"
+      className="min-h-14 border-b border-amk-line flex items-center justify-between gap-3 px-3 sm:px-4 bg-amk-base/90 backdrop-blur-md sticky top-0 z-50"
     >
       <div className="flex items-center gap-3">
         <Link to="/" data-testid="header-logo" className="flex items-center gap-2 group">
@@ -31,7 +31,7 @@ export default function Header({ projectName, status, onOpenSettings, onFinalize
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2 overflow-x-auto py-2">
         {rightExtra}
         {onOpenMediaLibrary && (
           <Button
@@ -45,15 +45,17 @@ export default function Header({ projectName, status, onOpenSettings, onFinalize
             <ImageIcon className="w-3.5 h-3.5 mr-1.5" strokeWidth={1.5} /> Media
           </Button>
         )}
-        <Button
-          data-testid="header-settings-btn"
-          variant="ghost"
-          size="sm"
-          className="text-amk-fg2 hover:text-white hover:bg-amk-surface font-mono text-xs"
-          onClick={onOpenSettings}
-        >
-          <SettingsIcon className="w-3.5 h-3.5 mr-1.5" strokeWidth={1.5} /> Settings
-        </Button>
+        {onOpenSettings && (
+          <Button
+            data-testid="header-settings-btn"
+            variant="ghost"
+            size="sm"
+            className="text-amk-fg2 hover:text-white hover:bg-amk-surface font-mono text-xs"
+            onClick={onOpenSettings}
+          >
+            <SettingsIcon className="w-3.5 h-3.5 mr-1.5" strokeWidth={1.5} /> Settings
+          </Button>
+        )}
         {prUrl ? (
           <a
             data-testid="header-pr-link"
