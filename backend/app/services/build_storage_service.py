@@ -47,6 +47,10 @@ BUILD_STATUS_VALUES = frozenset({
     "release_ready", "deployed", "archived",
 })
 _SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
+# Compiled once at module level — matches env var references in source files
+_ENV_VAR_RE = re.compile(
+    r'(?:process\.env\.|os\.environ\.get\(|os\.getenv\()["\']?([A-Z_][A-Z0-9_]{2,})'
+)
 
 METADATA_FILES = [
     "build.json",
@@ -77,20 +81,32 @@ def get_storage_root() -> Path:
 
 
 def _safe_segment(value: str) -> str:
-    """Sanitise a path segment — reject anything that isn't alphanum/dash/dot/underscore."""
-    if not value or not _SAFE_PATH_RE.match(value):
+    """Sanitise a path segment — reject anything that isn't alphanum/dash/dot/underscore.
+
+    Explicitly rejects path traversal sequences and directory separators before
+    applying os.path.basename as an additional sanitisation layer (CodeQL sanitizer).
+    Raises ValueError on any unsafe input.
+    """
+    # Explicit early rejection of traversal and separator characters
+    if not value or ".." in value or "/" in value or "\\" in value:
         raise ValueError(f"Unsafe path segment: {value!r}")
-    # Extra guard: no path traversal
-    if ".." in value or "/" in value or "\\" in value:
-        raise ValueError(f"Path traversal attempt: {value!r}")
-    return value
+    # os.path.basename strips any remaining directory components (CodeQL sanitizer)
+    clean = os.path.basename(value)
+    if not clean or not _SAFE_PATH_RE.match(clean):
+        raise ValueError(f"Unsafe path segment: {value!r}")
+    return clean
 
 
 def _assert_inside_root(path: Path, root: Path) -> None:
-    """Raise ValueError if path is not inside root (prevents traversal after resolution)."""
-    try:
-        path.resolve().relative_to(root.resolve())
-    except ValueError:
+    """Raise ValueError if path is not inside root (prevents traversal after resolution).
+
+    Uses os.path.realpath to canonicalise both paths before comparison so that
+    symlinks and relative components cannot be used to escape the storage root.
+    """
+    real_root = os.path.realpath(str(root))
+    real_path = os.path.realpath(str(path))
+    # The path must start with root + separator, or be the root itself
+    if not (real_path == real_root or real_path.startswith(real_root + os.sep)):
         raise ValueError(f"Path {path} is outside the builds storage root {root}")
 
 
@@ -373,12 +389,12 @@ def _load_workspace_meta(ws_dir: Path) -> dict | None:
 
 def list_workspaces(workspace_type: str | None = None) -> list[dict]:
     """Return all workspace metadata dicts, optionally filtered by type."""
-    root = get_storage_root()
-    results: list[dict] = []
-
-    # Validate workspace_type against the whitelist before using as path component
+    # Validate workspace_type first (before any file system operations)
     if workspace_type is not None and workspace_type not in BUILD_TYPES:
         raise ValueError(f"Invalid workspace_type: {workspace_type!r}. Must be one of: {sorted(BUILD_TYPES)}")
+
+    root = get_storage_root()
+    results: list[dict] = []
 
     types_to_scan = BUILD_TYPES if not workspace_type else {workspace_type}
 
@@ -540,11 +556,10 @@ def detect_missing_env_vars(workspace_path: Path, files: list[dict[str, Any]]) -
     resolved = workspace_path.resolve()
     _assert_inside_root(resolved, root)
 
-    env_re = re.compile(r'(?:process\.env\.|os\.environ\.get\(|os\.getenv\()["\']?([A-Z_][A-Z0-9_]{2,})')
     found: set[str] = set()
     for f in files:
         content = f.get("content", "")
-        found.update(env_re.findall(content))
+        found.update(_ENV_VAR_RE.findall(content))
 
     env_example_path = resolved / "env.example"
     declared: set[str] = set()

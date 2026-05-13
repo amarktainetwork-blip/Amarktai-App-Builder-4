@@ -1294,7 +1294,7 @@ async def qwen_status() -> dict:
             return {"available": True, "model": model, "status": "configured"}
         return {
             "available": False,
-            "status": f"{key} not configured — QWEN_API_KEY is set but {key} is missing",
+            "status": f"{key} not configured -- QWEN_API_KEY is set but {key} is missing",
             "suggested": QWEN_RECOMMENDED_MODELS.get(key, ""),
         }
 
