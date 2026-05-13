@@ -65,9 +65,11 @@ from .creative_director import run_creative_director
 from .agent_registry import needs_motion_agent, needs_backend_coder, needs_security_agent
 from .deployment_agent import run_deployment_validation
 from .media_director import run_media_director
+from app.services.build_context_service import normalize_build_context, parse_best_effort_agent_output
 
 # Per-agent timeout in seconds
 AGENT_TIMEOUTS = {
+    "planner": 180,
     "scout": 180,
     "architect": 240,
     "coder": 480,
@@ -79,6 +81,7 @@ AGENT_TIMEOUTS = {
     "backend_coder": 480,
     "security": 120,
     "visual_qa": 120,
+    "advisor": 180,
 }
 
 # Maximum number of iteration history entries to keep in project_memory
@@ -491,6 +494,17 @@ class Orchestrator:
                 await self._record_event(agent, "repaired",
                                          f"JSON repair succeeded for {agent}.")
             except Exception as repair_err:
+                best_effort = parse_best_effort_agent_output(result["text"])
+                if agent in {"planner", "scout"} and best_effort:
+                    await self._record_event(
+                        agent, "repaired",
+                        f"{agent.title()} returned markdown; using best-effort structured defaults.",
+                        meta={"repair_error": str(repair_err)},
+                    )
+                    data = best_effort
+                    await self._record_event(agent, "completed", f"{agent.title()} done.",
+                                             meta={"model": result["model_label"], "best_effort": True})
+                    return {"data": data, "model_label": result["model_label"]}
                 if agent == "coder":
                     err_msg = "Coder returned invalid JSON and automatic repair failed."
                 else:
@@ -869,24 +883,51 @@ class Orchestrator:
 
         # Load project memory at the start of the build (Phase 1)
         memory = await load_memory(self.db, self.project_id)
+        project_meta = await self._load_project()
+        project_name = project_meta.get("name", "")
+        project_settings = {
+            "quality_tier": project_meta.get("quality_tier", "balanced"),
+            "media_policy": project_meta.get("media_requirements", ""),
+            "required_files": sd.get("required_files", []),
+        }
+        normalized_context = normalize_build_context(
+            user_prompt,
+            project_name=project_name,
+            build_mode=mode,
+            planner_output={},
+            scout_output={},
+            settings=project_settings,
+        )
+        await self.emit({"type": "build_context", "data": normalized_context})
 
         # ── Phase 4: Smart Build Planning ────────────────────────────────────
         # Run a lightweight build planner to estimate complexity and explain the
         # plan to the user before the agents start coding.
+        plan_data: dict[str, Any] = {}
         try:
             await self._check_cancel()
             plan_input = json.dumps({
                 "prompt": user_prompt,
                 "mode": mode,
                 "stack_decision": sd,
+                "context": normalized_context,
             })
             plan_result = await self._run_agent("planner", BUILD_PLANNER_PROMPT, plan_input)
             plan_data = plan_result["data"]
+            normalized_context = normalize_build_context(
+                user_prompt,
+                project_name=project_name,
+                build_mode=mode,
+                planner_output=plan_data,
+                scout_output={},
+                settings=project_settings,
+            )
             await self.db.projects.update_one(
                 {"id": self.project_id},
-                {"$set": {"build_plan": plan_data, "updated_at": _now()}},
+                {"$set": {"build_plan": plan_data, "build_context": normalized_context, "updated_at": _now()}},
             )
             await self.emit({"type": "build_plan", "data": plan_data})
+            await self.emit({"type": "build_context", "data": normalized_context})
             # Compose a concise plan message for the user
             plan_msg_parts = [
                 f"**Build Plan · {plan_data.get('complexity', 'Moderate')} complexity**\n\n"
@@ -932,11 +973,28 @@ class Orchestrator:
             "prompt": user_prompt,
             "mode": mode,
             "stack": sd.get("stack", {}),
+            "context": normalized_context,
             "shared_context": shared_ctx,
         })
         scout = await self._run_agent("scout", SCOUT_PROMPT, scout_user)
         await self._check_cancel()
         scout_data = scout["data"]
+        normalized_context = normalize_build_context(
+            user_prompt,
+            project_name=project_name,
+            build_mode=mode,
+            planner_output=plan_data,
+            scout_output=scout_data,
+            settings=project_settings,
+        )
+        scout_data.setdefault("audience", normalized_context["audience"])
+        scout_data.setdefault("core_features", normalized_context["features"])
+        scout_data.setdefault("summary", normalized_context["goal"])
+        await self.db.projects.update_one(
+            {"id": self.project_id},
+            {"$set": {"build_context": normalized_context, "updated_at": _now()}},
+        )
+        await self.emit({"type": "build_context", "data": normalized_context})
         await self.fs.write("requirements.md", scout_data.get("requirements_md", ""), "markdown")
         await self.emit({"type": "file_written", "data": {"path": "requirements.md"}})
         # Include enriched scout fields in the message if present
@@ -968,6 +1026,7 @@ class Orchestrator:
         await self._check_cancel()
         arch_input = json.dumps({
             "requirements": scout_data,
+            "context": normalized_context,
             "mode": mode,
             "stack_decision": sd,
             "required_files": sd.get("required_files", []),
@@ -1004,7 +1063,7 @@ class Orchestrator:
         design_direction = create_design_direction(
             prompt=user_prompt,
             project_type=project_type_for_design,
-            audience=scout_data.get("audience", ""),
+            audience=normalized_context["audience"],
             tier=project_for_design.get("quality_tier", "balanced"),
             recent_signatures=recent_signatures if recent_signatures else None,
         )
@@ -1013,7 +1072,7 @@ class Orchestrator:
         creative_blueprint = run_creative_director(
             prompt=user_prompt,
             mode=mode,
-            audience=scout_data.get("audience", ""),
+            audience=normalized_context["audience"],
             industry=scout_data.get("industry", ""),
             tier=project_for_design.get("quality_tier", "balanced"),
             design_direction=design_direction,
@@ -1057,6 +1116,7 @@ class Orchestrator:
         coder_input = json.dumps({
             "requirements": scout_data,
             "plan": arch_data,
+            "context": normalized_context,
             "mode": mode,
             "stack_decision": sd,
             "required_files": sd.get("required_files", []),
@@ -1143,6 +1203,7 @@ class Orchestrator:
                 backend_input = json.dumps({
                     "requirements": scout_data,
                     "arch_plan": arch_data,
+                    "context": normalized_context,
                     "auth_required": sd.get("auth_required", False),
                     "database": sd.get("stack", {}).get("database", "none"),
                     "mode": mode,
@@ -1187,6 +1248,7 @@ class Orchestrator:
         review_input = json.dumps({
             "mode": mode,
             "required_files": sd.get("required_files", []),
+            "context": normalized_context,
             "files": [{"path": f["path"], "content": f["content"]} for f in current_files
                       if f["path"] not in _META_FILES],
             "shared_context": shared_ctx,
@@ -1295,6 +1357,7 @@ class Orchestrator:
                 "missing_files": missing,
                 "validation_errors": errors,
                 "repair_attempt": repair_pass + 1,
+                "context": normalized_context,
                 "files": [{"path": f["path"], "content": f["content"]} for f in repair_files
                           if f["path"] not in _META_FILES],
                 "shared_context": shared_ctx,
@@ -1497,6 +1560,7 @@ class Orchestrator:
             advisor_input = json.dumps({
                 "prompt": user_prompt,
                 "mode": mode,
+                "context": normalized_context,
                 "file_count": len(final_files),
                 "file_paths": [f["path"] for f in final_files],
                 "quality_score": last_val.get("qualityScore", 0),
@@ -1558,8 +1622,9 @@ class Orchestrator:
 
         # Compose a rich research message with all Phase 4 fields
         msg_parts = [f"**Research Complete**\n\n{rd.get('summary', '')}"]
-        if rd.get("target_audience"):
-            msg_parts.append(f"\n**Target audience:** {rd['target_audience']}")
+        target_audience = rd.get("target_audience") or rd.get("audience")
+        if target_audience:
+            msg_parts.append(f"\n**Target audience:** {target_audience}")
         if rd.get("user_pain_points"):
             msg_parts.append("\n**User pain points:**\n" + "\n".join(f"- {p}" for p in rd["user_pain_points"]))
         if rd.get("competing_approaches"):

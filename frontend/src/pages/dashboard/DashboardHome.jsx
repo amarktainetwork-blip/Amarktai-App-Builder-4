@@ -3,10 +3,13 @@ import { Link } from "react-router-dom";
 import { ArrowRight, Clock3, Github, ShieldCheck, Sparkles } from "lucide-react";
 import CapabilityStatus from "@/components/CapabilityStatus";
 import { Projects, System } from "@/lib/amk-api";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export default function DashboardHome() {
   const [projects, setProjects] = useState([]);
   const [readiness, setReadiness] = useState(null);
+  const [promptOpen, setPromptOpen] = useState(false);
 
   useEffect(() => {
     Projects.list().then(setProjects).catch(() => setProjects([]));
@@ -57,15 +60,35 @@ export default function DashboardHome() {
             <Clock3 className="h-5 w-5 text-amk-fg3" />
           </div>
           {last ? (
-            <Link to={`/workspace/${last.id}`} className="mt-5 block border border-amk-line bg-amk-base p-4 hover:bg-amk-surface">
-              <div className="flex items-center justify-between gap-3">
+            <div className="mt-5 border border-amk-line bg-amk-base p-4">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="truncate font-mono text-sm text-white">{last.name}</div>
-                  <div className="mt-1 truncate font-mono text-[10px] text-amk-fg3">{last.prompt}</div>
+                  <div className="truncate font-mono text-sm text-white">{last.name || "Untitled workspace"}</div>
+                  <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-amk-fg3">{last.status || "queued"}</div>
+                  {last.summary && (
+                    <p className="mt-3 overflow-hidden text-xs leading-5 text-amk-fg2 [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical]">
+                      {last.summary}
+                    </p>
+                  )}
+                  {last.prompt && (
+                    <p className="mt-2 overflow-hidden text-[11px] leading-5 text-amk-fg3 [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical]">
+                      {shortPrompt(last.prompt)}
+                    </p>
+                  )}
                 </div>
-                <ArrowRight className="h-4 w-4 shrink-0 text-amk-fg3" />
+                <Clock3 className="mt-1 h-4 w-4 shrink-0 text-amk-fg3" />
               </div>
-            </Link>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Link to={`/workspace/${last.id}`} className="inline-flex h-9 items-center gap-2 bg-amk-accent px-4 font-mono text-[10px] uppercase tracking-wider text-black hover:bg-emerald-300">
+                  Open workspace <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+                {last.prompt && (
+                  <Button type="button" variant="outline" onClick={() => setPromptOpen(true)} className="h-9 border-amk-line font-mono text-[10px] uppercase tracking-wider">
+                    View prompt
+                  </Button>
+                )}
+              </div>
+            </div>
           ) : (
             <p className="mt-5 text-sm leading-6 text-amk-fg2">No projects yet. Start with a prompt or import a repository.</p>
           )}
@@ -94,8 +117,22 @@ export default function DashboardHome() {
       </section>
 
       <CapabilityStatus compact />
+      <Dialog open={promptOpen} onOpenChange={setPromptOpen}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto border-amk-line bg-amk-panel text-amk-fg">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl text-white">{last?.name || "Workspace prompt"}</DialogTitle>
+          </DialogHeader>
+          <pre className="whitespace-pre-wrap break-words rounded-none border border-amk-line bg-amk-base p-4 text-xs leading-5 text-amk-fg2">
+            {last?.prompt || ""}
+          </pre>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+function shortPrompt(prompt = "") {
+  return prompt.length > 180 ? `${prompt.slice(0, 177).trim()}...` : prompt;
 }
 
 function StatusCard({ label, value, ok }) {

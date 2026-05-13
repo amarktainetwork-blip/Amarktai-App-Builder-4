@@ -266,6 +266,49 @@ def check_image_alt(ws: Path) -> dict[str, Any]:
     return {"ok": True}
 
 
+def check_dead_ctas(ws: Path) -> dict[str, Any]:
+    """Detect obvious dead links/buttons in UI source."""
+    ui_files = _iter_source_files(ws, {".html", ".jsx", ".tsx", ".vue", ".svelte"})
+    hits: list[str] = []
+    for f in ui_files[:50]:
+        try:
+            content = f.read_text(errors="replace")
+        except Exception:
+            continue
+        if re.search(r'href=["\']#["\']', content, re.IGNORECASE):
+            hits.append(str(f.relative_to(ws)))
+            continue
+        for match in re.finditer(r"<button\b([^>]*)>", content, re.IGNORECASE):
+            attrs = match.group(1)
+            if "onClick" not in attrs and "type=" not in attrs:
+                hits.append(str(f.relative_to(ws)))
+                break
+    if hits:
+        return {
+            "ok": False,
+            "blocker": False,
+            "warning": True,
+            "message": f"Potential dead CTA or inert button found in {len(set(hits))} file(s).",
+            "files": sorted(set(hits))[:10],
+            "suggestion": "Give CTAs real hrefs, handlers, or explicit button types tied to a working flow.",
+        }
+    return {"ok": True}
+
+
+def check_preview_manifest(ws: Path) -> dict[str, Any]:
+    """Check for a saved preview manifest/status when preview is required."""
+    candidates = ["preview-manifest.json", "preview_manifest.json", "preview.json", "status.json"]
+    if any((ws / name).exists() for name in candidates):
+        return {"ok": True}
+    return {
+        "ok": False,
+        "blocker": False,
+        "warning": True,
+        "message": "No preview manifest found.",
+        "suggestion": "Save preview-manifest.json or status.json with preview status and URL.",
+    }
+
+
 # ── Main gate ─────────────────────────────────────────────────────────────────
 
 def run_quality_gate(workspace_path: str | Path) -> dict[str, Any]:
@@ -303,6 +346,8 @@ def run_quality_gate(workspace_path: str | Path) -> dict[str, Any]:
         "readme":       check_readme(ws),
         "responsive":   check_responsive(ws),
         "image_alt":    check_image_alt(ws),
+        "dead_ctas":    check_dead_ctas(ws),
+        "preview_manifest": check_preview_manifest(ws),
     }
 
     blockers = []
@@ -330,13 +375,21 @@ def run_quality_gate(workspace_path: str | Path) -> dict[str, Any]:
     score = max(0, 100 - len(blockers) * 25 - len(warnings) * 5)
     passed = len(blockers) == 0
 
-    return {
+    files_checked = [str(p.relative_to(ws)) for p in _iter_source_files(ws, {".html", ".js", ".jsx", ".ts", ".tsx", ".css", ".md", ".json"})[:200]]
+    report = {
         "pass": passed,
         "score": score,
         "blockers": blockers,
         "warnings": warnings,
+        "fixes_applied": [],
+        "files_checked": files_checked,
         "checks": checks,
         "repair_suggestions": suggestions,
         "workspace_path": str(ws),
         "checked_at": _now(),
     }
+    try:
+        (ws / "quality-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return report

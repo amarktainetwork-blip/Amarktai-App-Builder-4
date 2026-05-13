@@ -294,7 +294,7 @@ def list_project_files(workspace_path: str | Path, max_files: int = 200) -> list
     files = []
     for p in sorted(ws.rglob("*")):
         if p.is_file():
-            rel = str(p.relative_to(ws))
+            rel = p.relative_to(ws).as_posix()
             # Skip .git and node_modules
             parts = Path(rel).parts
             if ".git" in parts or "node_modules" in parts or "__pycache__" in parts:

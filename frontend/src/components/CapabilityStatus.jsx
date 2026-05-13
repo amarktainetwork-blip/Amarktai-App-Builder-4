@@ -62,6 +62,13 @@ export default function CapabilityStatus({ compact = false }) {
 }
 
 function getStatus(capability, key) {
+  if (capability?.live_status === "key_present_live_ok") return { label: "Available", color: "#00E676" };
+  if (capability?.live_status === "key_present_live_fail" || capability?.live_status === "provider_timeout") {
+    return { label: "Live check failed", color: "#FF5722" };
+  }
+  if (capability?.configured && capability?.live_status === "key_present_not_tested") {
+    return { label: "Configured / not live tested", color: "#FFC107" };
+  }
   if (capability?.available) return { label: "Available", color: "#00E676" };
   if (capability?.coming_soon) return { label: "Coming soon", color: "#A1A1AA" };
   if (key === "preview_generation") return { label: "Available", color: "#00E676" };

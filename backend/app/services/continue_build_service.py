@@ -71,7 +71,7 @@ def load_workspace(workspace_path: str | Path) -> dict[str, Any]:
             parts = rel.parts
             if any(d in _SKIP_DIRS for d in parts):
                 continue
-            files.append(str(rel))
+            files.append(rel.as_posix())
             if len(files) >= 500:
                 break
 
@@ -480,7 +480,7 @@ def create_workspace_version(
             parts = rel.parts
             if any(d in _SKIP_DIRS | {".versions"} for d in parts):
                 continue
-            files.append(str(rel))
+            files.append(rel.as_posix())
 
     snapshot = {
         "version_id": version_id,
