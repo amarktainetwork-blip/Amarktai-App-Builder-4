@@ -22,6 +22,7 @@ import ProjectsPage from "@/pages/dashboard/ProjectsPage";
 import RepoWorkbenchPage from "@/pages/dashboard/RepoWorkbenchPage";
 import MediaPage from "@/pages/dashboard/MediaPage";
 import SettingsPage from "@/pages/dashboard/SettingsPage";
+import BuildStoragePage from "@/pages/dashboard/BuildStoragePage";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -57,6 +58,7 @@ function App() {
               <Route path="new" element={<NewBuildPage />} />
               <Route path="projects" element={<ProjectsPage />} />
               <Route path="repo" element={<RepoWorkbenchPage />} />
+              <Route path="builds" element={<BuildStoragePage />} />
               <Route path="media" element={<MediaPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>

@@ -127,6 +127,23 @@ export const System = {
   capabilitiesStatus: () => api.get("/capabilities/status").then((r) => r.data),
 };
 
+export const Builds = {
+  list: (workspaceType) =>
+    api.get("/builds", { params: workspaceType ? { workspace_type: workspaceType } : {} }).then((r) => r.data),
+  storageUsage: () => api.get("/builds/storage-usage").then((r) => r.data),
+  archive: (workspacePath, confirmed = true) =>
+    api.post("/builds/archive", { workspace_path: workspacePath, confirmed }).then((r) => r.data),
+  delete: (workspacePath, confirmed = true) =>
+    api.post("/builds/delete", { workspace_path: workspacePath, confirmed }).then((r) => r.data),
+  updateMeta: (workspacePath, updates) =>
+    api.post("/builds/update-meta", { workspace_path: workspacePath, updates }).then((r) => r.data),
+};
+
+export const Qwen = {
+  status: () => api.get("/qwen/status").then((r) => r.data),
+  applyRecommendedConfig: () => api.post("/qwen/apply-recommended-config").then((r) => r.data),
+};
+
 export const Admin = {
   users: () => api.get("/admin/users").then((r) => r.data),
   createUser: (body) => api.post("/admin/users", body).then((r) => r.data),
