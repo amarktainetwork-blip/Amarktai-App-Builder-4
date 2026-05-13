@@ -886,6 +886,19 @@ async def readiness() -> dict:
         await add("admin user", "FAIL", f"Could not check admin user: {type(exc).__name__}", "blocker")
 
     try:
+        await _probe_svc.probe_all_providers(
+            genx_key=(await _runtime_secret("GENX_API_KEY")) or "",
+            qwen_key=(await _runtime_secret("QWEN_API_KEY")) or "",
+            github_pat=(await _runtime_secret("GITHUB_PAT")) or "",
+            brave_key=(await _runtime_secret("BRAVE_SEARCH_API_KEY")) or "",
+            pixabay_key=(await _runtime_secret("PIXABAY_API_KEY")) or "",
+            qwen_base_url=(await _runtime_secret("QWEN_BASE_URL")) or None,
+            force_refresh=True,
+        )
+    except Exception as exc:
+        await add("provider live probes", "WARN", f"Provider probe cache refresh failed: {type(exc).__name__}", "warning")
+
+    try:
         truth = await _capability_truth()
     except Exception as exc:
         truth = {"providers": {}, "capabilities": {}, "warnings": [], "errors": [str(exc)]}
