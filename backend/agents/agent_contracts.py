@@ -439,6 +439,195 @@ AGENT_CONTRACTS: dict[str, dict[str, Any]] = {
         },
         "validation": "passed=false when any critical or high violation found",
         "failure_behavior": "block finalization; list all violations with fixes",
+        "tools": [
+            "repo_file_read", "secret_scanner", "insecure_pattern_scanner",
+            "diff_generator", "capability_registry",
+        ],
+    },
+
+    "repo_engineer": {
+        "name": "Repo Engineer Agent",
+        "responsibility": (
+            "Manages git operations safely: clone, branch, commit, push, PR. "
+            "Detects dirty state before pull. Never overwrites uncommitted changes without confirmation. "
+            "Uses safe subprocess calls only (never shell=True)."
+        ),
+        "task_type": "implementation",
+        "input_schema": {
+            "repo_url": "str — GitHub HTTPS URL",
+            "branch": "str",
+            "changes": "list[{path, content, action}]",
+            "commit_message": "str",
+            "github_pat": "str|null",
+        },
+        "output_schema": {
+            "ok": "bool",
+            "local_path": "str",
+            "commit_sha": "str|null",
+            "pr_url": "str|null",
+            "logs": "list[str]",
+            "error": "str|null",
+        },
+        "validation": "owner/repo/branch must be sanitised; no path traversal; tokens masked in logs",
+        "failure_behavior": "return ok=false with masked error; never expose token in logs",
+        "tools": [
+            "git_clone", "git_pull", "git_status", "git_commit", "git_push",
+            "git_open_pr", "repo_file_read", "repo_file_write", "diff_generator",
+            "capability_registry",
+        ],
+    },
+
+    "visual_qa": {
+        "name": "Visual QA Agent",
+        "responsibility": (
+            "Inspects the preview output for visual completeness: "
+            "no blank sections, no broken layout, no placeholder-only pages, "
+            "no missing images. Reports exact issues with page/section references."
+        ),
+        "task_type": "review",
+        "input_schema": {
+            "files": "list[{path, content}]",
+            "preview_url": "str|null",
+            "screenshot_data": "str|null — base64 PNG if available",
+        },
+        "output_schema": {
+            "passed": "bool",
+            "score": "int — 0-100",
+            "issues": "list[{severity, page, section, description, fix}]",
+            "summary": "str",
+        },
+        "validation": "score >= 70 for passing; all sections reviewed",
+        "failure_behavior": "block finalization on score < 50; list all issues",
+        "tools": [
+            "repo_file_read", "screenshot_visual_qa_hook", "preview_runner",
+            "accessibility_checker", "capability_registry",
+        ],
+    },
+
+    "accessibility": {
+        "name": "Accessibility Agent",
+        "responsibility": (
+            "Reviews UI code for WCAG 2.1 AA compliance: contrast ratios, "
+            "aria-labels, keyboard navigation, focus management, alt text, "
+            "semantic HTML, form labels."
+        ),
+        "task_type": "review",
+        "input_schema": {
+            "files": "list[{path, content}]",
+            "design_tokens": "dict|null",
+        },
+        "output_schema": {
+            "passed": "bool",
+            "wcag_level": "str — A|AA|AAA",
+            "violations": "list[{rule, severity, element, description, fix}]",
+            "score": "int — 0-100",
+        },
+        "validation": "passed=true only at AA or higher",
+        "failure_behavior": "return violations with exact fix instructions; never silently pass",
+        "tools": [
+            "repo_file_read", "accessibility_checker", "diff_generator",
+            "capability_registry",
+        ],
+    },
+
+    "deployment": {
+        "name": "Deployment Agent",
+        "responsibility": (
+            "Verifies build and deploy steps are complete and correct. "
+            "Checks Dockerfile, CI config, environment vars, build scripts. "
+            "Generates deployment notes. Never deploys without a passing QA gate."
+        ),
+        "task_type": "deployment",
+        "input_schema": {
+            "workspace_path": "str",
+            "stack": "str",
+            "build_result": "dict|null",
+            "qa_result": "dict|null",
+        },
+        "output_schema": {
+            "ready": "bool",
+            "blockers": "list[str]",
+            "deployment_notes": "str",
+            "env_vars_required": "list[str]",
+            "docker_ready": "bool",
+        },
+        "validation": "ready=false when build or QA failed or env vars missing",
+        "failure_behavior": "list exact blockers; never mark ready=true without evidence",
+        "tools": [
+            "build_runner", "test_runner", "repo_file_read", "deployment_planner",
+            "env_var_detector", "stack_detector", "log_analyzer", "capability_registry",
+        ],
+    },
+
+    "monitoring": {
+        "name": "Monitoring Agent",
+        "responsibility": (
+            "Reports real runtime status: active previews, stale processes, "
+            "disk usage, failed builds, provider probe results. "
+            "Never claims healthy when issues exist."
+        ),
+        "task_type": "monitoring",
+        "input_schema": {
+            "runtime_context": "dict",
+        },
+        "output_schema": {
+            "status": "str — healthy|degraded|unhealthy",
+            "active_previews": "int",
+            "stale_processes": "int",
+            "disk_free_mb": "float",
+            "failed_builds_last_hour": "int",
+            "provider_status": "dict",
+        },
+        "validation": "status=healthy only when all gates pass",
+        "failure_behavior": "always report true status; never suppress warnings",
+        "tools": [
+            "log_analyzer", "capability_registry", "build_runner", "preview_runner",
+        ],
+    },
+
+    "capability_truth": {
+        "name": "Capability Truth Agent",
+        "responsibility": (
+            "Blocks fake capability claims. Validates that provider live probes "
+            "are run before reporting 'live_ok'. Distinguishes between "
+            "key_present_not_tested and key_present_live_ok. "
+            "Refuses to let dashboard show 'working' when only a key is configured."
+        ),
+        "task_type": "validation",
+        "input_schema": {
+            "capability_summary": "dict",
+            "probe_results": "dict",
+        },
+        "output_schema": {
+            "validated": "bool",
+            "fake_claims": "list[str]",
+            "corrected_summary": "dict",
+        },
+        "validation": "no provider shown as live_ok without a passing probe",
+        "failure_behavior": "downgrade claim to key_present_not_tested; log warning",
+        "tools": ["capability_registry", "live_probe_runner"],
+    },
+
+    "memory_curator": {
+        "name": "Memory Curator Agent",
+        "responsibility": (
+            "Persists reusable project lessons: design decisions, tech stack choices, "
+            "common errors and fixes, component patterns. "
+            "Surfaces relevant lessons to agents at the start of each build."
+        ),
+        "task_type": "memory",
+        "input_schema": {
+            "project_id": "str",
+            "build_result": "dict",
+            "agent_outputs": "dict",
+        },
+        "output_schema": {
+            "lessons": "list[{key, value, relevance}]",
+            "persisted": "bool",
+        },
+        "validation": "no duplicate lessons; lessons have clear keys and values",
+        "failure_behavior": "log warning; do not block build on memory failure",
+        "tools": ["project_memory", "capability_registry"],
     },
 }
 
