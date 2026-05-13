@@ -78,6 +78,26 @@ from app.services.build_storage_service import (
     delete_workspace,
     detect_and_save_stack,
 )
+from app.services import git_workspace_service as _git_svc
+from app.services.frontend_detection_service import detect_frontend, list_project_files
+from app.services.command_runner_service import (
+    run_command, run_install, run_build, run_tests, get_logs as get_runner_logs,
+    ALLOWED_COMMANDS as _ALLOWED_COMMANDS,
+)
+from app.services import live_probe_service as _probe_svc
+from app.services import genx_model_sync as _genx_sync
+from app.services.model_router import route_task, get_router_status, TASK_ROUTING
+from app.services.quality_gate_service import run_quality_gate
+from app.services.continue_build_service import (
+    load_workspace as load_build_workspace,
+    detect_workspace_stack,
+    detect_missing_pieces,
+    generate_completion_plan,
+    generate_repair_diff,
+    apply_repair,
+    save_repair_plan_to_workspace,
+    create_workspace_version,
+)
 from agents.agent_registry import (
     get_all_agents,
     get_agent_status_summary,
@@ -3548,3 +3568,548 @@ async def builds_update_meta(
     except Exception as exc:
         raise HTTPException(500, f"Metadata update failed: {exc}")
     return {"ok": True, "meta": result}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 2 — REAL VPS GIT WORKSPACE ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+class GitImportBody(BaseModel):
+    repo_url: str = Field(min_length=10, max_length=500)
+    branch: str = "main"
+    confirm_overwrite: bool = False
+
+
+class GitPullBody(BaseModel):
+    owner: str = Field(min_length=1, max_length=100)
+    repo: str = Field(min_length=1, max_length=100)
+    branch: str = Field(min_length=1, max_length=200)
+    confirm_overwrite_dirty: bool = False
+
+
+class GitCommitBody(BaseModel):
+    owner: str = Field(min_length=1, max_length=100)
+    repo: str = Field(min_length=1, max_length=100)
+    branch: str = Field(min_length=1, max_length=200)
+    message: str = Field(min_length=1, max_length=500)
+    author_name: str = "Amarktai Builder"
+    author_email: str = "builder@amarktai.com"
+
+
+class GitPushBody(BaseModel):
+    owner: str = Field(min_length=1, max_length=100)
+    repo: str = Field(min_length=1, max_length=100)
+    branch: str = Field(min_length=1, max_length=200)
+    force: bool = False
+
+
+class GitPRBody(BaseModel):
+    owner: str = Field(min_length=1, max_length=100)
+    repo: str = Field(min_length=1, max_length=100)
+    head_branch: str = Field(min_length=1, max_length=200)
+    base_branch: str = "main"
+    title: str = "Amarktai Builder: automated changes"
+    body: str = ""
+
+
+@secured.post("/builds/import-git")
+async def builds_import_git(body: GitImportBody, claims: dict = Depends(require_user)) -> dict:
+    """Clone a GitHub repo into VPS build storage (real git clone, not just metadata)."""
+    github_pat = await _runtime_secret("GITHUB_PAT")
+    try:
+        result = _git_svc.clone_repo(
+            repo_url=body.repo_url,
+            branch=body.branch,
+            github_pat=github_pat or None,
+            confirm_overwrite=body.confirm_overwrite,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"Git clone failed: {exc}")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "Clone failed"))
+    return result
+
+
+@secured.post("/builds/{project_id}/git/pull")
+async def builds_git_pull(project_id: str, body: GitPullBody, claims: dict = Depends(require_user)) -> dict:
+    """Pull latest changes for a workspace."""
+    github_pat = await _runtime_secret("GITHUB_PAT")
+    try:
+        result = _git_svc.pull_latest(
+            owner=body.owner,
+            repo=body.repo,
+            branch=body.branch,
+            github_pat=github_pat or None,
+            confirm_overwrite_dirty=body.confirm_overwrite_dirty,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"Git pull failed: {exc}")
+    return result
+
+
+@secured.post("/builds/{project_id}/git/status")
+async def builds_git_status(project_id: str, body: dict, claims: dict = Depends(require_user)) -> dict:
+    """Get git status for a workspace."""
+    owner = body.get("owner", "")
+    repo = body.get("repo", "")
+    branch = body.get("branch", "main")
+    try:
+        return _git_svc.get_git_status(owner, repo, branch)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@secured.post("/builds/{project_id}/git/commit")
+async def builds_git_commit(project_id: str, body: GitCommitBody, claims: dict = Depends(require_user)) -> dict:
+    """Stage all changes and create a commit."""
+    try:
+        return _git_svc.commit_changes(
+            owner=body.owner,
+            repo=body.repo,
+            branch=body.branch,
+            message=body.message,
+            author_name=body.author_name,
+            author_email=body.author_email,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@secured.post("/builds/{project_id}/git/push")
+async def builds_git_push(project_id: str, body: GitPushBody, claims: dict = Depends(require_user)) -> dict:
+    """Push branch to origin."""
+    github_pat = await _runtime_secret("GITHUB_PAT")
+    try:
+        result = _git_svc.push_branch(
+            owner=body.owner,
+            repo=body.repo,
+            branch=body.branch,
+            github_pat=github_pat or None,
+            force=body.force,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"Git push failed: {exc}")
+    return result
+
+
+@secured.post("/builds/{project_id}/git/open-pr")
+async def builds_git_open_pr(project_id: str, body: GitPRBody, claims: dict = Depends(require_user)) -> dict:
+    """Open a GitHub pull request."""
+    github_pat = await _runtime_secret("GITHUB_PAT")
+    try:
+        result = _git_svc.open_pull_request(
+            owner=body.owner,
+            repo=body.repo,
+            head_branch=body.head_branch,
+            base_branch=body.base_branch,
+            title=body.title,
+            body=body.body,
+            github_pat=github_pat or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"Open PR failed: {exc}")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "PR creation failed"))
+    return result
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 3 — FRONTEND DETECTION AND PREVIEW ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+@secured.post("/builds/{project_id}/detect-frontend")
+async def builds_detect_frontend(project_id: str, body: dict, claims: dict = Depends(require_user)) -> dict:
+    """Detect the frontend framework in a workspace."""
+    workspace_path = body.get("workspace_path", "")
+    if not workspace_path:
+        raise HTTPException(400, "workspace_path is required")
+    try:
+        result = detect_frontend(workspace_path)
+        files = list_project_files(workspace_path)
+    except Exception as exc:
+        raise HTTPException(500, f"Frontend detection failed: {exc}")
+    return {**result, "file_list": files[:50], "detected_at": _now()}
+
+
+@secured.get("/builds/{project_id}/preview/status")
+async def builds_preview_status(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Get the preview status for a project workspace."""
+    return {
+        "project_id": project_id,
+        "status": "not_started",
+        "note": "Preview is started via POST /builds/{project_id}/preview/start",
+        "checked_at": _now(),
+    }
+
+
+@secured.get("/builds/{project_id}/preview/url")
+async def builds_preview_url(project_id: str, claims: dict = Depends(require_user)) -> dict:
+    """Get the preview URL for a project workspace."""
+    return {
+        "project_id": project_id,
+        "url": None,
+        "status": "not_started",
+        "note": "Start the preview with POST /builds/{project_id}/preview/start",
+        "checked_at": _now(),
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 4 — BUILD / TEST / INSTALL COMMAND RUNNER ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+class RunCommandBody(BaseModel):
+    workspace_path: str = Field(min_length=1, max_length=1024)
+    package_manager: str = "npm"
+
+
+@secured.post("/builds/{project_id}/install")
+async def builds_install(project_id: str, body: RunCommandBody, claims: dict = Depends(require_user)) -> dict:
+    """Run npm/pnpm/yarn install for a workspace."""
+    try:
+        result = run_install(body.workspace_path, body.package_manager, project_id=project_id)
+    except Exception as exc:
+        raise HTTPException(500, f"Install failed: {exc}")
+    return result
+
+
+@secured.post("/builds/{project_id}/build")
+async def builds_build(project_id: str, body: RunCommandBody, claims: dict = Depends(require_user)) -> dict:
+    """Run npm/pnpm/yarn build for a workspace."""
+    try:
+        result = run_build(body.workspace_path, body.package_manager, project_id=project_id)
+    except Exception as exc:
+        raise HTTPException(500, f"Build failed: {exc}")
+    return result
+
+
+@secured.post("/builds/{project_id}/test")
+async def builds_test(project_id: str, body: RunCommandBody, claims: dict = Depends(require_user)) -> dict:
+    """Run tests for a workspace."""
+    try:
+        result = run_tests(body.workspace_path, body.package_manager, project_id=project_id)
+    except Exception as exc:
+        raise HTTPException(500, f"Test run failed: {exc}")
+    return result
+
+
+@secured.get("/builds/{project_id}/logs")
+async def builds_logs(project_id: str, limit: int = 20, claims: dict = Depends(require_user)) -> dict:
+    """Return recent command runner logs for a project."""
+    try:
+        logs = get_runner_logs(project_id, limit=min(limit, 100))
+    except Exception as exc:
+        raise HTTPException(500, f"Log retrieval failed: {exc}")
+    return {"project_id": project_id, "logs": logs, "total": len(logs), "retrieved_at": _now()}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 5 — CONTINUE BUILD / REPAIR PIPELINE ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+class ContinueBuildBody(BaseModel):
+    workspace_path: str = Field(min_length=1, max_length=1024)
+    project_description: str = ""
+    auto_apply: bool = False
+
+
+class RepairDiffBody(BaseModel):
+    workspace_path: str = Field(min_length=1, max_length=1024)
+    changes: list[dict]
+
+
+class ApplyRepairBody(BaseModel):
+    workspace_path: str = Field(min_length=1, max_length=1024)
+    changes: list[dict]
+    auto_apply: bool = False
+
+
+class WorkspaceVersionBody(BaseModel):
+    workspace_path: str = Field(min_length=1, max_length=1024)
+    label: str = ""
+    notes: str = ""
+
+
+@secured.post("/builds/{project_id}/continue")
+async def builds_continue(project_id: str, body: ContinueBuildBody, claims: dict = Depends(require_user)) -> dict:
+    """
+    Continue an incomplete build: load workspace, detect stack, find missing pieces,
+    generate a completion plan, and optionally apply repairs.
+    """
+    ws_info = load_build_workspace(body.workspace_path)
+    if not ws_info.get("ok"):
+        raise HTTPException(404, ws_info.get("error", "Workspace not found"))
+
+    stack_info = detect_workspace_stack(body.workspace_path)
+    missing_info = detect_missing_pieces(body.workspace_path, stack_info.get("primary", "unknown"))
+    plan = generate_completion_plan(ws_info, stack_info, missing_info, body.project_description)
+    save_repair_plan_to_workspace(body.workspace_path, plan)
+
+    return {
+        "ok": True,
+        "workspace": ws_info,
+        "stack": stack_info,
+        "missing": missing_info,
+        "plan": plan,
+        "auto_apply": body.auto_apply,
+        "note": (
+            "Plan generated. Use /builds/{project_id}/apply-repair to apply changes."
+            if not body.auto_apply
+            else "Plan generated. Apply with /builds/{project_id}/apply-repair with auto_apply=True."
+        ),
+        "generated_at": _now(),
+    }
+
+
+@secured.post("/builds/{project_id}/repair-plan")
+async def builds_repair_plan(project_id: str, body: ContinueBuildBody, claims: dict = Depends(require_user)) -> dict:
+    """Generate a repair plan without applying changes."""
+    ws_info = load_build_workspace(body.workspace_path)
+    if not ws_info.get("ok"):
+        raise HTTPException(404, ws_info.get("error", "Workspace not found"))
+
+    stack_info = detect_workspace_stack(body.workspace_path)
+    missing_info = detect_missing_pieces(body.workspace_path, stack_info.get("primary", "unknown"))
+    plan = generate_completion_plan(ws_info, stack_info, missing_info, body.project_description)
+    return {"ok": True, "plan": plan, "stack": stack_info, "missing": missing_info}
+
+
+@secured.post("/builds/{project_id}/apply-repair")
+async def builds_apply_repair(project_id: str, body: ApplyRepairBody, claims: dict = Depends(require_user)) -> dict:
+    """Apply a set of file changes to a workspace. Returns diff if auto_apply=False."""
+    try:
+        result = apply_repair(body.workspace_path, body.changes, auto_apply=body.auto_apply)
+    except Exception as exc:
+        raise HTTPException(500, f"Repair failed: {exc}")
+    return result
+
+
+@secured.post("/builds/{project_id}/version")
+async def builds_version(project_id: str, body: WorkspaceVersionBody, claims: dict = Depends(require_user)) -> dict:
+    """Create a version snapshot of the current workspace state."""
+    result = create_workspace_version(body.workspace_path, label=body.label, notes=body.notes)
+    if not result.get("ok"):
+        raise HTTPException(500, result.get("error", "Version creation failed"))
+    return result
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 6 — LIVE PROVIDER PROBE ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+@api.get("/providers/status")
+async def providers_status() -> dict:
+    """
+    Return cached provider status. Does NOT trigger a live probe.
+    Use POST /api/providers/probe to run fresh probes.
+    """
+    cached = _probe_svc._CACHE.get("all_providers")
+    if cached:
+        return {k: v for k, v in cached.items() if not k.startswith("_")}
+    return {
+        "note": "No probe results cached. POST /api/providers/probe to run live probes.",
+        "genx": {"status": "key_present_not_tested"},
+        "qwen": {"status": "key_present_not_tested"},
+        "github": {"status": "key_present_not_tested"},
+        "brave": {"status": "key_present_not_tested"},
+        "pixabay": {"status": "key_present_not_tested"},
+        "probed_at": None,
+    }
+
+
+@secured.post("/providers/probe")
+async def providers_probe(claims: dict = Depends(require_user)) -> dict:
+    """Run live probes against all configured providers and return results."""
+    genx_key = await _runtime_secret("GENX_API_KEY")
+    qwen_key = await _runtime_secret("QWEN_API_KEY")
+    github_pat = await _runtime_secret("GITHUB_PAT")
+    brave_key = await _runtime_secret("BRAVE_SEARCH_API_KEY")
+    pixabay_key = await _runtime_secret("PIXABAY_API_KEY")
+    qwen_base = await _runtime_secret("QWEN_BASE_URL")
+
+    result = await _probe_svc.probe_all_providers(
+        genx_key=genx_key or "",
+        qwen_key=qwen_key or "",
+        github_pat=github_pat or "",
+        brave_key=brave_key or "",
+        pixabay_key=pixabay_key or "",
+        qwen_base_url=qwen_base or None,
+        force_refresh=True,
+    )
+    return result
+
+
+@secured.post("/providers/probe/{provider}")
+async def providers_probe_single(provider: str, claims: dict = Depends(require_user)) -> dict:
+    """Run a live probe against a single provider."""
+    genx_key = await _runtime_secret("GENX_API_KEY")
+    qwen_key = await _runtime_secret("QWEN_API_KEY")
+    github_pat = await _runtime_secret("GITHUB_PAT")
+    brave_key = await _runtime_secret("BRAVE_SEARCH_API_KEY")
+    pixabay_key = await _runtime_secret("PIXABAY_API_KEY")
+    qwen_base = await _runtime_secret("QWEN_BASE_URL")
+
+    result = await _probe_svc.probe_single_provider(
+        provider=provider,
+        genx_key=genx_key or "",
+        qwen_key=qwen_key or "",
+        github_pat=github_pat or "",
+        brave_key=brave_key or "",
+        pixabay_key=pixabay_key or "",
+        qwen_base_url=qwen_base or None,
+    )
+    return result
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 7 — GENX FULL MODEL DISCOVERY
+# ════════════════════════════════════════════════════════════════════════════
+
+@api.get("/models/genx")
+async def models_genx() -> dict:
+    """Return the current GenX model registry (cached or static fallback)."""
+    registry = _genx_sync.load_registry()
+    return {
+        "source": registry.get("source", "fallback"),
+        "model_count": registry.get("model_count", 0),
+        "capability_counts": registry.get("capability_counts", {}),
+        "synced_at": registry.get("synced_at"),
+        "models": [m.get("id") for m in registry.get("models", [])],
+        "note": "POST /api/models/genx/sync to refresh from live GenX API.",
+    }
+
+
+@secured.post("/models/genx/sync")
+async def models_genx_sync(claims: dict = Depends(require_user)) -> dict:
+    """Trigger a live sync of the GenX model list."""
+    api_key = await _runtime_secret("GENX_API_KEY")
+    result = await _genx_sync.sync_genx_models(api_key or "")
+    return result
+
+
+@api.get("/models/router-status")
+async def models_router_status() -> dict:
+    """Return the current model routing decisions for all task types."""
+    registry = _genx_sync.load_registry()
+    available = [m.get("id", "") for m in registry.get("models", [])]
+    routing = get_router_status(available)
+    return {
+        "available_model_count": len(available),
+        "source": registry.get("source", "fallback"),
+        "routing": routing,
+        "task_types": list(TASK_ROUTING.keys()),
+        "retrieved_at": _now(),
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 10 — PREMIUM QUALITY GATE ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+class QualityGateBody(BaseModel):
+    workspace_path: str = Field(min_length=1, max_length=1024)
+
+
+@secured.post("/builds/{project_id}/quality-gate")
+async def builds_quality_gate(project_id: str, body: QualityGateBody, claims: dict = Depends(require_user)) -> dict:
+    """Run the premium quality gate on a workspace."""
+    try:
+        result = run_quality_gate(body.workspace_path)
+    except Exception as exc:
+        raise HTTPException(500, f"Quality gate failed: {exc}")
+    return result
+
+
+@secured.get("/builds/{project_id}/quality-report")
+async def builds_quality_report(
+    project_id: str,
+    workspace_path: str = Query(min_length=1, max_length=1024),
+    claims: dict = Depends(require_user),
+) -> dict:
+    """Get the quality report for a workspace (re-runs the gate)."""
+    try:
+        result = run_quality_gate(workspace_path)
+    except Exception as exc:
+        raise HTTPException(500, f"Quality report failed: {exc}")
+    return result
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PHASE 11 — DASHBOARD BACKEND SUPPORT ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+@secured.get("/dashboard/status")
+async def dashboard_status(claims: dict = Depends(require_user)) -> dict:
+    """
+    Return a comprehensive, truthful system status for the dashboard.
+
+    Includes: build storage, provider config (not live probe), model registry,
+    agent readiness, and router decisions.
+    """
+    # Storage
+    try:
+        storage = storage_usage()
+    except Exception:
+        storage = {}
+
+    # Workspaces
+    try:
+        workspaces = list_workspaces()
+    except Exception:
+        workspaces = []
+
+    # GenX model registry
+    registry = _genx_sync.load_registry()
+    available_models = [m.get("id", "") for m in registry.get("models", [])]
+
+    # Routing sample
+    sample_routing = {
+        t: route_task(t, available_models)
+        for t in ["code_repair", "frontend_design", "repo_audit"]
+    }
+
+    # Provider configured status (not live probe — use POST /providers/probe for live)
+    genx_key = await _runtime_secret("GENX_API_KEY")
+    qwen_key = await _runtime_secret("QWEN_API_KEY")
+    github_pat = await _runtime_secret("GITHUB_PAT")
+
+    # Cached probe results
+    cached_probes = _probe_svc._CACHE.get("all_providers", {})
+
+    # Agent readiness
+    agent_summary = get_agent_status_summary()
+
+    return {
+        "storage": storage,
+        "workspace_count": len(workspaces),
+        "genx_models": {
+            "source": registry.get("source", "fallback"),
+            "count": registry.get("model_count", 0),
+            "synced_at": registry.get("synced_at"),
+        },
+        "providers_configured": {
+            "genx": bool(genx_key),
+            "qwen": bool(qwen_key),
+            "github": bool(github_pat),
+        },
+        "providers_live_status": {
+            p: cached_probes.get(p, {}).get("status", "key_present_not_tested")
+            for p in ("genx", "qwen", "github", "brave", "pixabay")
+        },
+        "routing_sample": sample_routing,
+        "agent_summary": agent_summary,
+        "truthful_note": (
+            "providers_configured shows if keys exist; "
+            "providers_live_status shows last probe result. "
+            "POST /api/providers/probe to refresh live status."
+        ),
+        "retrieved_at": _now(),
+    }
