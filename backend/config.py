@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
+from pathlib import Path
 from dataclasses import dataclass
 
 from cryptography.fernet import Fernet
@@ -23,6 +24,7 @@ REQUIRED_ENV = [
     "MONGO_URL",
     "DB_NAME",
     "CORS_ORIGINS",
+    "BUILDS_STORAGE_ROOT",
 ]
 SECRET_KEYS = {
     "GENX_API_KEY",
@@ -152,6 +154,23 @@ def validate_static_config() -> list[ConfigCheck]:
         "PASS" if cors_ok else ("FAIL" if is_production() else "WARN"),
         ", ".join(origins) if origins else "No origins configured.",
         "blocker" if is_production() and not cors_ok else "warning",
+    ))
+    builds_root = os.environ.get("BUILDS_STORAGE_ROOT") or ""
+    builds_ok = False
+    detail = "Set BUILDS_STORAGE_ROOT to a writable directory."
+    if builds_root:
+        try:
+            path = Path(builds_root)
+            path.mkdir(parents=True, exist_ok=True)
+            builds_ok = path.exists() and os.access(path, os.W_OK)
+            detail = str(path) if builds_ok else f"{path} is not writable."
+        except Exception as exc:
+            detail = f"{builds_root}: {type(exc).__name__}"
+    checks.append(ConfigCheck(
+        "BUILDS_STORAGE_ROOT",
+        "PASS" if builds_ok else ("FAIL" if is_production() else "WARN"),
+        detail,
+        "blocker" if is_production() and not builds_ok else "warning",
     ))
     return checks
 

@@ -61,6 +61,7 @@ from app.core.capability_registry import (
     async_capabilities_summary, QWEN_DEFAULT_BASE_URL, QWEN_ALT_BASE_URLS,
     QWEN_RECOMMENDED_MODELS, QWEN_OPTIONAL_MODELS,
 )
+from app.services.capability_truth_service import CapabilityTruthService
 from app.services.build_storage_service import (
     get_storage_root as get_builds_storage_root,
     create_repo_workspace,
@@ -131,7 +132,7 @@ from config import (
     validate_static_config,
 )
 import github_integration as gh
-from settings_store import clear_secret, get_secret, settings_status, save_secret
+from settings_store import clear_secret, get_secret, safe_get_secret, settings_status, save_secret
 
 
 ROOT_DIR = Path(__file__).parent
@@ -177,6 +178,13 @@ SETTINGS_KEYS = [
 async def lifespan(app: FastAPI):
     assert_startup_config()
     app.state.db = db
+    try:
+        await db.command("ping")
+    except Exception as exc:
+        msg = f"MongoDB is not reachable during startup: {type(exc).__name__}"
+        logger.error(msg)
+        if is_production():
+            raise RuntimeError(msg) from exc
     await seed_admin(db)
     # Ensure media storage directory exists
     try:
@@ -538,7 +546,17 @@ def _login_allowed(key: str) -> bool:
 
 
 async def _runtime_secret(key: str) -> str | None:
-    return await get_secret(db, key)
+    return (await safe_get_secret(db, key, env_fallback=True)).get("value") or None
+
+
+async def _runtime_secret_status(key: str) -> dict:
+    return await safe_get_secret(db, key, env_fallback=True)
+
+
+async def _capability_truth() -> dict:
+    cached = _probe_svc._CACHE.get("all_providers", {})
+    service = CapabilityTruthService(_runtime_secret_status, cached_probes=cached if isinstance(cached, dict) else {})
+    return await service.build()
 
 
 async def _genx_provider(quality_tier: str = "balanced") -> GenXProvider:
@@ -859,34 +877,51 @@ async def readiness() -> dict:
     except Exception as exc:
         await add("Mongo ping", "FAIL", str(exc), "blocker")
 
-    admin = await db.users.find_one({"role": "admin", "status": "active"}, {"_id": 0, "id": 1})
-    await add("admin user", "PASS" if admin else "FAIL",
-              "Active admin exists." if admin else "Create or seed an active admin user.",
-              "info" if admin else "blocker")
+    try:
+        admin = await db.users.find_one({"role": "admin", "status": "active"}, {"_id": 0, "id": 1})
+        await add("admin user", "PASS" if admin else "FAIL",
+                  "Active admin exists." if admin else "Create or seed an active admin user.",
+                  "info" if admin else "blocker")
+    except Exception as exc:
+        await add("admin user", "FAIL", f"Could not check admin user: {type(exc).__name__}", "blocker")
 
+    try:
+        truth = await _capability_truth()
+    except Exception as exc:
+        truth = {"providers": {}, "capabilities": {}, "warnings": [], "errors": [str(exc)]}
+        await add("capability truth", "FAIL", f"Capability truth failed: {type(exc).__name__}", "blocker")
+
+    providers = truth.get("providers", {})
+    for provider, meta in providers.items():
+        if meta.get("source") == "decrypt_failed" or meta.get("error") == "decrypt_failed":
+            await add(f"{provider} setting decrypt", "WARN", f"{meta.get('env_key', provider)} stored setting cannot decrypt; env fallback used if configured.", "warning")
+
+    genx_meta = providers.get("genx", {})
     genx_key = await _runtime_secret("GENX_API_KEY")
     if not genx_key:
-        await add("GenX API key", "FAIL", "Set GENX_API_KEY in Settings or environment.", "blocker")
+        await add("GenX API key", "FAIL", genx_meta.get("reason") or "Set GENX_API_KEY in Settings or environment.", "blocker")
     else:
         try:
             models = await GenXProvider(api_key=genx_key).list_models()
             await add("GenX live models", "PASS", f"{len(models)} models returned by {ROUTER_NAME}.")
         except Exception as exc:
-            await add("GenX live models", "FAIL", str(exc), "blocker")
+            await add("GenX live models", "FAIL", f"{type(exc).__name__}: {exc}", "blocker")
 
+    github_meta = providers.get("github", {})
     github_pat = await _runtime_secret("GITHUB_PAT")
     if not github_pat:
-        await add("GitHub PAT", "WARN", "Connect GitHub PAT in Settings to enable private imports, PRs, and repo creation.", "warning")
+        await add("GitHub PAT", "WARN", github_meta.get("reason") or "Connect GitHub PAT in Settings to enable private imports, PRs, and repo creation.", "warning")
     else:
         try:
             info = await gh.validate_pat(github_pat)
             await add("GitHub PAT live validation", "PASS", f"Authenticated as {info.get('login')}.")
         except Exception as exc:
-            await add("GitHub PAT live validation", "FAIL", str(exc), "blocker")
+            await add("GitHub PAT live validation", "WARN", f"{type(exc).__name__}: {exc}", "warning")
 
+    brave_meta = providers.get("brave", {})
     brave_key = await _runtime_secret("BRAVE_SEARCH_API_KEY")
     if not brave_key:
-        await add("Brave Search key", "WARN", "Scout runs without web research until BRAVE_SEARCH_API_KEY is configured.", "warning")
+        await add("Brave Search key", "WARN", brave_meta.get("reason") or "Scout runs without web research until BRAVE_SEARCH_API_KEY is configured.", "warning")
     else:
         try:
             async with httpx.AsyncClient(timeout=15.0) as cx:
@@ -898,19 +933,28 @@ async def readiness() -> dict:
                 r.raise_for_status()
             await add("Brave Search live validation", "PASS", "Brave Search API responded.")
         except Exception as exc:
-            await add("Brave Search live validation", "FAIL", str(exc), "blocker")
+            await add("Brave Search live validation", "WARN", f"{type(exc).__name__}: {exc}", "warning")
 
-    clean, detail = await _forbidden_source_check()
-    await add("legacy source references", "PASS" if clean else "FAIL", detail, "info" if clean else "blocker")
+    for provider, env_key in [("qwen", "QWEN_API_KEY"), ("pixabay", "PIXABAY_API_KEY")]:
+        meta = providers.get(provider, {})
+        if not meta.get("configured"):
+            await add(env_key, "WARN", meta.get("reason") or f"{env_key} not configured.", "warning")
+
+    try:
+        clean, detail = await _forbidden_source_check()
+        await add("legacy source references", "PASS" if clean else "FAIL", detail, "info" if clean else "blocker")
+    except Exception as exc:
+        await add("legacy source references", "WARN", f"Source check skipped: {type(exc).__name__}", "warning")
     await add("production demo simulation disabled", "PASS", "Production paths return disabled or errors when required keys are absent.")
 
     blockers = [c["detail"] for c in checks if c["status"] == "FAIL" and c["severity"] == "blocker"]
     warnings = [c["detail"] for c in checks if c["status"] == "WARN"]
     return {
-        "overall": "FAIL" if blockers else "PASS",
+        "overall": "FAIL" if blockers else ("WARN" if warnings else "PASS"),
         "checks": checks,
         "blockers": blockers,
         "warnings": warnings,
+        "providers": providers,
         "timestamp": _now(),
     }
 
@@ -953,11 +997,27 @@ async def get_capabilities() -> dict:
     Single source of truth: reads from saved settings (DB) first, then env vars.
     The frontend must use this to decide what to show.
     """
-    summary = await async_capabilities_summary(_runtime_secret)
+    try:
+        truth = await _capability_truth()
+    except Exception as exc:
+        truth = {
+            "registry": [],
+            "models": [],
+            "summary": {},
+            "capabilities": {},
+            "providers": {},
+            "errors": [f"capability truth failed: {type(exc).__name__}"],
+            "warnings": [],
+            "timestamp": _now(),
+        }
     return {
-        "registry": get_registry(),
-        "summary": summary,
-        "timestamp": _now(),
+        "registry": truth.get("models", []),
+        "models": truth.get("models", []),
+        "summary": truth.get("capabilities", {}),
+        "providers": truth.get("providers", {}),
+        "errors": truth.get("errors", []),
+        "warnings": truth.get("warnings", []),
+        "timestamp": truth.get("timestamp", _now()),
     }
 
 
@@ -968,34 +1028,22 @@ async def capabilities_status() -> dict:
     Single source of truth: reads from saved settings (DB) first, then env vars.
     Returns instantly without a live provider call.
     """
-    summary = await async_capabilities_summary(_runtime_secret)
-    cached_probes = _probe_svc._CACHE.get("all_providers", {})
-    provider_to_capability = {
-        "github": "github_integration",
-        "brave": "web_research",
-        "pixabay": "stock_media",
-        "genx": "text_generation",
-        "qwen": "qwen",
-    }
-    for provider, cap_key in provider_to_capability.items():
-        probe = cached_probes.get(provider) if isinstance(cached_probes, dict) else None
-        cap = summary.get(cap_key)
-        if not probe or not isinstance(cap, dict):
-            continue
-        live_status = probe.get("status")
-        cap["live_status"] = live_status
-        cap["last_live_probe"] = probe.get("probed_at")
-        if live_status == "key_present_live_ok":
-            cap["available"] = True
-            cap["configured"] = True
-            cap["reason"] = None
-        elif live_status in {"key_present_live_fail", "provider_timeout"}:
-            cap["available"] = False
-            cap["configured"] = True
-            cap["reason"] = probe.get("error") or f"{provider} live validation did not pass."
+    try:
+        truth = await _capability_truth()
+    except Exception as exc:
+        truth = {
+            "summary": {},
+            "capabilities": {},
+            "providers": {},
+            "models": [],
+            "errors": [f"capability truth failed: {type(exc).__name__}"],
+            "warnings": [],
+            "timestamp": _now(),
+        }
+    summary = truth.get("capabilities", {})
     available_caps = [k for k, v in summary.items() if v.get("available")]
     unavailable_caps = {
-        k: v["reason"]
+        k: v.get("reason")
         for k, v in summary.items()
         if not v.get("available")
     }
@@ -1003,7 +1051,11 @@ async def capabilities_status() -> dict:
         "available": available_caps,
         "unavailable": unavailable_caps,
         "summary": summary,
-        "timestamp": _now(),
+        "providers": truth.get("providers", {}),
+        "models": truth.get("models", []),
+        "errors": truth.get("errors", []),
+        "warnings": truth.get("warnings", []),
+        "timestamp": truth.get("timestamp", _now()),
     }
 
 
@@ -1016,7 +1068,9 @@ async def capability_models(capability: Optional[str] = None) -> dict:
     (omit parameter to return all models)
     """
     if capability:
-        models = models_with_capability(capability)
+        truth = await _capability_truth()
+        capability_attr = capability if capability.startswith("supports_") else f"supports_{capability}"
+        models = [m for m in truth.get("models", []) if m.get(capability_attr)]
         if not models:
             return {
                 "capability": capability,
@@ -1028,10 +1082,11 @@ async def capability_models(capability: Optional[str] = None) -> dict:
         return {
             "capability": capability,
             "models": models,
-            "available": True,
+            "available": any(m.get("available") for m in models),
             "count": len(models),
         }
-    return {"models": get_registry(), "count": len(get_registry())}
+    truth = await _capability_truth()
+    return {"models": truth.get("models", []), "count": len(truth.get("models", [])), "providers": truth.get("providers", {})}
 
 
 # ── Phase 1E: Build Mode Classifier endpoint ──────────────────────────────────
@@ -1140,6 +1195,11 @@ async def models_router(tier: str = "balanced") -> dict:
     info = tiers.get(internal_tier)
     if not info:
         raise HTTPException(503, "Router tier configuration error.")
+    truth = await _capability_truth()
+    genx_state = truth.get("providers", {}).get("genx", {})
+    genx_available = bool(
+        genx_state.get("configured") and genx_state.get("live_status") == "live_ok"
+    )
 
     coding_model = _coder_tier(tier_lower, tiers)
     fast_model = tiers.get("research", {}).get("model")
@@ -1175,6 +1235,8 @@ async def models_router(tier: str = "balanced") -> dict:
     repair_limit = {"cheap": 1, "balanced": 2, "premium": 3}.get(tier_lower, 2)
 
     warnings: list[str] = []
+    if not genx_available:
+        warnings.append(genx_state.get("reason") or "GenX provider is not live-validated; routing is informational only.")
     if tier_lower == "premium":
         warnings.append("Premium tier uses the most capable model and incurs higher GenX credit usage.")
     elif tier_lower == "cheap":
@@ -1200,6 +1262,14 @@ async def models_router(tier: str = "balanced") -> dict:
         "internal_tier": internal_tier,
         "model": info["model"],
         "label": info["label"],
+        "available": genx_available,
+        "provider": {
+            "name": "genx",
+            "configured": genx_state.get("configured", False),
+            "source": genx_state.get("source", "missing"),
+            "live_status": genx_state.get("live_status", "key_missing"),
+            "reason": genx_state.get("reason"),
+        },
         "selected_models": selected_models,
         "repair_limit": repair_limit,
         "reasons": reasons,
@@ -3385,7 +3455,8 @@ async def list_agents() -> dict:
 async def agents_status() -> dict:
     """Return a summary of agent status: active, deterministic, partial, planned."""
     summary = get_agent_status_summary()
-    cap_summary = await async_capabilities_summary(_runtime_secret)
+    truth = await _capability_truth()
+    cap_summary = truth.get("capabilities", {})
     return {
         **summary,
         "capabilities": cap_summary,
@@ -3397,7 +3468,8 @@ async def agents_status() -> dict:
 async def orchestration_health() -> dict:
     """Report orchestration health — agents, capabilities, and readiness."""
     agent_summary = get_agent_status_summary()
-    cap_summary = await async_capabilities_summary(_runtime_secret)
+    truth = await _capability_truth()
+    cap_summary = truth.get("capabilities", {})
 
     # Check required agents
     required_agents = [
@@ -4020,13 +4092,15 @@ async def providers_status() -> dict:
     cached = _probe_svc._CACHE.get("all_providers")
     if cached:
         return {k: v for k, v in cached.items() if not k.startswith("_")}
+    truth = await _capability_truth()
+    providers = truth.get("providers", {})
     return {
         "note": "No probe results cached. POST /api/providers/probe to run live probes.",
-        "genx": {"status": "key_present_not_tested"},
-        "qwen": {"status": "key_present_not_tested"},
-        "github": {"status": "key_present_not_tested"},
-        "brave": {"status": "key_present_not_tested"},
-        "pixabay": {"status": "key_present_not_tested"},
+        "genx": {"status": providers.get("genx", {}).get("live_status", "key_missing")},
+        "qwen": {"status": providers.get("qwen", {}).get("live_status", "key_missing")},
+        "github": {"status": providers.get("github", {}).get("live_status", "key_missing")},
+        "brave": {"status": providers.get("brave", {}).get("live_status", "key_missing")},
+        "pixabay": {"status": providers.get("pixabay", {}).get("live_status", "key_missing")},
         "probed_at": None,
     }
 
@@ -4082,13 +4156,34 @@ async def providers_probe_single(provider: str, claims: dict = Depends(require_u
 @api.get("/models/genx")
 async def models_genx() -> dict:
     """Return the current GenX model registry (cached or static fallback)."""
+    truth = await _capability_truth()
+    genx_state = truth.get("providers", {}).get("genx", {})
+    provider_available = bool(
+        genx_state.get("configured") and genx_state.get("live_status") == "live_ok"
+    )
     registry = _genx_sync.load_registry()
     return {
+        "available": provider_available,
+        "provider": {
+            "configured": genx_state.get("configured", False),
+            "source": genx_state.get("source", "missing"),
+            "live_status": genx_state.get("live_status", "key_missing"),
+            "reason": genx_state.get("reason"),
+        },
         "source": registry.get("source", "fallback"),
-        "model_count": registry.get("model_count", 0),
+        "model_count": registry.get("model_count", 0) if provider_available else 0,
+        "known_model_count": registry.get("model_count", 0),
         "capability_counts": registry.get("capability_counts", {}),
         "synced_at": registry.get("synced_at"),
-        "models": [m.get("id") for m in registry.get("models", [])],
+        "models": [
+            {
+                "id": m.get("id"),
+                "known": True,
+                "available": provider_available,
+                "unavailable_reason": None if provider_available else genx_state.get("reason") or "GENX_API_KEY not configured",
+            }
+            for m in registry.get("models", [])
+        ],
         "note": "POST /api/models/genx/sync to refresh from live GenX API.",
     }
 
@@ -4104,11 +4199,23 @@ async def models_genx_sync(claims: dict = Depends(require_user)) -> dict:
 @api.get("/models/router-status")
 async def models_router_status() -> dict:
     """Return the current model routing decisions for all task types."""
+    truth = await _capability_truth()
+    genx_state = truth.get("providers", {}).get("genx", {})
+    provider_available = bool(
+        genx_state.get("configured") and genx_state.get("live_status") == "live_ok"
+    )
     registry = _genx_sync.load_registry()
-    available = [m.get("id", "") for m in registry.get("models", [])]
+    available = [m.get("id", "") for m in registry.get("models", [])] if provider_available else []
     routing = get_router_status(available)
     return {
         "available_model_count": len(available),
+        "known_model_count": registry.get("model_count", 0),
+        "provider": {
+            "configured": genx_state.get("configured", False),
+            "source": genx_state.get("source", "missing"),
+            "live_status": genx_state.get("live_status", "key_missing"),
+            "reason": genx_state.get("reason"),
+        },
         "source": registry.get("source", "fallback"),
         "routing": routing,
         "task_types": list(TASK_ROUTING.keys()),
