@@ -58,6 +58,25 @@ from app.repos.repair_engine import (
 from app.runtime.preview_service import PreviewService
 from app.core.capability_registry import (
     get_registry, capabilities_summary, probe_live_status, models_with_capability,
+    async_capabilities_summary, QWEN_DEFAULT_BASE_URL, QWEN_ALT_BASE_URLS,
+    QWEN_RECOMMENDED_MODELS, QWEN_OPTIONAL_MODELS,
+)
+from app.services.build_storage_service import (
+    get_storage_root as get_builds_storage_root,
+    create_repo_workspace,
+    create_generated_workspace,
+    create_incomplete_workspace,
+    create_release_workspace,
+    update_workspace_metadata,
+    save_audit_report,
+    save_repair_plan,
+    save_deploy_report,
+    list_workspaces,
+    get_workspace,
+    storage_usage,
+    archive_workspace,
+    delete_workspace,
+    detect_and_save_stack,
 )
 from agents.agent_registry import (
     get_all_agents,
@@ -140,6 +159,12 @@ async def lifespan(app: FastAPI):
         logger.info("Media storage ready at %s", os.environ.get("MEDIA_STORAGE_PATH", "/app/storage/media"))
     except Exception as e:
         logger.warning("Media storage init warning: %s", e)
+    # Ensure build storage directory exists
+    try:
+        builds_root = get_builds_storage_root()
+        logger.info("Build storage ready at %s", builds_root)
+    except Exception as e:
+        logger.warning("Build storage init warning: %s", e)
     # Ensure MongoDB indexes for media_assets
     try:
         await db.media_assets.create_index("user_id")
@@ -900,12 +925,13 @@ async def contact(body: ContactBody) -> dict:
 async def get_capabilities() -> dict:
     """Return the full AI capability registry.
 
-    Phase 1A: This is the single source of truth for what every provider
-    and model supports.  The frontend must use this to decide what to show.
+    Single source of truth: reads from saved settings (DB) first, then env vars.
+    The frontend must use this to decide what to show.
     """
+    summary = await async_capabilities_summary(_runtime_secret)
     return {
         "registry": get_registry(),
-        "summary": capabilities_summary(),
+        "summary": summary,
         "timestamp": _now(),
     }
 
@@ -914,10 +940,10 @@ async def get_capabilities() -> dict:
 async def capabilities_status() -> dict:
     """Return the current runtime availability of each AI capability.
 
-    Derives status from configured environment variables without a live
-    network call — returns instantly.
+    Single source of truth: reads from saved settings (DB) first, then env vars.
+    Returns instantly without a live provider call.
     """
-    summary = capabilities_summary()
+    summary = await async_capabilities_summary(_runtime_secret)
     available_caps = [k for k, v in summary.items() if v.get("available")]
     unavailable_caps = {
         k: v["reason"]
@@ -1240,8 +1266,8 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
 async def qwen_status() -> dict:
     """Return optional Qwen direct-provider availability status.
 
-    Checks which Qwen capability keys are configured.
-    Returns honest status for each capability.
+    Reads from saved settings (DB) first, then env vars.
+    Returns honest status for each capability — never vague if key exists.
     Never blocks normal builds — Qwen is entirely optional.
     """
     qwen_key = await _runtime_secret("QWEN_API_KEY")
@@ -1251,33 +1277,52 @@ async def qwen_status() -> dict:
             "configured": False,
             "api_key_set": False,
             "capabilities": {
-                "chat":  {"available": False, "status": "not configured"},
-                "code":  {"available": False, "status": "not configured"},
-                "image": {"available": False, "status": "not configured"},
-                "video": {"available": False, "status": "not configured"},
-                "audio": {"available": False, "status": "not configured"},
+                "chat":  {"available": False, "status": "QWEN_API_KEY not configured"},
+                "code":  {"available": False, "status": "QWEN_API_KEY not configured"},
+                "image": {"available": False, "status": "QWEN_API_KEY not configured"},
+                "video": {"available": False, "status": "QWEN_API_KEY not configured"},
+                "audio": {"available": False, "status": "QWEN_API_KEY not configured"},
             },
             "note": "Qwen is optional. Add QWEN_API_KEY in Settings to enable.",
+            "recommended_config": QWEN_RECOMMENDED_MODELS,
+            "default_base_url": QWEN_DEFAULT_BASE_URL,
         }
 
-    async def _check_cap(key: str, label: str) -> dict:
-        model = await _runtime_secret(key)
+    async def _check_cap(key: str) -> dict:
+        model = await _runtime_secret(key) or os.environ.get(key, "")
         if model:
             return {"available": True, "model": model, "status": "configured"}
-        return {"available": False, "status": "not configured / unavailable"}
+        return {
+            "available": False,
+            "status": f"{key} not configured — QWEN_API_KEY is set but {key} is missing",
+            "suggested": QWEN_RECOMMENDED_MODELS.get(key, ""),
+        }
 
-    chat  = await _check_cap("QWEN_MODEL_CHAT",  "Chat")
-    code  = await _check_cap("QWEN_MODEL_CODE",  "Code")
-    image = await _check_cap("QWEN_MODEL_IMAGE", "Image generation")
-    video = await _check_cap("QWEN_MODEL_VIDEO", "Video generation")
-    audio = await _check_cap("QWEN_MODEL_AUDIO", "Audio/voice generation")
+    chat  = await _check_cap("QWEN_MODEL_CHAT")
+    code  = await _check_cap("QWEN_MODEL_CODE")
+    image = await _check_cap("QWEN_MODEL_IMAGE")
+    video = await _check_cap("QWEN_MODEL_VIDEO")
+    audio = await _check_cap("QWEN_MODEL_AUDIO")
 
-    base_url = await _runtime_secret("QWEN_BASE_URL")
+    base_url = (
+        await _runtime_secret("QWEN_BASE_URL")
+        or os.environ.get("QWEN_BASE_URL", QWEN_DEFAULT_BASE_URL)
+    )
+
+    missing = [k for k, v in {
+        "QWEN_BASE_URL": base_url,
+        "QWEN_MODEL_CHAT": chat.get("model", ""),
+        "QWEN_MODEL_CODE": code.get("model", ""),
+        "QWEN_MODEL_IMAGE": image.get("model", ""),
+        "QWEN_MODEL_VIDEO": video.get("model", ""),
+        "QWEN_MODEL_AUDIO": audio.get("model", ""),
+    }.items() if not v]
 
     return {
         "configured": True,
         "api_key_set": True,
-        "base_url": base_url or os.environ.get("QWEN_BASE_URL") or "default",
+        "base_url": base_url,
+        "missing_fields": missing,
         "capabilities": {
             "chat":  chat,
             "code":  code,
@@ -1285,12 +1330,64 @@ async def qwen_status() -> dict:
             "video": video,
             "audio": audio,
         },
+        "recommended_config": QWEN_RECOMMENDED_MODELS,
+        "default_base_url": QWEN_DEFAULT_BASE_URL,
+        "alt_base_urls": QWEN_ALT_BASE_URLS,
+        "optional_models": QWEN_OPTIONAL_MODELS,
         "note": (
             "Qwen is optional. GenX is the primary provider. "
             "Qwen is only used for tasks where a specific Qwen model is configured."
         ),
     }
 
+
+@api.post("/qwen/apply-recommended-config")
+async def qwen_apply_recommended_config(
+    claims: dict = Depends(require_user),
+) -> dict:
+    """Apply recommended Qwen model defaults to the settings store.
+
+    Sets QWEN_BASE_URL and all recommended model IDs if they are not
+    already configured. Does NOT overwrite existing values.
+    Requires QWEN_API_KEY to already be set.
+    """
+    qwen_key = await _runtime_secret("QWEN_API_KEY")
+    if not qwen_key:
+        raise HTTPException(400, "QWEN_API_KEY must be configured before applying defaults.")
+
+    applied: list[str] = []
+    skipped: list[str] = []
+
+    # Base URL
+    current_base = await _runtime_secret("QWEN_BASE_URL") or os.environ.get("QWEN_BASE_URL", "")
+    if not current_base:
+        await save_secret(db, "QWEN_BASE_URL", QWEN_DEFAULT_BASE_URL, claims["sub"])
+        applied.append("QWEN_BASE_URL")
+    else:
+        skipped.append("QWEN_BASE_URL")
+
+    # Model IDs
+    for key, default_model in QWEN_RECOMMENDED_MODELS.items():
+        current = await _runtime_secret(key) or os.environ.get(key, "")
+        if not current:
+            await save_secret(db, key, default_model, claims["sub"])
+            applied.append(key)
+        else:
+            skipped.append(key)
+
+    return {
+        "ok": True,
+        "applied": applied,
+        "skipped": skipped,
+        "message": (
+            f"Applied {len(applied)} recommended defaults. "
+            f"Skipped {len(skipped)} already-configured values."
+        ),
+        "applied_values": {
+            "QWEN_BASE_URL": QWEN_DEFAULT_BASE_URL,
+            **QWEN_RECOMMENDED_MODELS,
+        },
+    }
 
 
 
@@ -1514,6 +1611,33 @@ async def import_from_repo(body: RepoImportBody, claims: dict = Depends(require_
         )
     except Exception:
         pass  # Non-fatal: analysis can be requested later via /repo-analysis endpoint
+
+    # Save to VPS build storage (non-fatal — does not block import)
+    try:
+        branch_name = info.get("branch", "main")
+        ws_meta = create_repo_workspace(
+            owner=owner,
+            repo=repo,
+            branch=branch_name,
+            commit_sha=info.get("commit_sha", ""),
+            repo_url=info.get("html_url", body.repo_url),
+        )
+        # Run stack detection and save to workspace metadata
+        detect_and_save_stack(
+            Path(ws_meta["local_path"]),
+            info.get("files", []),
+        )
+        # Link the project_id to the workspace metadata
+        update_workspace_metadata(
+            Path(ws_meta["local_path"]),
+            {"linked_project_id": proj.id, "build_status": "cloned"},
+        )
+        logger.info(
+            "Saved repo workspace for %s/%s@%s at %s",
+            owner, repo, branch_name, ws_meta["local_path"],
+        )
+    except Exception as exc:
+        logger.warning("Build storage save failed (non-fatal): %s", exc)
 
     return proj
 
@@ -3212,7 +3336,7 @@ async def list_agents() -> dict:
 async def agents_status() -> dict:
     """Return a summary of agent status: active, deterministic, partial, planned."""
     summary = get_agent_status_summary()
-    cap_summary = capabilities_summary()
+    cap_summary = await async_capabilities_summary(_runtime_secret)
     return {
         **summary,
         "capabilities": cap_summary,
@@ -3224,7 +3348,7 @@ async def agents_status() -> dict:
 async def orchestration_health() -> dict:
     """Report orchestration health — agents, capabilities, and readiness."""
     agent_summary = get_agent_status_summary()
-    cap_summary = capabilities_summary()
+    cap_summary = await async_capabilities_summary(_runtime_secret)
 
     # Check required agents
     required_agents = [
@@ -3320,3 +3444,107 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# BUILD STORAGE ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+class BuildArchiveBody(BaseModel):
+    workspace_path: str = Field(min_length=1, max_length=1024)
+    confirmed: bool = False
+
+
+class BuildDeleteBody(BaseModel):
+    workspace_path: str = Field(min_length=1, max_length=1024)
+    confirmed: bool = False
+
+
+class BuildMetaUpdateBody(BaseModel):
+    workspace_path: str = Field(min_length=1, max_length=1024)
+    updates: dict
+
+
+@secured.get("/builds")
+async def list_builds(
+    workspace_type: Optional[str] = None,
+    claims: dict = Depends(require_user),
+) -> dict:
+    """Return all saved build workspaces, optionally filtered by type.
+
+    Types: repos | generated | incomplete | releases
+    """
+    try:
+        workspaces = list_workspaces(workspace_type)
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to list builds: {exc}")
+    try:
+        usage = storage_usage()
+    except Exception:
+        usage = {}
+    return {
+        "workspaces": workspaces,
+        "total": len(workspaces),
+        "storage": usage,
+        "retrieved_at": _now(),
+    }
+
+
+@secured.get("/builds/storage-usage")
+async def builds_storage_usage(claims: dict = Depends(require_user)) -> dict:
+    """Return disk usage for the builds storage root."""
+    try:
+        return {**storage_usage(), "retrieved_at": _now()}
+    except Exception as exc:
+        raise HTTPException(500, f"Storage usage error: {exc}")
+
+
+@secured.post("/builds/archive")
+async def builds_archive(
+    body: BuildArchiveBody,
+    claims: dict = Depends(require_user),
+) -> dict:
+    """Archive a build workspace (move to archived/ subfolder)."""
+    try:
+        result = archive_workspace(Path(body.workspace_path), confirmed=body.confirmed)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"Archive failed: {exc}")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "Archive failed"))
+    return result
+
+
+@secured.post("/builds/delete")
+async def builds_delete(
+    body: BuildDeleteBody,
+    claims: dict = Depends(require_user),
+) -> dict:
+    """Permanently delete a build workspace. Requires confirmed=True."""
+    if claims.get("role") != "admin":
+        raise HTTPException(403, "Only admins can permanently delete build workspaces.")
+    try:
+        result = delete_workspace(Path(body.workspace_path), confirmed=body.confirmed)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"Delete failed: {exc}")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "Delete failed"))
+    return result
+
+
+@secured.post("/builds/update-meta")
+async def builds_update_meta(
+    body: BuildMetaUpdateBody,
+    claims: dict = Depends(require_user),
+) -> dict:
+    """Update metadata for a build workspace."""
+    try:
+        result = update_workspace_metadata(Path(body.workspace_path), body.updates)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"Metadata update failed: {exc}")
+    return {"ok": True, "meta": result}

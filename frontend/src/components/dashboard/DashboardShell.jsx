@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Activity, Boxes, Github, Image, LayoutDashboard, LogOut, Plus, Settings, Sparkles } from "lucide-react";
+import { Activity, Boxes, Database, Github, Image, LayoutDashboard, LogOut, Plus, Settings, Sparkles } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
 const NAV = [
@@ -7,6 +7,7 @@ const NAV = [
   { to: "/dashboard/new", label: "New Build", icon: Plus },
   { to: "/dashboard/projects", label: "Projects", icon: Boxes },
   { to: "/dashboard/repo", label: "Repo Workbench", icon: Github },
+  { to: "/dashboard/builds", label: "Build Storage", icon: Database },
   { to: "/dashboard/media", label: "Media", icon: Image },
   { to: "/dashboard/settings", label: "Settings", icon: Settings },
   { to: "/system", label: "System", icon: Activity },
