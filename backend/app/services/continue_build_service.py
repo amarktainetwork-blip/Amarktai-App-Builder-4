@@ -469,7 +469,6 @@ def create_workspace_version(
     versions_dir = ws / ".versions"
     versions_dir.mkdir(exist_ok=True)
 
-    from datetime import datetime, timezone
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     version_id = ts
 

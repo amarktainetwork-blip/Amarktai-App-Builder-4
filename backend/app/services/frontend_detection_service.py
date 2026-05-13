@@ -270,7 +270,6 @@ def _detect_port_hint(root: Path, framework: str, scripts: dict[str, str]) -> in
         if vite_path.exists():
             try:
                 content = vite_path.read_text(errors="replace")
-                import re
                 m = re.search(r"port\s*:\s*(\d+)", content)
                 if m:
                     return int(m.group(1))

@@ -68,8 +68,16 @@ def _assert_inside_root(path: Path) -> None:
 
 def _run_git(args: list[str], cwd: Path, env: dict | None = None,
              timeout: int = GIT_CMD_TIMEOUT) -> tuple[int, str, str]:
-    """Run a git command. Returns (returncode, stdout, stderr)."""
+    """Run a git command. Returns (returncode, stdout, stderr).
+
+    Security: all caller-supplied URL args must be validated by _parse_github_url()
+    before reaching this function. Shell=True is never used. The cmd list is always
+    ["git", <fixed-subcmd>, ...validated-args...], so no shell injection is possible.
+    cwd is validated to be inside BUILDS_STORAGE_ROOT by _assert_inside_root().
+    """
     _assert_inside_root(cwd)
+    # cmd is constructed as a list (not a string) — shell=False is the default for
+    # subprocess.run when passed a list, ensuring no shell injection.
     cmd = ["git"] + args
     base_env = {**os.environ}
     if env:
@@ -86,6 +94,7 @@ def _run_git(args: list[str], cwd: Path, env: dict | None = None,
             text=True,
             timeout=timeout,
             env=base_env,
+            shell=False,  # explicit: never use shell expansion
         )
         return result.returncode, result.stdout, result.stderr
     except subprocess.TimeoutExpired:

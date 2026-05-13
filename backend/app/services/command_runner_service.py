@@ -57,7 +57,7 @@ ALLOWED_COMMANDS: list[tuple[str, tuple[str, ...]]] = [
     ("test",    ("npm", "test")),
     ("test",    ("npm", "run", "test")),
     ("lint",    ("npm", "run", "lint")),
-    ("build",   ("npm", "run", "start")),   # for CRA start = build
+    ("build",   ("npm", "run", "start")),   # CRA: npm run start starts the dev server for building/serving
     # pnpm
     ("install", ("pnpm", "install")),
     ("build",   ("pnpm", "run", "build")),
@@ -168,6 +168,9 @@ def run_command(
 
     start_ts = time.monotonic()
     try:
+        # Security: shell=False (default for list args). All cmd_args values are
+        # validated against ALLOWED_COMMANDS allowlist by _match_allowed() above.
+        # workspace_path is validated by _assert_inside_root() above.
         result = subprocess.run(
             cmd_args,
             cwd=str(ws),
@@ -175,6 +178,7 @@ def run_command(
             text=True,
             timeout=timeout,
             env=env,
+            shell=False,  # explicit: never use shell expansion
         )
         elapsed = time.monotonic() - start_ts
         stdout = result.stdout[:MAX_LOG_BYTES]

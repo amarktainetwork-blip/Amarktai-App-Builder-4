@@ -156,9 +156,17 @@ class TestFrontendDetectionService:
     def setup_method(self):
         from app.services import frontend_detection_service as svc
         self.svc = svc
+        self._tmpdirs: list[tempfile.TemporaryDirectory] = []
 
-    def _make_workspace(self, files: dict[str, str]) -> tempfile.TemporaryDirectory:
-        tmpdir = tempfile.mkdtemp()
+    def teardown_method(self):
+        for td in self._tmpdirs:
+            td.cleanup()
+        self._tmpdirs.clear()
+
+    def _make_workspace(self, files: dict[str, str]) -> str:
+        td = tempfile.TemporaryDirectory()
+        self._tmpdirs.append(td)
+        tmpdir = td.name
         for rel, content in files.items():
             path = Path(tmpdir) / rel
             path.parent.mkdir(parents=True, exist_ok=True)
