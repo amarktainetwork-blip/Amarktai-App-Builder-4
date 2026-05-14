@@ -16,7 +16,6 @@ ROUTER_NAME = "GenX Router"
 DEV_FERNET_KEY = "YW1hcmt0YWktZGV2LWZlcm5ldC1rZXktMzItYnl0ZSE="
 REQUIRED_ENV = [
     "APP_ENV",
-    "GENX_API_KEY",
     "JWT_SECRET",
     "ADMIN_EMAIL",
     "ADMIN_PASSWORD",
@@ -110,6 +109,13 @@ def validate_static_config() -> list[ConfigCheck]:
             "FAIL" if missing else "PASS",
             f"Missing: {', '.join(missing)}" if missing else "All required production variables are present.",
             "blocker" if missing else "info",
+        ))
+        checks.append(ConfigCheck(
+            "GENX provider source",
+            "PASS" if os.environ.get("GENX_API_KEY") else "WARN",
+            "GENX_API_KEY provided by environment." if os.environ.get("GENX_API_KEY")
+            else "GENX_API_KEY may be supplied by encrypted dashboard Settings; readiness validates the runtime secret.",
+            "info" if os.environ.get("GENX_API_KEY") else "warning",
         ))
     else:
         checks.append(ConfigCheck(

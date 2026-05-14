@@ -10,7 +10,7 @@ JWT_SECRET=<random value, at least 32 characters>
 SETTINGS_ENCRYPTION_KEY=<Fernet key>
 ADMIN_EMAIL=<admin email>
 ADMIN_PASSWORD=<strong password, at least 12 characters>
-GENX_API_KEY=<required for production builder agents>
+GENX_API_KEY=<optional here if supplied through encrypted dashboard Settings>
 GENX_BASE_URL=https://query.genx.sh/v1
 BUILDS_STORAGE_ROOT=/var/www/amarktai/builds
 CORS_ORIGINS=https://builder.amarktai.com
@@ -18,7 +18,7 @@ MONGO_URL=mongodb://mongo:27017
 DB_NAME=amarktai_builder
 ```
 
-`GENX_API_KEY` is fatal in production because builder agents cannot truthfully run without it.
+`GENX_API_KEY` is required at runtime because builder agents cannot truthfully run without it. Production startup may use encrypted dashboard Settings for this provider key; readiness fails with a blocker if neither Settings nor environment provides a valid key.
 
 ## Recommended Providers
 
