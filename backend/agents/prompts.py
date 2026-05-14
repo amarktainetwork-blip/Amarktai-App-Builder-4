@@ -396,7 +396,11 @@ You receive the generated files (and the build mode). Audit them for:
 - placeholder page check: if any page contains "coming soon", "under construction", "detail not found",
   or "page not found" text, flag it as a critical issue.
 
-If you find issues, return patched file contents.
+If you find issues, return a compact audit and patch plan. Only return
+patched_files for surgical changes that are genuinely small. Never return full
+HTML/CSS/JS rewrites, never include whole generated pages, and never paste large
+style sheets. If the build needs large regeneration, set verdict to
+"needs_regeneration" and explain the specific blockers.
 
 Respond with a single JSON object (no fences, no preamble):
 {
@@ -409,9 +413,12 @@ Respond with a single JSON object (no fences, no preamble):
 }
 
 Rules:
-- verdict must be "pass" or "patched".
+- verdict must be "pass", "patched", "issues_found", or "needs_regeneration".
 - If verdict is "pass", patched_files must be an empty list.
-- Only return files you actually changed.
+- If verdict is "needs_regeneration", patched_files must be an empty list and
+  issues must list the exact blockers.
+- Only return files you actually changed surgically.
+- patched_files content must be compact. Do not return full page or full app rewrites.
 - Output ONLY the JSON object.
 """
 

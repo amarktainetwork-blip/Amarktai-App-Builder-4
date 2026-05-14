@@ -844,6 +844,14 @@ class Orchestrator:
             await self._record_event(agent, "failed", msg)
             raise TimeoutError(msg)
         await self._track_usage(result["model_label"], len(system) + len(user), len(result["text"]))
+        if agent == "reviewer" and len(result["text"] or "") > 60_000:
+            await self._persist_raw_agent_response(
+                agent,
+                result["text"],
+                result["model_label"],
+                "Reviewer response exceeded audit-only size limit.",
+            )
+            raise ValueError("Reviewer response exceeded audit-only size limit; Reviewer must return a compact audit/patch plan.")
         try:
             data = _parse_json(result["text"])
         except Exception as e:
@@ -1357,6 +1365,11 @@ class Orchestrator:
                 pixabay_api_key=(await get_secret(self.db, "PIXABAY_API_KEY")) or "",
             )
             await self.emit({"type": "media_runtime", "data": media_manifest})
+            for changed_rel in media_manifest.get("injected_files", []):
+                changed_path = workspace / str(changed_rel).lstrip("/")
+                if changed_path.exists() and changed_path.is_file():
+                    await self.fs.write(str(changed_rel), changed_path.read_text(encoding="utf-8", errors="replace"), "text")
+                    await self.emit({"type": "file_written", "data": {"path": str(changed_rel)}})
             await self._record_event(
                 "media_director",
                 "runtime_completed" if media_manifest.get("asset_count", 0) else "runtime_failed",
@@ -1369,6 +1382,8 @@ class Orchestrator:
             require_runtime=quality_tier == "premium",
             require_media=media_required,
             require_motion=motion_required,
+            prompt=prompt,
+            mode=mode,
         )
         update_workspace_metadata(
             workspace,
@@ -1909,10 +1924,22 @@ class Orchestrator:
             "shared_context": shared_ctx,
         }, indent=2)
         review_issues: list[str] = []
+        reviewer_blocker = ""
+        reviewer_passed = False
         try:
             rev = await self._run_agent("reviewer", REVIEWER_PROMPT, review_input)
             await self._check_cancel()
             rev_data = rev["data"]
+            verdict = str(rev_data.get("verdict", "pass")).strip().lower()
+            if verdict == "needs_regeneration":
+                reviewer_blocker = "Reviewer requested regeneration before this build can be marked ready."
+            elif verdict not in {"pass", "patched", "issues_found", "warn"}:
+                reviewer_blocker = f"Reviewer returned unsupported verdict: {verdict or 'missing'}."
+            for patched_file in rev_data.get("patched_files", []):
+                patched_content = str(patched_file.get("content", ""))
+                if len(patched_content) > 50_000 and re.search(r"<html|body\s*\{|\.hero|@media", patched_content, re.IGNORECASE):
+                    reviewer_blocker = "Reviewer attempted a full-file rewrite instead of a compact audit patch."
+                    break
             for f in rev_data.get("patched_files", []):
                 await self.fs.write(f["path"], f["content"], f.get("language", "text"))
                 await self.emit({"type": "file_written", "data": {"path": f["path"]}})
@@ -1924,15 +1951,23 @@ class Orchestrator:
                 meta={"model": rev["model_label"], "patched": [f["path"] for f in rev_data.get("patched_files", [])]},
             )
             review_issues = rev_data.get("issues", [])
+            reviewer_passed = not reviewer_blocker
             await self._ensure_contract_files(user_prompt, arch_data)
         except Exception as reviewer_err:
             # Reviewer failure is non-fatal: record and proceed to deterministic validation.
-            err_detail = f"Reviewer returned invalid output; skipping reviewer patches. Proceeding to validation. Detail: {reviewer_err}"
+            err_detail = f"Reviewer returned invalid output; skipping reviewer patches. Detail: {reviewer_err}"
+            reviewer_blocker = err_detail
             await self._record_event("reviewer", "failed", err_detail,
                                      meta={"reviewer_error": str(reviewer_err)})
             await self._record_message("system", None, err_detail,
-                                       meta={"reviewer_nonfatal": True})
+                                       meta={"reviewer_nonfatal": project_meta.get("quality_tier", "balanced") != "premium"})
             await self._ensure_contract_files(user_prompt, arch_data)
+
+        if project_meta.get("quality_tier", "balanced") == "premium" and (reviewer_blocker or not reviewer_passed):
+            err = reviewer_blocker or "Reviewer did not complete successfully for this premium build."
+            await self._fail_project("reviewer", err)
+            await self._record_message("system", None, err, meta={"error": err, "reviewer_required": True})
+            return
 
         # 5) Validation + bounded repair loop
         project = await self._load_project()

@@ -803,6 +803,43 @@ class TestQualityGateService:
         assert self.svc.check_media_manifest(ws)["ok"] is True
         assert self.svc.check_motion_manifest(ws)["ok"] is True
 
+    def test_strict_gate_blocks_placeholder_dead_cta_and_broken_asset(self):
+        ws = self._make_workspace({
+            "index.html": "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body><main><h1>Your Product</h1><a href='#'>Start</a><img src='broken.jpg' alt='Broken'></main></body></html>",
+            "README.md": "# App",
+            "preview-manifest.json": "{}",
+            "motion_manifest.json": json.dumps({"changed_files": ["script.js"]}),
+            "media_manifest.json": json.dumps({"assets": [{"path": "media/asset.jpg"}]}),
+            "media/asset.jpg": b"\xff\xd8\xff\xe0fakejpeg".decode("latin1"),
+            "script.js": "requestAnimationFrame(() => {})",
+        })
+        with patch.object(self.svc, "run_runtime_qa", return_value={"pass": True, "blockers": [], "report_path": "runtime-qa/runtime-qa-report.json"}):
+            result = self.svc.run_quality_gate(ws, strict=True, require_media=True, require_motion=True)
+        blocker_checks = {b["check"] for b in result["blockers"]}
+        assert "placeholders" in blocker_checks
+        assert "dead_ctas" in blocker_checks
+        assert "broken_assets" in blocker_checks
+        assert result["pass"] is False
+
+    @pytest.mark.parametrize(
+        "prompt,should_block",
+        [
+            ("Create a premium Amarktai Builder website", True),
+            ("Create a fighter jet cinematic media website", True),
+            ("Create a SaaS dashboard", True),
+            ("Create an automotive dealership website with inventory and finance pages", False),
+        ],
+    )
+    def test_template_contamination_only_allowed_for_automotive_prompts(self, prompt, should_block):
+        ws = self._make_workspace({
+            "index.html": "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body><main>Hello</main></body></html>",
+            "finance.html": "<html><body>Finance</body></html>",
+            "inventory.html": "<html><body>Inventory</body></html>",
+            "vehicle-detail.html": "<html><body>Vehicle</body></html>",
+        })
+        result = self.svc.check_template_contamination(Path(ws), prompt=prompt, mode="website")
+        assert result["ok"] is (not should_block)
+
 
 class TestRuntimeMediaMotionServices:
 
@@ -836,6 +873,27 @@ class TestRuntimeMediaMotionServices:
         assert "index.html" in changed
         html = (tmp_path / "index.html").read_text()
         assert "data-amarktai-media-asset" in html
+
+    @pytest.mark.asyncio
+    async def test_pixabay_mock_response_persists_manifest_and_injects_assets(self, tmp_path):
+        from app.services import media_runtime_service as svc
+        svg_asset = b'<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#111827"/></svg>'
+        (tmp_path / "index.html").write_text("<html><body><main><h1>Amarktai</h1></main></body></html>")
+        (tmp_path / "styles.css").write_text("body{}")
+        with patch.object(svc, "search_images", AsyncMock(return_value=[{"url": "https://cdn.test/asset.png", "full_url": "https://cdn.test/full.png", "tags": "ai"}])), \
+             patch.object(svc, "search_videos", AsyncMock(return_value=[])), \
+             patch.object(svc, "_download", AsyncMock(return_value=(svg_asset, "image/svg+xml"))):
+            manifest = await svc.execute_media_plan(
+                tmp_path,
+                project_id="p1",
+                prompt="premium Amarktai Builder website",
+                pixabay_api_key="pixabay-test",
+            )
+        assert manifest["asset_count"] == 1
+        assert manifest["assets"][0]["source"] == "pixabay"
+        assert "index.html" in manifest["injected_files"]
+        assert (tmp_path / "media_manifest.json").exists()
+        assert "data-amarktai-media-asset" in (tmp_path / "index.html").read_text()
 
 
 # ════════════════════════════════════════════════════════════════════════════

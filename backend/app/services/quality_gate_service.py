@@ -38,11 +38,30 @@ logger = logging.getLogger("amarktai.quality_gate")
 _PLACEHOLDER_PATTERNS = [
     r"Lorem ipsum",
     r"placeholder text",
+    r"Your Product",
     r"TODO:",
     r"FIXME:",
     r"Coming soon",
     r"Under construction",
+    r"\bFeature One\b",
+    r"broken\.jpg",
+    r"placeholder\.[a-z0-9]{2,5}",
 ]
+
+_AUTOMOTIVE_ONLY_FILES = {"finance.html", "inventory.html", "vehicle-detail.html"}
+_AUTOMOTIVE_HINTS = re.compile(
+    r"\b(auto|automotive|car|cars|vehicle|vehicles|dealership|dealer|inventory|finance|test drive)\b",
+    re.IGNORECASE,
+)
+_STRICT_WARNING_BLOCKERS = {
+    "placeholders",
+    "dead_ctas",
+    "responsive",
+    "image_alt",
+    "preview_manifest",
+    "broken_assets",
+    "template_contamination",
+}
 
 _SECRET_PATTERNS = [
     r"(?i)(api[_-]?key|apikey|secret[_-]?key|private[_-]?key)\s*=\s*['\"][a-zA-Z0-9_\-\.]{16,}['\"]",
@@ -313,6 +332,50 @@ def check_preview_manifest(ws: Path) -> dict[str, Any]:
 
 # ── Main gate ─────────────────────────────────────────────────────────────────
 
+def check_broken_assets(ws: Path) -> dict[str, Any]:
+    """Detect local image/video references that do not resolve in the workspace."""
+    ui_files = _iter_source_files(ws, {".html", ".jsx", ".tsx", ".vue", ".svelte"})
+    missing: list[str] = []
+    for f in ui_files[:50]:
+        try:
+            content = f.read_text(errors="replace")
+        except Exception:
+            continue
+        refs = re.findall(r"\b(?:src|poster)=['\"]([^'\"]+)['\"]", content, re.IGNORECASE)
+        for ref in refs:
+            if not ref or ref.startswith(("http://", "https://", "data:", "#", "{", "/api/")):
+                continue
+            clean_ref = ref.split("#", 1)[0].split("?", 1)[0]
+            if clean_ref.startswith("/"):
+                clean_ref = clean_ref.lstrip("/")
+            if not (ws / clean_ref).exists():
+                missing.append(f"{f.relative_to(ws)} -> {ref}")
+    if missing:
+        return {
+            "ok": False,
+            "blocker": True,
+            "message": f"Broken local media references found in {len(missing)} location(s).",
+            "files": missing[:10],
+            "suggestion": "Persist referenced media assets or update src/poster paths to existing files.",
+        }
+    return {"ok": True}
+
+
+def check_template_contamination(ws: Path, *, prompt: str = "", mode: str = "") -> dict[str, Any]:
+    """Prevent unrelated starter pages from leaking into non-automotive builds."""
+    requested_automotive = bool(_AUTOMOTIVE_HINTS.search(f"{prompt} {mode}"))
+    present = sorted(name for name in _AUTOMOTIVE_ONLY_FILES if (ws / name).exists())
+    if present and not requested_automotive:
+        return {
+            "ok": False,
+            "blocker": True,
+            "message": "Automotive starter pages appeared in a non-automotive build.",
+            "files": present,
+            "suggestion": "Remove finance/inventory/vehicle-detail starter files unless the prompt requests automotive workflows.",
+        }
+    return {"ok": True, "files": present, "automotive_prompt": requested_automotive}
+
+
 def check_media_manifest(ws: Path) -> dict[str, Any]:
     """Require persisted real media assets when media is mandatory."""
     for rel in ("media_manifest.json", "media-manifest.json", "media/manifest.json"):
@@ -356,6 +419,8 @@ def run_quality_gate(
     require_runtime: bool = False,
     require_media: bool = False,
     require_motion: bool = False,
+    prompt: str = "",
+    mode: str = "",
 ) -> dict[str, Any]:
     """
     Run all quality checks on a project workspace.
@@ -392,6 +457,8 @@ def run_quality_gate(
         "responsive":   check_responsive(ws),
         "image_alt":    check_image_alt(ws),
         "dead_ctas":    check_dead_ctas(ws),
+        "broken_assets": check_broken_assets(ws),
+        "template_contamination": check_template_contamination(ws, prompt=prompt, mode=mode),
         "preview_manifest": check_preview_manifest(ws),
     }
     if strict or require_media:
@@ -421,11 +488,15 @@ def run_quality_gate(
                     "files": result.get("files", []),
                 })
             elif result.get("warning"):
-                warnings.append({
+                payload = {
                     "check": check_name,
                     "message": result.get("message", ""),
                     "files": result.get("files", []),
-                })
+                }
+                if strict and check_name in _STRICT_WARNING_BLOCKERS:
+                    blockers.append(payload)
+                else:
+                    warnings.append(payload)
             if result.get("suggestion"):
                 suggestions.append(result["suggestion"])
 

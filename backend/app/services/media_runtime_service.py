@@ -185,17 +185,17 @@ async def execute_media_plan(
             except Exception as exc:
                 attempts.append({"provider": "pixabay_video", "ok": False, "reason": str(exc)})
 
+    injected_files = inject_media_assets(workspace, assets) if assets else []
     manifest = {
         "project_id": project_id,
         "status": "ready" if assets else "failed",
         "assets": assets,
         "attempts": attempts,
         "asset_count": len(assets),
+        "injected_files": injected_files,
         "created_at": _now(),
     }
     (workspace / "media_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    if assets:
-        inject_media_assets(workspace, assets)
     return manifest
 
 

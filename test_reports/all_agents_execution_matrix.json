@@ -1,13 +1,10 @@
 {
   "generated_at": "2026-05-14",
-  "branch": "fix/complete-all-agents-github-runtime-production",
+  "branch": "fix/final-runtime-agents-production-completion",
   "summary": {
     "registered_agents": 28,
     "registry_active": 28,
-    "hard_blockers": [
-      "accessibility",
-      "visual_qa"
-    ]
+    "hard_blockers": []
   },
   "implemented_this_pr": [
     "GitHub repo listing endpoint using dashboard-managed GITHUB_PAT.",
@@ -17,7 +14,12 @@
     "GitHub PR URL persistence to project and build workspace metadata.",
     "Safe command runner allowlist extended for git status/diff/log/branch and env-gated docker compose config/build.",
     "Frontend package dependencies for GSAP, Three.js, React Three Fiber, axe-core, Playwright test, and Lighthouse.",
-    "Backend Playwright dependency and Docker Chromium install step."
+    "Backend Playwright dependency and Docker Chromium install step.",
+    "Runtime QA service executes Playwright Chromium, axe-core accessibility, Lighthouse/browser performance, screenshots, console, links, and media checks.",
+    "Media runtime persists GenX/Qwen/Pixabay assets, writes media_manifest.json, and injects media references into generated pages.",
+    "Motion runtime patches files, writes motion_manifest.json, and exposes dashboard evidence.",
+    "Premium gates fail closed on missing runtime QA, missing media, missing motion, malformed Reviewer output, placeholder content, broken assets, and template contamination.",
+    "Idea Builder handoff passes finalized brief, mode, tier, media choice, and session id into New Build."
   ],
   "agents": [
     {
@@ -26,10 +28,12 @@
       "status": "active",
       "prompt_key": null,
       "called_from": [
-        "_validate_contract (via quality_validator._score_accessibility())"
+        "run_quality_gate -> run_runtime_qa -> axe-core browser scan",
+        "_validate_contract static accessibility score"
       ],
       "tools": [
-        "axe_core_static",
+        "playwright_chromium",
+        "axe_core_browser",
         "aria_checker",
         "contrast_validator",
         "keyboard_nav_checker",
@@ -43,12 +47,13 @@
         "suggestions",
         "wcag_aa_pass"
       ],
-      "blocks_on_failure": false,
-      "implementation": "quality_validator._score_accessibility() \u2014 enhanced axe-core-like static analysis: lang attr, headings, alt text, ARIA, focus states, skip links, landmarks, form labels, contrast indicators",
-      "notes": "Fully activated in Phase 2B with enhanced static checks. Full Playwright/axe-core integration requires runtime container (Phase 2C).",
-      "hard_blocker": true,
-      "blocker_reason": "Registry still documents this as static/future-runtime work, not full browser-backed execution.",
-      "static_only_signal": true
+      "blocks_on_failure": true,
+      "implementation": "runtime_qa_service.run_runtime_qa() injects axe-core in Playwright; strict premium quality gates block on accessibility violations/scores.",
+      "notes": "Browser-backed runtime accessibility is wired through strict quality gates and dashboard runtime evidence.",
+      "hard_blocker": false,
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "backend_coder",
@@ -80,8 +85,9 @@
       "implementation": "BACKEND_CODER_PROMPT (via coder in full-stack mode)",
       "notes": "Called when mode is full_stack, api_service, or dashboard with auth.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "capability_truth",
@@ -108,8 +114,9 @@
       "implementation": "extended_agents.verify_capability_claims() + CAPABILITY_TRUTH_PROMPT",
       "notes": "Added in Phase 2B. Critical for honest platform operation.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "component_librarian",
@@ -136,8 +143,9 @@
       "implementation": "extended_agents.register_components()",
       "notes": "Added in Phase 2B. Builds a reusable component registry per project.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "creative_director",
@@ -171,8 +179,9 @@
       "implementation": "creative_director.run_creative_director() \u2014 deterministic blueprint engine with diversity checking, brand palette selection, section archetype enforcement, and typography pair system",
       "notes": "Deterministic blueprint engine. Enforces premium section archetypes and typography hierarchy. Prevents purple/teal AI gradient defaults.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "data_architect",
@@ -203,8 +212,9 @@
       "implementation": "extended_agents.analyze_data_architecture() + DATA_ARCHITECT_PROMPT",
       "notes": "Added in Phase 2B. Called for full_stack, api_service, dashboard builds.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "deployment",
@@ -238,8 +248,9 @@
       "implementation": "deployment_agent.run_deployment_validation() \u2014 full validation: Dockerfile, docker-compose, .env.example, build scripts, preview readiness, health checks, deployment instructions",
       "notes": "Fully activated in Phase 2B. Docker/sandbox preview is Phase 2C runtime.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "documentation",
@@ -264,8 +275,9 @@
       "implementation": "extended_agents.generate_readme() + DOCUMENTATION_PROMPT",
       "notes": "Added in Phase 2B. Ensures every build has a README.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "export_agent",
@@ -293,8 +305,9 @@
       "implementation": "extended_agents.prepare_export_manifest() + EXPORT_PROMPT",
       "notes": "Added in Phase 2B. Used by download/export endpoints.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "frontend_coder",
@@ -325,8 +338,9 @@
       "implementation": "CODER_PROMPT",
       "notes": "Premium output enforced via PREMIUM_SECTION_LIBRARY and VISUAL_COMPOSITION_RULES.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "logo_agent",
@@ -355,8 +369,9 @@
       "implementation": "logo_agent.py (SVG) + run_logo_agent() + media library storage",
       "notes": "AI image generation is capability-gated. Falls back to SVG if unavailable.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "manager",
@@ -384,8 +399,9 @@
       "implementation": "Orchestrator._run_build_pipeline + BUILD_PLANNER_PROMPT",
       "notes": "Acts as the orchestration manager. Blocks completion if required agents fail.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "media_director",
@@ -419,8 +435,9 @@
       "implementation": "media_director.run_media_director() \u2014 full orchestration with relevance scoring, quality scoring, duplicate detection, honest AI reporting",
       "notes": "Fully activated in Phase 2B. Honest reporting when AI unavailable. Scores relevance (0-100), quality (0-100), rejects poor media.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "memory_curator",
@@ -445,8 +462,9 @@
       "implementation": "extended_agents.curate_memory() + MEMORY_CURATOR_PROMPT",
       "notes": "Added in Phase 2B. Runs as background task to keep memory lean.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "monitoring",
@@ -474,8 +492,9 @@
       "implementation": "extended_agents.analyze_monitoring_readiness()",
       "notes": "Added in Phase 2B. Non-blocking \u2014 issues are warnings, not failures.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "motion_3d",
@@ -503,8 +522,9 @@
       "implementation": "MOTION_3D_PROMPT (called by orchestrator when animation detected)",
       "notes": "Activated when prompt contains: 3D, particles, animations, video bg, GSAP, Three.js.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "product_strategist",
@@ -532,8 +552,9 @@
       "implementation": "SCOUT_PROMPT",
       "notes": "Maps to 'scout' agent in the orchestrator.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "prompt_optimizer",
@@ -560,8 +581,9 @@
       "implementation": "extended_agents.analyze_prompt_quality()",
       "notes": "Added in Phase 2B. Non-blocking analysis that improves downstream quality.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "qa_agent",
@@ -589,8 +611,9 @@
       "implementation": "REVIEWER_PROMPT + quality_validator + coverage_score",
       "notes": "Maps to 'reviewer' agent.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "repo_engineer",
@@ -620,8 +643,9 @@
       "implementation": "REPO_FIX_PROMPT + RepairEngine",
       "notes": "Also backed by deterministic RepairEngine for targeted fixes.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "runtime_engineer",
@@ -650,8 +674,9 @@
       "implementation": "extended_agents.check_runtime_health() + RUNTIME_ENGINEER_PROMPT",
       "notes": "Added in Phase 2B. Never marks a build as runtime_ok if build logs have errors.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "security",
@@ -678,8 +703,9 @@
       "implementation": "SECURITY_PROMPT (called post-coder in auth/full-stack builds)",
       "notes": "Activated for full_stack, api_service, dashboard builds with auth.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "seo_performance",
@@ -709,8 +735,9 @@
       "implementation": "quality_validator._score_seo() + _score_performance() \u2014 enhanced with Twitter Card, structured data, image alt, canonical, lazy loading, defer/async, font preloading checks",
       "notes": "Fully activated in Phase 2B. Lighthouse requires headless browser (Phase 2C).",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "tool_integration",
@@ -738,8 +765,9 @@
       "implementation": "extended_agents.verify_tool_integration()",
       "notes": "Added in Phase 2B. Detects tool usage and validates env configuration.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "ui_designer",
@@ -771,8 +799,9 @@
       "implementation": "design_engine.create_design_direction() + PREMIUM_SECTION_LIBRARY + VISUAL_COMPOSITION_RULES \u2014 generates design tokens, section templates, typography scale, responsive spacing, and layout constraints",
       "notes": "Deterministic. PREMIUM_SECTION_LIBRARY and VISUAL_COMPOSITION_RULES injected into CODER_PROMPT via shared_context.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "ux_architect",
@@ -798,8 +827,9 @@
       "implementation": "ARCHITECT_PROMPT",
       "notes": "Maps to 'architect' agent.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "visual_qa",
@@ -807,14 +837,16 @@
       "status": "active",
       "prompt_key": "VISUAL_QA_PROMPT",
       "called_from": [
-        "_run_build_pipeline (post-build gate)"
+        "run_quality_gate -> run_runtime_qa screenshots/console/broken asset checks",
+        "_run_build_pipeline visual_qa_result event"
       ],
       "tools": [
-        "layout_checker",
-        "typography_validator",
-        "contrast_checker",
-        "responsive_tester",
-        "quality_scorer"
+        "playwright_chromium",
+        "desktop_tablet_mobile_screenshots",
+        "console_error_capture",
+        "broken_link_checker",
+        "broken_asset_checker",
+        "lighthouse"
       ],
       "outputs": [
         "visual_qa_result",
@@ -822,12 +854,13 @@
         "layout_issues",
         "suggestions"
       ],
-      "blocks_on_failure": false,
-      "implementation": "orchestrator._static_visual_qa_result() + quality_validator scoring; VISUAL_QA_PROMPT remains available for future browser-backed review",
-      "notes": "Runs deterministic static Visual QA for every completed build and persists visual_qa_result. Browser screenshots require a future Playwright runtime.",
-      "hard_blocker": true,
-      "blocker_reason": "Registry still documents this as static/future-runtime work, not full browser-backed execution.",
-      "static_only_signal": true
+      "blocks_on_failure": true,
+      "implementation": "runtime_qa_service.run_runtime_qa() captures browser evidence; strict premium gates block if runtime QA cannot execute or fails.",
+      "notes": "Runtime visual QA evidence is persisted and displayed in Workspace RuntimeEvidencePanel.",
+      "hard_blocker": false,
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     },
     {
       "agent_id": "worker",
@@ -849,8 +882,9 @@
       "implementation": "All specialist LLM agents (coder, reviewer, repo_fix, motion_3d, security)",
       "notes": "Workers are all agents that receive tasks from the Manager/Orchestrator.",
       "hard_blocker": false,
-      "blocker_reason": "",
-      "static_only_signal": false
+      "runtime_event": true,
+      "dashboard_event": true,
+      "output_contract": true
     }
   ]
 }

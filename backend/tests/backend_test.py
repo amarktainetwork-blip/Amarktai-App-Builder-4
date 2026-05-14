@@ -1144,6 +1144,61 @@ async def test_reviewer_invalid_json_is_non_fatal_if_files_present():
     assert proj.get("status") == "ready", f"Expected ready, got {proj.get('status')}"
 
 
+@pytest.mark.asyncio
+async def test_premium_reviewer_invalid_json_blocks_ready_state():
+    """Premium builds must fail closed when Reviewer cannot produce valid audit JSON."""
+    db, proj, files, events, messages = _make_db()
+    proj["quality_tier"] = "premium"
+    call_count = [0]
+    responses = [
+        _PLANNER_RESP,
+        {"summary": "App", "audience": "users", "core_features": ["home"], "requirements_md": "# Reqs"},
+        {"tech_stack": {"frontend": "HTML", "styling": "CSS"}, "file_plan": []},
+        {"files": [
+            {"path": "index.html", "language": "html", "content": "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body><main>Hello</main></body></html>"},
+            {"path": "styles.css", "language": "css", "content": "body{color:#fff;background:#000}"},
+            {"path": "README.md", "language": "markdown", "content": "# App"},
+            {"path": "amarktai.project.json", "language": "json", "content": '{"name":"App"}'},
+        ], "summary": "Done"},
+        "NOT VALID JSON AT ALL !!!",
+        "ALSO NOT VALID",
+    ]
+
+    async def complete_se(**kwargs):
+        idx = call_count[0]
+        call_count[0] += 1
+        r = responses[idx] if idx < len(responses) else responses[-1]
+        return {
+            "text": json.dumps(r) if not isinstance(r, str) else r,
+            "model_label": "test", "model": "test", "session_id": "s", "usage": {},
+        }
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(side_effect=complete_se)
+    events_received = []
+
+    async def emit(payload):
+        events_received.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    written = []
+
+    async def fake_write(p, c, l="text"):
+        written.append({"path": p, "content": c, "language": l})
+
+    orch.fs.write = fake_write
+    orch.fs.list_full = AsyncMock(side_effect=lambda: list(written))
+    orch.fs.list = AsyncMock(return_value=[])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    from agents.stack_engine import decide_stack
+    await orch.run_full_build("Build a premium landing page", mode="landing_page", stack_decision=decide_stack(mode="landing_page"))
+
+    assert proj.get("status") == "failed"
+    assert proj.get("failed_agent") == "reviewer"
+    assert "Reviewer returned invalid output" in proj.get("error", "")
+
+
 # ---------- PART 5: Stop Build ----------
 
 @pytest.mark.asyncio

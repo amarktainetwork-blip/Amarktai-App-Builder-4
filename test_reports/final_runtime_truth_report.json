@@ -37,7 +37,7 @@
     "production": [
       "Readiness checks Playwright and Lighthouse runtime availability in production",
       "Dashboard-managed secrets remain the runtime truth through _runtime_secret/safe_get_secret",
-      "Verification scripts added for production runtime, repo workbench, and premium build smoke"
+      "Verification scripts added for production runtime, repo workbench, premium build, Idea Builder, and agent matrix checks"
     ]
   },
   "phase4_runtime_wiring": {
@@ -50,11 +50,13 @@
     "verification_scripts": [
       "scripts/verify_production_runtime.sh",
       "scripts/verify_repo_workbench_live.sh",
-      "scripts/verify_premium_build_live.sh"
+      "scripts/verify_premium_build_live.sh",
+      "scripts/verify_idea_builder_live.sh",
+      "scripts/verify_agent_matrix.sh"
     ],
     "tests": {
-      "backend_full": "794 passed, 2 skipped, 1 warning",
-      "frontend_tests": "35 passed",
+      "backend_full": "801 passed, 2 skipped, 1 warning",
+      "frontend_tests": "36 passed",
       "frontend_build": "PASS"
     }
   }

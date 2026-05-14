@@ -113,6 +113,21 @@ test("workspace shows runtime media motion QA evidence", () => {
   expect(content).toMatch(/runtime_qa/);
 });
 
+test("live verification scripts cover runtime, repo, premium, idea, and agent matrix", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.join(__dirname, "../../..");
+  [
+    "scripts/verify_production_runtime.sh",
+    "scripts/verify_repo_workbench_live.sh",
+    "scripts/verify_premium_build_live.sh",
+    "scripts/verify_idea_builder_live.sh",
+    "scripts/verify_agent_matrix.sh",
+  ].forEach((rel) => {
+    expect(fs.existsSync(path.join(root, rel))).toBe(true);
+  });
+});
+
 // ── Workspace navigation ──────────────────────────────────────────────────────
 
 test("workspace has Back to Projects button", () => {
