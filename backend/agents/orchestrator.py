@@ -386,6 +386,8 @@ The Coder model returned output that could not be parsed into files. Rather than
         "summary": "Coder output was malformed, so Amarktai generated a deterministic fallback website with previewable files and a quality report.",
         "warnings": [reason],
         "fallback_used": True,
+        "recovery_status": "fallback_unready",
+        "can_finalize": False,
     }
 
 
@@ -1715,8 +1717,51 @@ class Orchestrator:
         await self._record_message(
             "agent", "coder",
             coder_data.get("summary", "Files generated."),
-            meta={"model": coder["model_label"], "files": [f["path"] for f in generated_files]},
+            meta={
+                "model": coder["model_label"],
+                "files": [f["path"] for f in generated_files],
+                "fallback_used": bool(coder_data.get("fallback_used")),
+                "can_finalize": coder_data.get("can_finalize", True),
+            },
         )
+
+        if coder_data.get("fallback_used"):
+            err = (
+                "Coder fallback generated previewable recovery files, but fallback output "
+                "cannot be marked ready. Retry Coder or repair the build before finalizing."
+            )
+            await self.db.projects.update_one(
+                {"id": self.project_id},
+                {"$set": {
+                    "fallback_used": True,
+                    "can_finalize": False,
+                    "validation_state": {
+                        "status": "failed",
+                        "warnings": coder_data.get("warnings", []),
+                        "errors": [err],
+                        "can_preview": True,
+                        "can_finalize": False,
+                        "failed_agent": "coder",
+                        "fallback_used": True,
+                    },
+                    "updated_at": _now(),
+                }},
+            )
+            await self._record_event(
+                "coder",
+                "failed",
+                err,
+                meta={"fallback_used": True, "recovery_status": coder_data.get("recovery_status")},
+            )
+            await self._record_event(
+                "reviewer",
+                "skipped",
+                "Reviewer skipped because Coder output was fallback recovery, not production-ready source.",
+                meta={"fallback_used": True},
+            )
+            await self._fail_project("coder", err)
+            await self._record_message("system", None, err, meta={"fallback_used": True, "can_finalize": False})
+            return
 
         # Persist pages + save full memory after Coder (Phase 1)
         memory = update_memory_pages(memory, generated_files)
