@@ -2479,6 +2479,94 @@ async def test_build_pipeline_missing_audience_reaches_architect_and_coder(monke
 
 # ── Phase 2/3: Preview Executor ───────────────────────────────────────────────
 
+@pytest.mark.asyncio
+async def test_build_pipeline_malformed_coder_output_uses_fallback_preview(monkeypatch, tmp_path):
+    """Malformed Coder prose must not fail the project when fallback files can be generated."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    monkeypatch.setenv("BUILDS_STORAGE_ROOT", str(tmp_path))
+    db, _project, _files, _events, _messages = _make_db()
+    _project.update({"mode": "website", "quality_tier": "premium", "name": "Amarktai Builder"})
+
+    emitted = []
+
+    async def emit(event):
+        emitted.append(event)
+
+    responses = [
+        json.dumps(_PLANNER_RESP),
+        json.dumps({"summary": "Premium builder site", "audience": "founders", "core_features": ["preview", "quality"], "requirements_md": "# Requirements"}),
+        json.dumps({"tech_stack": {"frontend": "HTML", "backend": "none", "database": "none", "styling": "CSS", "libraries": []}, "file_plan": [{"path": "index.html"}]}),
+        "I will create a premium site, but here is a broken partial response with no usable files.",
+        "not json either",
+        json.dumps({"verdict": "pass", "issues": [], "patched_files": [], "summary": "ok"}),
+        json.dumps(_ADVISOR_RESP),
+    ]
+    idx = [0]
+    calls = []
+    provider = MagicMock()
+
+    async def complete(**kw):
+        calls.append(kw.get("agent"))
+        i = idx[0]
+        idx[0] += 1
+        return {"text": responses[i] if i < len(responses) else responses[-1], "model_label": "test-model", "session_id": "s", "usage": {}}
+
+    provider.complete = AsyncMock(side_effect=complete)
+    orch = Orchestrator(db, provider, "proj1", emit)
+    written = []
+
+    async def fake_write(path, content, lang="text"):
+        written.append({"path": path, "content": content, "language": lang})
+
+    orch.fs.write = fake_write
+    orch.fs.list_full = AsyncMock(side_effect=lambda: list(written))
+    orch.fs.list = AsyncMock(return_value=[])
+    orch.fs.read = AsyncMock(return_value=None)
+
+    from agents.stack_engine import decide_stack
+
+    sd = decide_stack(mode="website", quality_tier="premium")
+    await orch.run_full_build("Create an elite website for Amarktai Builder.", mode="website", stack_decision=sd)
+
+    paths = {item["path"] for item in written}
+    assert "coder" in calls
+    assert "repair" in calls
+    assert _project["status"] == "ready"
+    assert {"index.html", "styles.css", "script.js", "quality_report.md"}.issubset(paths)
+    assert _project["preview_manifest"]["status"] == "ready"
+    assert _project["quality_report"]["score"] >= 0
+    assert "agent_raw_responses.coder" in _project
+    assert any(evt["agent"] == "coder" and evt["status"] == "completed" for evt in _events)
+    assert not _project.get("error")
+
+
+@pytest.mark.asyncio
+async def test_run_agent_blocks_accepts_markdown_fenced_json():
+    """Coder may return JSON inside markdown fences; it should parse as JSON, not as package.json."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    db, _project, _files, _events, _messages = _make_db()
+    provider = MagicMock()
+    provider.complete = AsyncMock(return_value={
+        "text": "```json\n{\"files\":[{\"path\":\"index.html\",\"content\":\"<html><body>Ready</body></html>\",\"language\":\"html\"}],\"summary\":\"ok\"}\n```",
+        "model_label": "test-model",
+        "session_id": "s",
+        "usage": {},
+    })
+    emitted = []
+
+    async def emit(event):
+        emitted.append(event)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    result = await orch._run_agent_blocks("coder", "system", "{}")
+
+    assert result["data"]["files"][0]["path"] == "index.html"
+    assert result["data"]["summary"] == "ok"
+    assert "agent_raw_responses.coder" not in _project
+
+
 def test_preview_executor_static_returns_can_preview():
     """Static repo with index.html must return canPreview=True with inlined HTML."""
     from agents.preview_executor import execute_preview

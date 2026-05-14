@@ -578,6 +578,7 @@ def extract_files_from_model_output(text: str) -> tuple[list[dict], list[str], s
     warnings: list[str] = []
     files: list[dict] = []
     summary = ""
+    used_default_paths: set[str] = set()
 
     def add(path: str, content: str, language: str | None = None) -> None:
         try:
@@ -614,6 +615,17 @@ def extract_files_from_model_output(text: str) -> tuple[list[dict], list[str], s
     except Exception:
         pass
 
+    default_path_by_lang = {
+        "html": "index.html",
+        "htm": "index.html",
+        "css": "styles.css",
+        "javascript": "script.js",
+        "js": "script.js",
+        "jsx": "src/App.jsx",
+        "markdown": "README.md",
+        "md": "README.md",
+    }
+
     fence = re.compile(r"```(?P<lang>[A-Za-z0-9_.+-]*)[ \t]*(?P<path>[^\n`]*)\n(?P<content>[\s\S]*?)```", re.MULTILINE)
     for match in fence.finditer(text or ""):
         lang = (match.group("lang") or "").strip()
@@ -627,8 +639,21 @@ def extract_files_from_model_output(text: str) -> tuple[list[dict], list[str], s
                 if m:
                     path = m.group(1)
                     break
+        if not path:
+            default_path = default_path_by_lang.get(lang.lower())
+            content = match.group("content")
+            if default_path and default_path not in used_default_paths:
+                if default_path == "index.html" and "<html" not in content.lower() and "<!doctype" not in content.lower():
+                    pass
+                else:
+                    path = default_path
+                    used_default_paths.add(default_path)
         if path:
             add(path, match.group("content"), lang or None)
+    if not files and "```json" not in (text or "").lower():
+        html_match = re.search(r"(<!doctype\s+html[\s\S]*|<html[\s\S]*)", text or "", re.IGNORECASE)
+        if html_match:
+            add("index.html", html_match.group(1))
     if not files and (text or "").strip():
         warnings.append("No structured files found in model output.")
     return files, warnings, summary

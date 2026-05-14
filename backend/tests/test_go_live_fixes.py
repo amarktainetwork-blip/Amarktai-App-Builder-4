@@ -111,3 +111,28 @@ def test_quality_gate_catches_placeholder_and_dead_cta(tmp_path):
     assert "placeholders" in warning_checks
     assert "dead_ctas" in warning_checks
     assert (tmp_path / "quality-report.json").exists()
+
+
+def test_extract_files_from_plain_code_fences_without_paths():
+    from agents.build_contract import extract_files_from_model_output
+
+    raw = """
+Here are the files:
+
+```html
+<!doctype html><html><head><title>Amarktai</title></head><body><h1>Amarktai Builder</h1></body></html>
+```
+
+```css
+body { margin: 0; font-family: system-ui; }
+```
+
+```js
+document.documentElement.dataset.ready = "true";
+```
+"""
+    files, warnings, _summary = extract_files_from_model_output(raw)
+    paths = {item["path"] for item in files}
+
+    assert {"index.html", "styles.css", "script.js"}.issubset(paths)
+    assert not any("No structured files" in warning for warning in warnings)
