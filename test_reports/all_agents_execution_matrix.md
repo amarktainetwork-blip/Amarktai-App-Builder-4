@@ -1,48 +1,57 @@
 # All Agents Execution Matrix
 Generated: 2026-05-14
 
-## Implemented in this PR
-- GitHub repo listing endpoint using dashboard-managed GITHUB_PAT.
-- GitHub branch listing endpoint with owner/repo validation.
-- Repo Workbench dashboard browse/search/select/branch clone flow.
-- Build-storage PR creation guard requiring a verified branch diff.
-- GitHub PR URL persistence to project and build workspace metadata.
-- Safe command runner allowlist extended for git status/diff/log/branch and env-gated docker compose config/build.
-- Frontend package dependencies for GSAP, Three.js, React Three Fiber, axe-core, Playwright test, and Lighthouse.
-- Backend Playwright dependency and Docker Chromium install step.
+Branch: `fix/final-runtime-agents-production-completion`
 
-## Hard Blockers Still Present
-- `accessibility`: registry still describes static or future runtime behavior; full Playwright/axe/Lighthouse wiring must replace that implementation before claiming complete runtime QA.
-- `visual_qa`: registry still describes static or future runtime behavior; full Playwright/axe/Lighthouse wiring must replace that implementation before claiming complete runtime QA.
+## Runtime Status
+- Registered agents audited: 28.
+- Active registry entries: 28.
+- Hard blockers in this implementation report: 0.
+- Silent skips are not treated as success; conditional skips must emit an agent event with the exact reason.
+
+## Implemented Runtime Wiring
+- Runtime QA now executes through `runtime_qa_service.run_runtime_qa()` with Playwright Chromium, axe-core browser injection, screenshots, console checks, broken link/media checks, and Lighthouse/browser performance evidence.
+- Media Director now uses GenX/Qwen image generation when configured and Pixabay image/video fallback, persists real assets under build storage, writes `media_manifest.json`, and injects assets into generated pages.
+- Motion/3D runtime patches generated files, writes `motion_manifest.json`, supports reduced motion, and exposes dashboard evidence.
+- Premium gates fail closed on missing runtime QA, missing media, missing motion, malformed Reviewer output, placeholder content, broken assets, template contamination, and fallback-only output.
+- Repo Workbench supports repo/branch selection, import, analysis, workflow patch, allowed command execution, diff evidence, PR gating, and PR URL persistence.
+- Idea Builder persists conversations, finalizes briefs, and hands mode/tier/media/session context into New Build.
 
 ## Agent Table
-| Agent | Status | Prompt | Called From | Tools | Hard Blocker |
-| --- | --- | --- | --- | --- | --- |
-| `accessibility` | active | - | _validate_contract (via quality_validator._score_accessibility()) | axe_core_static, aria_checker, contrast_validator, keyboard_nav_checker, semantic_html_validator, label_checker | YES |
-| `backend_coder` | active | BACKEND_CODER_PROMPT | _run_build_pipeline (full_stack/api_service mode) | fastapi, express, jwt, bcrypt, prisma, postgres | no |
-| `capability_truth` | active | CAPABILITY_TRUTH_PROMPT | Pre-build truth check, GET /api/capabilities/status | capability_registry_reader, frontend_claim_auditor, mismatch_reporter, ui_action_generator | no |
-| `component_librarian` | active | - | _run_build_pipeline (post-coder component audit) | react_component_scanner, html_section_scanner, css_component_scanner, component_registry | no |
-| `creative_director` | active | - | _run_build_pipeline | design_engine, design_dna, brand_palette, typography_system, layout_archetypes, diversity_checker | no |
-| `data_architect` | active | DATA_ARCHITECT_PROMPT | _run_build_pipeline (full_stack/api_service/dashboard modes) | prisma_schema_generator, sqlalchemy_model_generator, mongoose_schema_generator, auth_schema_generator, api_contract_generator, migration_planner | no |
-| `deployment` | active | - | _run_build_pipeline (final step), POST /api/deploy/validate | docker_validator, env_template_checker, build_script_validator, sandbox_preview, build_log_streaming, deploy_instruction_generator | no |
-| `documentation` | active | DOCUMENTATION_PROMPT | _run_build_pipeline (post-coder, always) | readme_generator, api_doc_generator, setup_guide_generator, env_var_documenter | no |
-| `export_agent` | active | EXPORT_PROMPT | POST /api/export, POST /api/projects/{id}/download | file_packager, zip_generator, manifest_builder, deploy_target_advisor | no |
-| `frontend_coder` | active | CODER_PROMPT | _run_build_pipeline | react, vite, nextjs, tailwind, framer_motion, lucide_icons | no |
-| `logo_agent` | active | - | POST /api/logo, shared_context in build pipeline | svg_generation, genx_image_generation, media_library, favicon_generation, brand_colors | no |
-| `manager` | active | BUILD_PLANNER_PROMPT | _run_build_pipeline | project_memory, capability_registry, task_checklist, worker_assignment, completion_guard | no |
-| `media_director` | active | - | _run_build_pipeline (media_manifest in shared_context) | pixabay_images, pixabay_videos, genx_image_generation, qwen_image_generation, svg_generation, media_library | no |
-| `memory_curator` | active | MEMORY_CURATOR_PROMPT | Background memory curation after each iteration | memory_cleaner, memory_compressor, decision_deduplicator, history_summarizer | no |
-| `monitoring` | active | - | _run_build_pipeline (post-coder, backend builds) | health_endpoint_checker, logging_detector, rate_limit_checker, cors_validator, error_telemetry_checker | no |
-| `motion_3d` | active | MOTION_3D_PROMPT | _run_build_pipeline (when 3D/animation detected in prompt) | three_js, framer_motion, gsap, particle_systems, css_animations, video_backgrounds | no |
-| `product_strategist` | active | SCOUT_PROMPT | _run_build_pipeline | web_search, project_memory, requirements_extraction, feature_planning, audience_detection | no |
-| `prompt_optimizer` | active | - | Pre-build prompt analysis (non-blocking) | prompt_quality_analyzer, vague_phrase_detector, requirement_extractor, context_enricher | no |
-| `qa_agent` | active | REVIEWER_PROMPT | _run_build_pipeline, run_retry | html_validator, css_validator, link_checker, coverage_score, build_contract_validator | no |
-| `repo_engineer` | active | REPO_FIX_PROMPT | _run_repo_fix, repo_repair endpoint | github_pat, repo_clone, stack_detection, diff_generation, pr_creation, repair_engine | no |
-| `runtime_engineer` | active | RUNTIME_ENGINEER_PROMPT | POST /api/runtime/health, _run_build_pipeline (post-coder) | build_log_analyzer, entry_point_validator, preview_url_checker, container_health_check, runtime_error_detector | no |
-| `security` | active | SECURITY_PROMPT | _run_build_pipeline (when auth_required or full_stack) | secret_scanner, auth_pattern_checker, dependency_audit, xss_detector, injection_checker | no |
-| `seo_performance` | active | - | _validate_contract (via quality_validator._score_seo() + _score_performance()) | meta_tag_checker, og_tag_validator, twitter_card_validator, heading_hierarchy_checker, image_optimization_checker, lazy_loading_checker | no |
-| `tool_integration` | active | - | _run_build_pipeline (tool audit pass) | env_var_checker, api_key_validator, tool_detector, integration_registry, connector_library | no |
-| `ui_designer` | active | PREMIUM_SECTION_LIBRARY | _run_build_pipeline | design_tokens, responsive_breakpoints, component_library, section_templates, spacing_system, typography_scale | no |
-| `ux_architect` | active | ARCHITECT_PROMPT | _run_build_pipeline | stack_engine, file_plan, route_design, component_inventory, tech_stack_selection | no |
-| `visual_qa` | active | VISUAL_QA_PROMPT | _run_build_pipeline (post-build gate) | layout_checker, typography_validator, contrast_checker, responsive_tester, quality_scorer | YES |
-| `worker` | active | - | Orchestrator via _run_agent() | all_agent_tools | no |
+| Agent | Runtime call site | Output/evidence | Blocks when required |
+| --- | --- | --- | --- |
+| `manager` | build planner and completion gate | build plan, blocker list, `can_finalize` evidence | yes |
+| `prompt_optimizer` | pre-build prompt analysis | prompt quality/enriched context | conditional |
+| `product_strategist` / `scout` | `_run_build_pipeline` | requirements, audience, features, mode context | yes |
+| `creative_director` | `_run_build_pipeline` | design direction and creative blueprint | yes for premium |
+| `ux_architect` / `architect` | `_run_build_pipeline` | file plan, stack plan, preview strategy | yes |
+| `ui_designer` | design blueprint/section library | design tokens and layout requirements | yes for premium |
+| `frontend_coder` | `_run_agent_blocks("coder")` | generated app files | yes |
+| `backend_coder` | full-stack/API/dashboard activation | API/auth/db/env files | yes when mode requires backend |
+| `data_architect` | full-stack/API/dashboard activation | schema/API contracts | yes when data layer required |
+| `tool_integration` | integration audit pass | env/tool requirements | conditional |
+| `component_librarian` | post-coder component audit | component evidence | conditional |
+| `media_director` | orchestrator media runtime + `/media-runtime` | persisted assets, `media_manifest.json`, dashboard media evidence | yes for premium/media builds |
+| `logo_agent` | logo/media routes and shared context | logo/favicon/brand evidence | conditional |
+| `motion_3d` | orchestrator deterministic motion runtime | patched files, `motion_manifest.json`, dashboard motion evidence | yes for premium/motion builds |
+| `qa_agent` / `reviewer` | Reviewer audit pass and repair loop | compact JSON audit, issues, surgical patches | yes for premium |
+| `visual_qa` | runtime QA screenshots and static visual event | screenshots, console/link/media results | yes for premium |
+| `accessibility` | runtime QA axe scan + static scoring | axe violations, accessibility score/report | yes for premium |
+| `seo_performance` | quality validator + Lighthouse/performance report | SEO/performance scores and blockers | yes for premium |
+| `security` | auth/full-stack security review | security report, high/critical violations | yes when security-required |
+| `runtime_engineer` | runtime QA, health, preview validation | runtime report and preview checks | yes for premium |
+| `deployment` | deployment validation step | deployment checklist/errors | conditional |
+| `documentation` | documentation generator/audit | README/setup/env evidence | conditional |
+| `repo_engineer` | repo fix/workbench workflow | repo profile, patch plan, diffs, command logs | yes for repo workflows |
+| `repair_agent` | validation repair loop | repair attempts, patched files, failure reasons | yes when validation fails |
+| `test_runner` / command runner | build storage command routes | allowed command logs and statuses | yes for repo PR workflow |
+| `github_pr_agent` | finalize/open PR route | branch diff, commit, push, PR URL | yes for PR flow |
+| `export_agent` | export/download routes | package manifest/download archive | conditional |
+| `memory_curator` | memory update/curation | build memory and decisions | conditional |
+| `advisor` | post-ready advisor | product recommendations after valid completion | no, runs after gates pass |
+| `capability_truth` | readiness/capabilities endpoints | provider/model truth and dashboard labels | yes for build start gates |
+
+## Verification
+- `python -m pytest -q`: 801 passed, 2 skipped.
+- `cd frontend && npm.cmd test -- --watchAll=false`: 36 passed.
+- `cd frontend && npm.cmd run build`: compiled successfully.
