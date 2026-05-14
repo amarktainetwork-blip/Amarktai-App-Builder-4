@@ -74,6 +74,45 @@ test("dashboard has top navigation routes", () => {
   expect(content).toMatch(/Repo Workbench/);
 });
 
+test("repo workbench exposes GitHub browse and branch selection", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/dashboard/RepoWorkbenchPage.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/Load repos/);
+  expect(content).toMatch(/githubBranches/);
+  expect(content).toMatch(/clone-selected-repo-btn/);
+  expect(content).toMatch(/github-branch-select/);
+});
+
+test("frontend API has GitHub workbench and git PR clients", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../lib/amk-api.js"),
+    "utf8"
+  );
+  expect(content).toMatch(/githubRepos/);
+  expect(content).toMatch(/githubBranches/);
+  expect(content).toMatch(/gitOpenPR/);
+  expect(content).toMatch(/repoWorkflowRun/);
+  expect(content).toMatch(/runtimeQA/);
+  expect(content).toMatch(/mediaRuntime/);
+});
+
+test("workspace shows runtime media motion QA evidence", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/RuntimeEvidencePanel/);
+  expect(content).toMatch(/runtime-evidence-panel/);
+  expect(content).toMatch(/motion_manifest/);
+  expect(content).toMatch(/media_runtime/);
+  expect(content).toMatch(/runtime_qa/);
+});
+
 // ── Workspace navigation ──────────────────────────────────────────────────────
 
 test("workspace has Back to Projects button", () => {

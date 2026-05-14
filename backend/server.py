@@ -81,6 +81,7 @@ from app.services.build_storage_service import (
     detect_and_save_stack,
 )
 from app.services import git_workspace_service as _git_svc
+from app.services import github_repo_service as _github_repo_svc
 from app.services.frontend_detection_service import detect_frontend, list_project_files
 from app.services.command_runner_service import (
     run_command, run_install, run_build, run_tests, get_logs as get_runner_logs,
@@ -90,6 +91,8 @@ from app.services import live_probe_service as _probe_svc
 from app.services import genx_model_sync as _genx_sync
 from app.services.model_router import route_task, get_router_status, TASK_ROUTING
 from app.services.quality_gate_service import run_quality_gate
+from app.services.runtime_qa_service import run_runtime_qa
+from app.services.media_runtime_service import execute_media_plan
 from app.services.idea_builder_service import (
     IDEA_BUILDER_SYSTEM_PROMPT,
     compose_final_prompt,
@@ -979,6 +982,17 @@ async def readiness() -> dict:
         meta = providers.get(provider, {})
         if not meta.get("configured"):
             await add(env_key, "WARN", meta.get("reason") or f"{env_key} not configured.", "warning")
+
+    try:
+        import shutil
+        from playwright.sync_api import sync_playwright  # noqa: F401
+        await add("Playwright runtime", "PASS", "Playwright Python package is importable.")
+        if shutil.which("lighthouse"):
+            await add("Lighthouse runtime", "PASS", "Lighthouse binary is available on PATH.")
+        else:
+            await add("Lighthouse runtime", "FAIL", "Install Lighthouse in the backend container PATH for production runtime QA.", "blocker")
+    except Exception as exc:
+        await add("Playwright runtime", "FAIL", f"Playwright runtime unavailable: {type(exc).__name__}", "blocker")
 
     try:
         clean, detail = await _forbidden_source_check()
@@ -2646,6 +2660,34 @@ async def github_status() -> dict:
         return {"configured": True, "valid": False, "detail": str(exc)}
 
 
+@secured.get("/integrations/github/repos")
+async def github_repositories(
+    visibility: str = Query("all", pattern="^(all|public|private)$"),
+    per_page: int = Query(100, ge=1, le=100),
+) -> dict:
+    """List repositories visible to the configured GitHub PAT for dashboard import."""
+    pat = await _runtime_secret("GITHUB_PAT")
+    return await _github_repo_svc.list_repositories(
+        pat or "",
+        visibility=visibility,
+        per_page=per_page,
+    )
+
+
+@secured.get("/integrations/github/repos/{owner}/{repo}/branches")
+async def github_repository_branches(
+    owner: str,
+    repo: str,
+    per_page: int = Query(100, ge=1, le=100),
+) -> dict:
+    """List branches for a selected GitHub repository."""
+    pat = await _runtime_secret("GITHUB_PAT")
+    try:
+        return await _github_repo_svc.list_branches(pat or "", owner, repo, per_page=per_page)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @admin_api.get("/users")
 async def admin_list_users() -> list[dict]:
     docs = await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(500)
@@ -3881,6 +3923,7 @@ class GitPRBody(BaseModel):
     base_branch: str = "main"
     title: str = "Amarktai Builder: automated changes"
     body: str = ""
+    allow_failing_pr: bool = False
 
 
 @secured.post("/builds/import-git")
@@ -3974,6 +4017,33 @@ async def builds_git_open_pr(project_id: str, body: GitPRBody, claims: dict = De
     """Open a GitHub pull request."""
     github_pat = await _runtime_secret("GITHUB_PAT")
     try:
+        diff = _git_svc.get_branch_diff(
+            owner=body.owner,
+            repo=body.repo,
+            branch=body.head_branch,
+            base_branch=body.base_branch,
+        )
+        if not diff.get("ok"):
+            raise HTTPException(400, diff.get("error", "Could not verify branch diff before PR creation"))
+        if not diff.get("has_changes"):
+            raise HTTPException(400, "No branch diff found. Refusing to create an empty GitHub PR.")
+        matched_workspace = next((
+            workspace for workspace in list_workspaces()
+            if workspace.get("github_owner") == body.owner
+            and workspace.get("github_repo") == body.repo
+            and workspace.get("branch") == body.head_branch
+        ), None)
+        if matched_workspace and not body.allow_failing_pr:
+            failed_checks = [
+                name for name in ("last_test_status", "last_build_status", "last_quality_status")
+                if str(matched_workspace.get(name, "")).lower() in {"failed", "blocked", "error"}
+            ]
+            if failed_checks:
+                raise HTTPException(
+                    409,
+                    f"Refusing to create PR because checks failed: {', '.join(failed_checks)}. "
+                    "Set allow_failing_pr=true only for an explicit draft/failing PR flow.",
+                )
         result = _git_svc.open_pull_request(
             owner=body.owner,
             repo=body.repo,
@@ -3985,11 +4055,33 @@ async def builds_git_open_pr(project_id: str, body: GitPRBody, claims: dict = De
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(500, f"Open PR failed: {exc}")
     if not result.get("ok"):
         raise HTTPException(400, result.get("error", "PR creation failed"))
-    return result
+    pr_url = result.get("pr_url") or ""
+    if pr_url:
+        await db.projects.update_one(
+            {"id": project_id},
+            {"$set": {"github_pr_url": pr_url, "updated_at": _now()}},
+        )
+        for workspace in list_workspaces():
+            if (
+                workspace.get("github_owner") == body.owner
+                and workspace.get("github_repo") == body.repo
+                and workspace.get("branch") == body.head_branch
+            ):
+                try:
+                    update_workspace_metadata(Path(workspace["local_path"]), {
+                        "github_pr_url": pr_url,
+                        "last_deploy_status": "github_pr_opened",
+                    })
+                except Exception as exc:
+                    logger.warning("Could not persist GitHub PR URL to workspace metadata: %s", exc)
+                break
+    return {**result, "diff": diff}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -4169,6 +4261,16 @@ class WorkspaceVersionBody(BaseModel):
     workspace_path: str = Field(min_length=1, max_length=1024)
     label: str = ""
     notes: str = ""
+
+
+class RepoWorkflowBody(BaseModel):
+    workspace_path: str = Field(min_length=1, max_length=1024)
+    prompt: str = Field(min_length=1, max_length=10000)
+    package_manager: str = "npm"
+    auto_apply: bool = False
+    run_install: bool = False
+    run_build: bool = True
+    run_tests: bool = True
 
 
 @secured.post("/builds/{project_id}/continue")
@@ -4384,15 +4486,85 @@ async def models_router_status() -> dict:
 
 class QualityGateBody(BaseModel):
     workspace_path: str = Field(min_length=1, max_length=1024)
+    strict: bool = False
+    require_runtime: bool = False
+    require_media: bool = False
+    require_motion: bool = False
 
 
 @secured.post("/builds/{project_id}/quality-gate")
 async def builds_quality_gate(project_id: str, body: QualityGateBody, claims: dict = Depends(require_user)) -> dict:
     """Run the premium quality gate on a workspace."""
     try:
-        result = run_quality_gate(body.workspace_path)
+        result = run_quality_gate(
+            body.workspace_path,
+            strict=body.strict,
+            require_runtime=body.require_runtime,
+            require_media=body.require_media,
+            require_motion=body.require_motion,
+        )
     except Exception as exc:
         raise HTTPException(500, f"Quality gate failed: {exc}")
+    return result
+
+
+@secured.post("/builds/{project_id}/repo-workflow/run")
+async def builds_repo_workflow_run(project_id: str, body: RepoWorkflowBody, claims: dict = Depends(require_user)) -> dict:
+    """Analyze, plan, patch/diff, run checks, and persist repo workflow evidence."""
+    ws_info = load_build_workspace(body.workspace_path)
+    if not ws_info.get("ok"):
+        raise HTTPException(404, ws_info.get("error", "Workspace not found"))
+    workspace = Path(body.workspace_path).resolve()
+    version = create_workspace_version(workspace, label="pre-repo-workflow", notes=body.prompt[:500])
+    stack_info = detect_workspace_stack(workspace)
+    missing_info = detect_missing_pieces(workspace, stack_info.get("primary", "unknown"))
+    plan = generate_completion_plan(ws_info, stack_info, missing_info, body.prompt)
+    change = {
+        "path": "AMARKTAI_REPO_WORKFLOW.md",
+        "action": "modify" if (workspace / "AMARKTAI_REPO_WORKFLOW.md").exists() else "create",
+        "content": (
+            "# Amarktai Repo Workflow\n\n"
+            f"Prompt: {body.prompt}\n\n"
+            f"Stack: {json.dumps(stack_info, indent=2)}\n\n"
+            f"Plan: {json.dumps(plan, indent=2)}\n"
+        ),
+    }
+    repair = apply_repair(workspace, [change], auto_apply=body.auto_apply)
+    install_result = run_install(workspace, body.package_manager, project_id=project_id) if body.run_install else {"ok": None, "skipped": True}
+    build_result = run_build(workspace, body.package_manager, project_id=project_id) if body.run_build else {"ok": None, "skipped": True}
+    test_result = run_tests(workspace, body.package_manager, project_id=project_id) if body.run_tests else {"ok": None, "skipped": True}
+    quality = run_quality_gate(workspace)
+    status = _git_svc.get_git_status(
+        ws_info.get("owner") or ws_info.get("meta", {}).get("owner", ""),
+        ws_info.get("repo") or ws_info.get("meta", {}).get("repo", ""),
+        ws_info.get("branch") or ws_info.get("meta", {}).get("branch", "main"),
+    ) if ws_info.get("owner") or ws_info.get("meta", {}).get("owner") else {"ok": False, "error": "Not a git workspace metadata shape"}
+    last_build_status = "passed" if build_result.get("ok") in {True, None} else "failed"
+    last_test_status = "passed" if test_result.get("ok") in {True, None} else "failed"
+    last_quality_status = "passed" if quality.get("pass") else "failed"
+    update_workspace_metadata(workspace, {
+        "last_build_status": last_build_status,
+        "last_test_status": last_test_status,
+        "last_quality_status": last_quality_status,
+        "repo_workflow_last_prompt": body.prompt[:1000],
+    })
+    result = {
+        "ok": True,
+        "workspace": ws_info,
+        "version": version,
+        "stack": stack_info,
+        "missing": missing_info,
+        "plan": plan,
+        "repair": repair,
+        "install": install_result,
+        "build": build_result,
+        "tests": test_result,
+        "quality": quality,
+        "git_status": status,
+        "can_open_pr": bool(status.get("is_dirty")) and last_build_status == "passed" and last_test_status == "passed" and last_quality_status == "passed",
+        "generated_at": _now(),
+    }
+    (workspace / "repo_workflow_report.json").write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
     return result
 
 
@@ -4407,6 +4579,52 @@ async def builds_quality_report(
         result = run_quality_gate(workspace_path)
     except Exception as exc:
         raise HTTPException(500, f"Quality report failed: {exc}")
+    return result
+
+
+@secured.post("/builds/{project_id}/runtime-qa")
+async def builds_runtime_qa(project_id: str, body: QualityGateBody, claims: dict = Depends(require_user)) -> dict:
+    """Execute browser-backed Playwright/axe/Lighthouse QA for a workspace."""
+    try:
+        result = run_runtime_qa(body.workspace_path)
+    except Exception as exc:
+        raise HTTPException(500, f"Runtime QA failed: {exc}")
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$set": {"runtime_qa": result, "updated_at": _now()}},
+    )
+    return result
+
+
+class BuildMediaRuntimeBody(BaseModel):
+    workspace_path: str = Field(min_length=1, max_length=1024)
+    prompt: str = Field(default="", max_length=10000)
+    sections: list[str] = Field(default_factory=list)
+
+
+@secured.post("/builds/{project_id}/media-runtime")
+async def builds_media_runtime(project_id: str, body: BuildMediaRuntimeBody, claims: dict = Depends(require_user)) -> dict:
+    """Generate or fetch real media assets for a workspace and persist media_manifest.json."""
+    try:
+        result = await execute_media_plan(
+            body.workspace_path,
+            project_id=project_id,
+            prompt=body.prompt or "Amarktai Builder production website",
+            sections=body.sections,
+            genx_api_key=(await _runtime_secret("GENX_API_KEY")) or "",
+            genx_base_url=(await _runtime_secret("GENX_BASE_URL")) or "https://query.genx.sh/v1",
+            genx_image_model=(await _runtime_secret("GENX_MODEL_IMAGE")) or os.environ.get("GENX_MODEL_IMAGE", ""),
+            qwen_api_key=(await _runtime_secret("QWEN_API_KEY")) or "",
+            qwen_base_url=(await _runtime_secret("QWEN_BASE_URL")) or "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            qwen_image_model=(await _runtime_secret("QWEN_MODEL_IMAGE")) or "",
+            pixabay_api_key=(await _runtime_secret("PIXABAY_API_KEY")) or "",
+        )
+    except Exception as exc:
+        raise HTTPException(500, f"Media runtime failed: {exc}")
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$set": {"media_runtime": result, "media_manifest": result, "updated_at": _now()}},
+    )
     return result
 
 

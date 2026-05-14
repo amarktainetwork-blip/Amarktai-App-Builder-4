@@ -1,0 +1,856 @@
+{
+  "generated_at": "2026-05-14",
+  "branch": "fix/complete-all-agents-github-runtime-production",
+  "summary": {
+    "registered_agents": 28,
+    "registry_active": 28,
+    "hard_blockers": [
+      "accessibility",
+      "visual_qa"
+    ]
+  },
+  "implemented_this_pr": [
+    "GitHub repo listing endpoint using dashboard-managed GITHUB_PAT.",
+    "GitHub branch listing endpoint with owner/repo validation.",
+    "Repo Workbench dashboard browse/search/select/branch clone flow.",
+    "Build-storage PR creation guard requiring a verified branch diff.",
+    "GitHub PR URL persistence to project and build workspace metadata.",
+    "Safe command runner allowlist extended for git status/diff/log/branch and env-gated docker compose config/build.",
+    "Frontend package dependencies for GSAP, Three.js, React Three Fiber, axe-core, Playwright test, and Lighthouse.",
+    "Backend Playwright dependency and Docker Chromium install step."
+  ],
+  "agents": [
+    {
+      "agent_id": "accessibility",
+      "name": "Accessibility Agent",
+      "status": "active",
+      "prompt_key": null,
+      "called_from": [
+        "_validate_contract (via quality_validator._score_accessibility())"
+      ],
+      "tools": [
+        "axe_core_static",
+        "aria_checker",
+        "contrast_validator",
+        "keyboard_nav_checker",
+        "semantic_html_validator",
+        "label_checker",
+        "reduced_motion_checker"
+      ],
+      "outputs": [
+        "accessibility_score",
+        "violations",
+        "suggestions",
+        "wcag_aa_pass"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "quality_validator._score_accessibility() \u2014 enhanced axe-core-like static analysis: lang attr, headings, alt text, ARIA, focus states, skip links, landmarks, form labels, contrast indicators",
+      "notes": "Fully activated in Phase 2B with enhanced static checks. Full Playwright/axe-core integration requires runtime container (Phase 2C).",
+      "hard_blocker": true,
+      "blocker_reason": "Registry still documents this as static/future-runtime work, not full browser-backed execution.",
+      "static_only_signal": true
+    },
+    {
+      "agent_id": "backend_coder",
+      "name": "Backend Coder Agent",
+      "status": "active",
+      "prompt_key": "BACKEND_CODER_PROMPT",
+      "called_from": [
+        "_run_build_pipeline (full_stack/api_service mode)"
+      ],
+      "tools": [
+        "fastapi",
+        "express",
+        "jwt",
+        "bcrypt",
+        "prisma",
+        "postgres",
+        "mongodb",
+        "docker",
+        "env_templates"
+      ],
+      "outputs": [
+        "api_files",
+        "auth_files",
+        "db_models",
+        "env_example",
+        "docker_compose"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "BACKEND_CODER_PROMPT (via coder in full-stack mode)",
+      "notes": "Called when mode is full_stack, api_service, or dashboard with auth.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "capability_truth",
+      "name": "Capability Truth Agent",
+      "status": "active",
+      "prompt_key": "CAPABILITY_TRUTH_PROMPT",
+      "called_from": [
+        "Pre-build truth check",
+        "GET /api/capabilities/status"
+      ],
+      "tools": [
+        "capability_registry_reader",
+        "frontend_claim_auditor",
+        "mismatch_reporter",
+        "ui_action_generator"
+      ],
+      "outputs": [
+        "all_claims_truthful",
+        "verified_claims",
+        "false_claims",
+        "capability_snapshot"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "extended_agents.verify_capability_claims() + CAPABILITY_TRUTH_PROMPT",
+      "notes": "Added in Phase 2B. Critical for honest platform operation.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "component_librarian",
+      "name": "Component Librarian Agent",
+      "status": "active",
+      "prompt_key": null,
+      "called_from": [
+        "_run_build_pipeline (post-coder component audit)"
+      ],
+      "tools": [
+        "react_component_scanner",
+        "html_section_scanner",
+        "css_component_scanner",
+        "component_registry"
+      ],
+      "outputs": [
+        "component_count",
+        "components",
+        "react_components",
+        "html_sections",
+        "css_components"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "extended_agents.register_components()",
+      "notes": "Added in Phase 2B. Builds a reusable component registry per project.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "creative_director",
+      "name": "Creative Director Agent",
+      "status": "active",
+      "prompt_key": null,
+      "called_from": [
+        "_run_build_pipeline"
+      ],
+      "tools": [
+        "design_engine",
+        "design_dna",
+        "brand_palette",
+        "typography_system",
+        "layout_archetypes",
+        "diversity_checker",
+        "section_archetype_library",
+        "premium_layout_registry",
+        "typography_pair_registry",
+        "responsive_spacing_system"
+      ],
+      "outputs": [
+        "design_blueprint",
+        "design_tokens",
+        "coder_instructions",
+        "font_pair",
+        "section_plan",
+        "animation_tone"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "creative_director.run_creative_director() \u2014 deterministic blueprint engine with diversity checking, brand palette selection, section archetype enforcement, and typography pair system",
+      "notes": "Deterministic blueprint engine. Enforces premium section archetypes and typography hierarchy. Prevents purple/teal AI gradient defaults.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "data_architect",
+      "name": "Data Architect Agent",
+      "status": "active",
+      "prompt_key": "DATA_ARCHITECT_PROMPT",
+      "called_from": [
+        "_run_build_pipeline (full_stack/api_service/dashboard modes)"
+      ],
+      "tools": [
+        "prisma_schema_generator",
+        "sqlalchemy_model_generator",
+        "mongoose_schema_generator",
+        "auth_schema_generator",
+        "api_contract_generator",
+        "migration_planner"
+      ],
+      "outputs": [
+        "database",
+        "orm",
+        "models",
+        "auth_strategy",
+        "api_contracts",
+        "schema_files",
+        "env_vars_needed"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "extended_agents.analyze_data_architecture() + DATA_ARCHITECT_PROMPT",
+      "notes": "Added in Phase 2B. Called for full_stack, api_service, dashboard builds.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "deployment",
+      "name": "Deployment Agent",
+      "status": "active",
+      "prompt_key": null,
+      "called_from": [
+        "_run_build_pipeline (final step)",
+        "POST /api/deploy/validate"
+      ],
+      "tools": [
+        "docker_validator",
+        "env_template_checker",
+        "build_script_validator",
+        "sandbox_preview",
+        "build_log_streaming",
+        "deploy_instruction_generator",
+        "health_check_verifier",
+        "rollback_coordinator"
+      ],
+      "outputs": [
+        "passed",
+        "deploy_checklist",
+        "warnings",
+        "errors",
+        "deployment_instructions",
+        "rollback_guidance",
+        "preview_readiness"
+      ],
+      "blocks_on_failure": true,
+      "implementation": "deployment_agent.run_deployment_validation() \u2014 full validation: Dockerfile, docker-compose, .env.example, build scripts, preview readiness, health checks, deployment instructions",
+      "notes": "Fully activated in Phase 2B. Docker/sandbox preview is Phase 2C runtime.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "documentation",
+      "name": "Documentation Agent",
+      "status": "active",
+      "prompt_key": "DOCUMENTATION_PROMPT",
+      "called_from": [
+        "_run_build_pipeline (post-coder, always)"
+      ],
+      "tools": [
+        "readme_generator",
+        "api_doc_generator",
+        "setup_guide_generator",
+        "env_var_documenter"
+      ],
+      "outputs": [
+        "readme_md",
+        "setup_md",
+        "api_docs"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "extended_agents.generate_readme() + DOCUMENTATION_PROMPT",
+      "notes": "Added in Phase 2B. Ensures every build has a README.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "export_agent",
+      "name": "Export Agent",
+      "status": "active",
+      "prompt_key": "EXPORT_PROMPT",
+      "called_from": [
+        "POST /api/export",
+        "POST /api/projects/{id}/download"
+      ],
+      "tools": [
+        "file_packager",
+        "zip_generator",
+        "manifest_builder",
+        "deploy_target_advisor"
+      ],
+      "outputs": [
+        "export_ready",
+        "package_name",
+        "file_manifest",
+        "deploy_targets",
+        "recommended_deploy"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "extended_agents.prepare_export_manifest() + EXPORT_PROMPT",
+      "notes": "Added in Phase 2B. Used by download/export endpoints.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "frontend_coder",
+      "name": "Frontend Coder Agent",
+      "status": "active",
+      "prompt_key": "CODER_PROMPT",
+      "called_from": [
+        "_run_build_pipeline"
+      ],
+      "tools": [
+        "react",
+        "vite",
+        "nextjs",
+        "tailwind",
+        "framer_motion",
+        "lucide_icons",
+        "responsive_css",
+        "accessibility",
+        "web_fonts"
+      ],
+      "outputs": [
+        "html_files",
+        "css_files",
+        "js_files",
+        "react_components"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "CODER_PROMPT",
+      "notes": "Premium output enforced via PREMIUM_SECTION_LIBRARY and VISUAL_COMPOSITION_RULES.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "logo_agent",
+      "name": "Logo Agent",
+      "status": "active",
+      "prompt_key": null,
+      "called_from": [
+        "POST /api/logo",
+        "shared_context in build pipeline"
+      ],
+      "tools": [
+        "svg_generation",
+        "genx_image_generation",
+        "media_library",
+        "favicon_generation",
+        "brand_colors"
+      ],
+      "outputs": [
+        "logo_svg",
+        "favicon",
+        "html_snippet",
+        "css_snippet",
+        "asset_id"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "logo_agent.py (SVG) + run_logo_agent() + media library storage",
+      "notes": "AI image generation is capability-gated. Falls back to SVG if unavailable.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "manager",
+      "name": "Manager Agent",
+      "status": "active",
+      "prompt_key": "BUILD_PLANNER_PROMPT",
+      "called_from": [
+        "_run_build_pipeline"
+      ],
+      "tools": [
+        "project_memory",
+        "capability_registry",
+        "task_checklist",
+        "worker_assignment",
+        "completion_guard"
+      ],
+      "outputs": [
+        "build_plan",
+        "task_list",
+        "complexity",
+        "pages",
+        "files"
+      ],
+      "blocks_on_failure": true,
+      "implementation": "Orchestrator._run_build_pipeline + BUILD_PLANNER_PROMPT",
+      "notes": "Acts as the orchestration manager. Blocks completion if required agents fail.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "media_director",
+      "name": "Media Director Agent",
+      "status": "active",
+      "prompt_key": null,
+      "called_from": [
+        "_run_build_pipeline (media_manifest in shared_context)"
+      ],
+      "tools": [
+        "pixabay_images",
+        "pixabay_videos",
+        "genx_image_generation",
+        "qwen_image_generation",
+        "svg_generation",
+        "media_library",
+        "capability_registry",
+        "media_scoring",
+        "duplicate_detector"
+      ],
+      "outputs": [
+        "media_manifest",
+        "section_media",
+        "media_strategy",
+        "media_score",
+        "honest_report",
+        "rejected_assets",
+        "warnings"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "media_director.run_media_director() \u2014 full orchestration with relevance scoring, quality scoring, duplicate detection, honest AI reporting",
+      "notes": "Fully activated in Phase 2B. Honest reporting when AI unavailable. Scores relevance (0-100), quality (0-100), rejects poor media.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "memory_curator",
+      "name": "Memory Curator Agent",
+      "status": "active",
+      "prompt_key": "MEMORY_CURATOR_PROMPT",
+      "called_from": [
+        "Background memory curation after each iteration"
+      ],
+      "tools": [
+        "memory_cleaner",
+        "memory_compressor",
+        "decision_deduplicator",
+        "history_summarizer"
+      ],
+      "outputs": [
+        "curated_memory",
+        "removed_keys",
+        "summary"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "extended_agents.curate_memory() + MEMORY_CURATOR_PROMPT",
+      "notes": "Added in Phase 2B. Runs as background task to keep memory lean.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "monitoring",
+      "name": "Monitoring Agent",
+      "status": "active",
+      "prompt_key": null,
+      "called_from": [
+        "_run_build_pipeline (post-coder, backend builds)"
+      ],
+      "tools": [
+        "health_endpoint_checker",
+        "logging_detector",
+        "rate_limit_checker",
+        "cors_validator",
+        "error_telemetry_checker"
+      ],
+      "outputs": [
+        "has_health_endpoint",
+        "has_logging",
+        "monitoring_score",
+        "issues",
+        "checklist"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "extended_agents.analyze_monitoring_readiness()",
+      "notes": "Added in Phase 2B. Non-blocking \u2014 issues are warnings, not failures.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "motion_3d",
+      "name": "Motion / 3D Agent",
+      "status": "active",
+      "prompt_key": "MOTION_3D_PROMPT",
+      "called_from": [
+        "_run_build_pipeline (when 3D/animation detected in prompt)"
+      ],
+      "tools": [
+        "three_js",
+        "framer_motion",
+        "gsap",
+        "particle_systems",
+        "css_animations",
+        "video_backgrounds",
+        "webgl"
+      ],
+      "outputs": [
+        "animated_files",
+        "motion_enhancements",
+        "3d_scene"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "MOTION_3D_PROMPT (called by orchestrator when animation detected)",
+      "notes": "Activated when prompt contains: 3D, particles, animations, video bg, GSAP, Three.js.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "product_strategist",
+      "name": "Product Strategist Agent",
+      "status": "active",
+      "prompt_key": "SCOUT_PROMPT",
+      "called_from": [
+        "_run_build_pipeline"
+      ],
+      "tools": [
+        "web_search",
+        "project_memory",
+        "requirements_extraction",
+        "feature_planning",
+        "audience_detection"
+      ],
+      "outputs": [
+        "requirements_md",
+        "core_features",
+        "audience",
+        "summary",
+        "pain_points"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "SCOUT_PROMPT",
+      "notes": "Maps to 'scout' agent in the orchestrator.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "prompt_optimizer",
+      "name": "Prompt Optimizer Agent",
+      "status": "active",
+      "prompt_key": null,
+      "called_from": [
+        "Pre-build prompt analysis (non-blocking)"
+      ],
+      "tools": [
+        "prompt_quality_analyzer",
+        "vague_phrase_detector",
+        "requirement_extractor",
+        "context_enricher"
+      ],
+      "outputs": [
+        "prompt_quality_score",
+        "issues",
+        "strengths",
+        "suggestions",
+        "optimized_prompt"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "extended_agents.analyze_prompt_quality()",
+      "notes": "Added in Phase 2B. Non-blocking analysis that improves downstream quality.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "qa_agent",
+      "name": "QA Agent",
+      "status": "active",
+      "prompt_key": "REVIEWER_PROMPT",
+      "called_from": [
+        "_run_build_pipeline",
+        "run_retry"
+      ],
+      "tools": [
+        "html_validator",
+        "css_validator",
+        "link_checker",
+        "coverage_score",
+        "build_contract_validator"
+      ],
+      "outputs": [
+        "review_report",
+        "missing_files",
+        "repair_tasks",
+        "scores"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "REVIEWER_PROMPT + quality_validator + coverage_score",
+      "notes": "Maps to 'reviewer' agent.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "repo_engineer",
+      "name": "Repo Engineer Agent",
+      "status": "active",
+      "prompt_key": "REPO_FIX_PROMPT",
+      "called_from": [
+        "_run_repo_fix",
+        "repo_repair endpoint"
+      ],
+      "tools": [
+        "github_pat",
+        "repo_clone",
+        "stack_detection",
+        "diff_generation",
+        "pr_creation",
+        "repair_engine",
+        "checkpoint"
+      ],
+      "outputs": [
+        "fixed_files",
+        "diff_summary",
+        "pr_url",
+        "repair_log"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "REPO_FIX_PROMPT + RepairEngine",
+      "notes": "Also backed by deterministic RepairEngine for targeted fixes.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "runtime_engineer",
+      "name": "Runtime Engineer Agent",
+      "status": "active",
+      "prompt_key": "RUNTIME_ENGINEER_PROMPT",
+      "called_from": [
+        "POST /api/runtime/health",
+        "_run_build_pipeline (post-coder)"
+      ],
+      "tools": [
+        "build_log_analyzer",
+        "entry_point_validator",
+        "preview_url_checker",
+        "container_health_check",
+        "runtime_error_detector"
+      ],
+      "outputs": [
+        "runtime_ok",
+        "can_preview",
+        "issues",
+        "checklist",
+        "entry_point"
+      ],
+      "blocks_on_failure": true,
+      "implementation": "extended_agents.check_runtime_health() + RUNTIME_ENGINEER_PROMPT",
+      "notes": "Added in Phase 2B. Never marks a build as runtime_ok if build logs have errors.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "security",
+      "name": "Security Agent",
+      "status": "active",
+      "prompt_key": "SECURITY_PROMPT",
+      "called_from": [
+        "_run_build_pipeline (when auth_required or full_stack)"
+      ],
+      "tools": [
+        "secret_scanner",
+        "auth_pattern_checker",
+        "dependency_audit",
+        "xss_detector",
+        "injection_checker"
+      ],
+      "outputs": [
+        "security_report",
+        "risks",
+        "violations",
+        "suggestions"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "SECURITY_PROMPT (called post-coder in auth/full-stack builds)",
+      "notes": "Activated for full_stack, api_service, dashboard builds with auth.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "seo_performance",
+      "name": "SEO / Performance Agent",
+      "status": "active",
+      "prompt_key": null,
+      "called_from": [
+        "_validate_contract (via quality_validator._score_seo() + _score_performance())"
+      ],
+      "tools": [
+        "meta_tag_checker",
+        "og_tag_validator",
+        "twitter_card_validator",
+        "heading_hierarchy_checker",
+        "image_optimization_checker",
+        "lazy_loading_checker",
+        "lighthouse_static_proxy",
+        "structured_data_validator"
+      ],
+      "outputs": [
+        "seo_score",
+        "performance_score",
+        "recommendations",
+        "heading_structure"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "quality_validator._score_seo() + _score_performance() \u2014 enhanced with Twitter Card, structured data, image alt, canonical, lazy loading, defer/async, font preloading checks",
+      "notes": "Fully activated in Phase 2B. Lighthouse requires headless browser (Phase 2C).",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "tool_integration",
+      "name": "Tool Integration Agent",
+      "status": "active",
+      "prompt_key": null,
+      "called_from": [
+        "_run_build_pipeline (tool audit pass)"
+      ],
+      "tools": [
+        "env_var_checker",
+        "api_key_validator",
+        "tool_detector",
+        "integration_registry",
+        "connector_library"
+      ],
+      "outputs": [
+        "detected_tools",
+        "connected_tools",
+        "missing_env_vars",
+        "warnings",
+        "integration_score"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "extended_agents.verify_tool_integration()",
+      "notes": "Added in Phase 2B. Detects tool usage and validates env configuration.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "ui_designer",
+      "name": "UI Designer Agent",
+      "status": "active",
+      "prompt_key": "PREMIUM_SECTION_LIBRARY",
+      "called_from": [
+        "_run_build_pipeline"
+      ],
+      "tools": [
+        "design_tokens",
+        "responsive_breakpoints",
+        "component_library",
+        "section_templates",
+        "spacing_system",
+        "typography_scale",
+        "premium_layout_registry",
+        "visual_composition_rules"
+      ],
+      "outputs": [
+        "design_direction",
+        "design_tokens",
+        "section_templates",
+        "typography_scale",
+        "spacing_system",
+        "responsive_rules"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "design_engine.create_design_direction() + PREMIUM_SECTION_LIBRARY + VISUAL_COMPOSITION_RULES \u2014 generates design tokens, section templates, typography scale, responsive spacing, and layout constraints",
+      "notes": "Deterministic. PREMIUM_SECTION_LIBRARY and VISUAL_COMPOSITION_RULES injected into CODER_PROMPT via shared_context.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "ux_architect",
+      "name": "UX Architect Agent",
+      "status": "active",
+      "prompt_key": "ARCHITECT_PROMPT",
+      "called_from": [
+        "_run_build_pipeline"
+      ],
+      "tools": [
+        "stack_engine",
+        "file_plan",
+        "route_design",
+        "component_inventory",
+        "tech_stack_selection"
+      ],
+      "outputs": [
+        "tech_stack",
+        "file_plan",
+        "component_list"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "ARCHITECT_PROMPT",
+      "notes": "Maps to 'architect' agent.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    },
+    {
+      "agent_id": "visual_qa",
+      "name": "Visual QA Agent",
+      "status": "active",
+      "prompt_key": "VISUAL_QA_PROMPT",
+      "called_from": [
+        "_run_build_pipeline (post-build gate)"
+      ],
+      "tools": [
+        "layout_checker",
+        "typography_validator",
+        "contrast_checker",
+        "responsive_tester",
+        "quality_scorer"
+      ],
+      "outputs": [
+        "visual_qa_result",
+        "design_score",
+        "layout_issues",
+        "suggestions"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "orchestrator._static_visual_qa_result() + quality_validator scoring; VISUAL_QA_PROMPT remains available for future browser-backed review",
+      "notes": "Runs deterministic static Visual QA for every completed build and persists visual_qa_result. Browser screenshots require a future Playwright runtime.",
+      "hard_blocker": true,
+      "blocker_reason": "Registry still documents this as static/future-runtime work, not full browser-backed execution.",
+      "static_only_signal": true
+    },
+    {
+      "agent_id": "worker",
+      "name": "Worker Agents",
+      "status": "active",
+      "prompt_key": null,
+      "called_from": [
+        "Orchestrator via _run_agent()"
+      ],
+      "tools": [
+        "all_agent_tools"
+      ],
+      "outputs": [
+        "task_result",
+        "files",
+        "status"
+      ],
+      "blocks_on_failure": false,
+      "implementation": "All specialist LLM agents (coder, reviewer, repo_fix, motion_3d, security)",
+      "notes": "Workers are all agents that receive tasks from the Manager/Orchestrator.",
+      "hard_blocker": false,
+      "blocker_reason": "",
+      "static_only_signal": false
+    }
+  ]
+}

@@ -133,12 +133,23 @@ export const System = {
   health: () => api.get("/health").then((r) => r.data),
   readiness: () => api.get("/readiness").then((r) => r.data),
   githubStatus: () => api.get("/integrations/github/status").then((r) => r.data),
+  githubRepos: (params = {}) => api.get("/integrations/github/repos", { params }).then((r) => r.data),
+  githubBranches: (owner, repo, params = {}) =>
+    api.get(`/integrations/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`, { params }).then((r) => r.data),
   capabilitiesStatus: () => api.get("/capabilities/status").then((r) => r.data),
 };
 
 export const Builds = {
   list: (workspaceType) =>
     api.get("/builds", { params: workspaceType ? { workspace_type: workspaceType } : {} }).then((r) => r.data),
+  importGit: (body) => api.post("/builds/import-git", body).then((r) => r.data),
+  gitStatus: (projectId, body) => api.post(`/builds/${projectId}/git/status`, body).then((r) => r.data),
+  gitCommit: (projectId, body) => api.post(`/builds/${projectId}/git/commit`, body).then((r) => r.data),
+  gitPush: (projectId, body) => api.post(`/builds/${projectId}/git/push`, body).then((r) => r.data),
+  gitOpenPR: (projectId, body) => api.post(`/builds/${projectId}/git/open-pr`, body).then((r) => r.data),
+  repoWorkflowRun: (projectId, body) => api.post(`/builds/${projectId}/repo-workflow/run`, body).then((r) => r.data),
+  runtimeQA: (projectId, body) => api.post(`/builds/${projectId}/runtime-qa`, body).then((r) => r.data),
+  mediaRuntime: (projectId, body) => api.post(`/builds/${projectId}/media-runtime`, body).then((r) => r.data),
   storageUsage: () => api.get("/builds/storage-usage").then((r) => r.data),
   archive: (workspacePath, confirmed = true) =>
     api.post("/builds/archive", { workspace_path: workspacePath, confirmed }).then((r) => r.data),

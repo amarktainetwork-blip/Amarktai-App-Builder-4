@@ -47,6 +47,7 @@ export default function NewBuildPage() {
     if (state.projectName) setName(state.projectName);
     if (state.mode) setMode(state.mode);
     if (state.qualityTier) setQualityTier(state.qualityTier);
+    if (state.mediaChoice) setMediaChoice(state.mediaChoice);
   }, [location.state]);
 
   const doCreate = async (enrichedPrompt, upgradeAcknowledged = false, extraParams = {}) => {

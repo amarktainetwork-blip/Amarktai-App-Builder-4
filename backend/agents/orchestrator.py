@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -76,6 +77,9 @@ from app.services.build_context_service import (
 )
 from app.services.build_storage_service import create_generated_workspace, update_workspace_metadata
 from app.services.quality_gate_service import run_quality_gate
+from app.services.media_runtime_service import execute_media_plan
+from app.services.motion_runtime_service import patch_motion_files, prompt_requires_motion
+from settings_store import get_secret
 
 # Per-agent timeout in seconds
 AGENT_TIMEOUTS = {
@@ -1285,6 +1289,11 @@ class Orchestrator:
         *,
         preview_strategy: str,
         coverage: dict[str, Any],
+        prompt: str = "",
+        mode: str = "",
+        quality_tier: str = "balanced",
+        media_required: bool = False,
+        motion_required: bool = False,
     ) -> dict[str, Any]:
         """Mirror generated Mongo files to build storage and run quality reporting."""
         meta = create_generated_workspace(self.project_id)
@@ -1331,7 +1340,36 @@ class Orchestrator:
             json.dumps(preview_manifest, indent=2),
             encoding="utf-8",
         )
-        quality_report = run_quality_gate(workspace)
+        media_manifest: dict[str, Any] | None = None
+        if media_required:
+            await self._record_event("media_director", "runtime_started", "Media Director generating/fetching real media assets.")
+            media_manifest = await execute_media_plan(
+                workspace,
+                project_id=self.project_id,
+                prompt=prompt,
+                sections=[],
+                genx_api_key=(await get_secret(self.db, "GENX_API_KEY")) or "",
+                genx_base_url=(await get_secret(self.db, "GENX_BASE_URL")) or os.environ.get("GENX_BASE_URL", "https://query.genx.sh/v1"),
+                genx_image_model=(await get_secret(self.db, "GENX_MODEL_IMAGE")) or os.environ.get("GENX_MODEL_IMAGE", ""),
+                qwen_api_key=(await get_secret(self.db, "QWEN_API_KEY")) or "",
+                qwen_base_url=(await get_secret(self.db, "QWEN_BASE_URL")) or os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+                qwen_image_model=(await get_secret(self.db, "QWEN_MODEL_IMAGE")) or os.environ.get("QWEN_MODEL_IMAGE", ""),
+                pixabay_api_key=(await get_secret(self.db, "PIXABAY_API_KEY")) or "",
+            )
+            await self.emit({"type": "media_runtime", "data": media_manifest})
+            await self._record_event(
+                "media_director",
+                "runtime_completed" if media_manifest.get("asset_count", 0) else "runtime_failed",
+                f"Media runtime persisted {media_manifest.get('asset_count', 0)} asset(s).",
+                meta=media_manifest,
+            )
+        quality_report = run_quality_gate(
+            workspace,
+            strict=quality_tier == "premium",
+            require_runtime=quality_tier == "premium",
+            require_media=media_required,
+            require_motion=motion_required,
+        )
         update_workspace_metadata(
             workspace,
             {
@@ -1341,6 +1379,7 @@ class Orchestrator:
                 "quality_score": quality_report.get("score"),
                 "quality_pass": quality_report.get("pass"),
                 "coverage_score": coverage.get("coverageScore"),
+                "media_asset_count": (media_manifest or {}).get("asset_count", 0),
             },
         )
         await self.db.projects.update_one(
@@ -1351,12 +1390,17 @@ class Orchestrator:
                 "generated_files": written,
                 "preview_manifest": preview_manifest,
                 "quality_report": quality_report,
+                "runtime_qa": quality_report.get("runtime_qa"),
+                "media_runtime": media_manifest,
                 "quality_report_path": str(workspace / "quality-report.json"),
                 "updated_at": _now(),
             }},
         )
         await self.emit({"type": "preview_manifest", "data": preview_manifest})
         await self.emit({"type": "quality_report", "data": quality_report})
+        if quality_tier == "premium" and not quality_report.get("pass"):
+            first = (quality_report.get("blockers") or [{}])[0].get("message", "Premium quality gate failed.")
+            raise RuntimeError(f"Premium quality gate blocked readiness: {first}")
         await self._record_event(
             "validator",
             "quality_report_generated",
@@ -2001,6 +2045,36 @@ class Orchestrator:
                 )
                 # Continue to next iteration — will hit exhaustion check
 
+        # Deterministic Motion / 3D execution before final validation. This
+        # modifies real generated files and writes motion_manifest.json instead
+        # of relying on a registry-only motion claim.
+        if prompt_requires_motion(user_prompt, mode) or project_meta.get("quality_tier", "balanced") == "premium":
+            await self._record_event("motion_3d", "started", "Motion/3D agent patching generated files.")
+            motion_files_before = await self.fs.list_full()
+            patched_files, motion_manifest = patch_motion_files(
+                motion_files_before,
+                prompt=user_prompt,
+                mode=mode,
+            )
+            before_paths = {f.get("path"): f.get("content") for f in motion_files_before}
+            for item in patched_files:
+                path = item.get("path", "")
+                if not path or before_paths.get(path) == item.get("content"):
+                    continue
+                await self.fs.write(path, item.get("content", ""), item.get("language", "text"))
+                await self.emit({"type": "file_written", "data": {"path": path}})
+            await self.db.projects.update_one(
+                {"id": self.project_id},
+                {"$set": {"motion_manifest": motion_manifest, "updated_at": _now()}},
+            )
+            await self.emit({"type": "motion_manifest", "data": motion_manifest})
+            await self._record_event(
+                "motion_3d",
+                "completed",
+                f"Motion/3D agent patched {len(motion_manifest.get('changed_files', []))} file(s).",
+                meta=motion_manifest,
+            )
+
         # Post-validation readiness checks
         final_files = await self.fs.list_full()
         project_after_validation = await self._load_project()
@@ -2071,12 +2145,27 @@ class Orchestrator:
             final_files = await self.fs.list_full()
 
         try:
+            media_required = bool(
+                project_after.get("quality_tier", "balanced") == "premium"
+                or re.search(r"\b(media|image|photo|video|cinematic|visual|gallery|background)\b", user_prompt, re.IGNORECASE)
+            )
+            motion_required = project_after.get("quality_tier", "balanced") == "premium" or prompt_requires_motion(user_prompt, mode)
             await self._persist_generated_workspace(
                 final_files,
                 preview_strategy=preview_strategy,
                 coverage=coverage,
+                prompt=user_prompt,
+                mode=mode,
+                quality_tier=project_after.get("quality_tier", "balanced"),
+                media_required=media_required,
+                motion_required=motion_required,
             )
         except Exception as qa_err:
+            if project_after.get("quality_tier", "balanced") == "premium":
+                err = f"Premium runtime quality gate failed: {qa_err}"
+                await self._fail_project("validator", err)
+                await self._record_message("system", None, err, meta={"error": err})
+                return
             await self._record_event(
                 "validator",
                 "warn",

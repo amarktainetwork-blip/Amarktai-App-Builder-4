@@ -1,0 +1,201 @@
+"""Browser-backed runtime QA for generated and imported workspaces.
+
+This service is intentionally strict: if the browser runtime or accessibility /
+performance tooling is unavailable, strict quality gates receive a blocker
+instead of a fake pass.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+VIEWPORTS = {
+    "desktop": {"width": 1440, "height": 1000},
+    "tablet": {"width": 820, "height": 1180},
+    "mobile": {"width": 390, "height": 844},
+}
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _entry_url(workspace: Path) -> tuple[str | None, str | None]:
+    for rel in ("index.html", "public/index.html", "dist/index.html", "build/index.html"):
+        candidate = workspace / rel
+        if candidate.exists():
+            return candidate.resolve().as_uri(), rel
+    return None, None
+
+
+def _axe_source() -> str | None:
+    candidates = [
+        os.environ.get("AXE_CORE_PATH", ""),
+        "/app/frontend/node_modules/axe-core/axe.min.js",
+        "/app/node_modules/axe-core/axe.min.js",
+        str(Path.cwd() / "frontend" / "node_modules" / "axe-core" / "axe.min.js"),
+    ]
+    for raw in candidates:
+        if not raw:
+            continue
+        path = Path(raw)
+        if path.exists():
+            return path.read_text(encoding="utf-8", errors="replace")
+    return None
+
+
+def _run_lighthouse(url: str, report_dir: Path) -> dict[str, Any]:
+    lighthouse = os.environ.get("LIGHTHOUSE_BIN") or shutil.which("lighthouse")
+    if not lighthouse:
+        return {
+            "ok": False,
+            "available": False,
+            "reason": "Lighthouse binary is not available in this runtime.",
+        }
+    output = report_dir / "lighthouse-report.json"
+    cmd = [
+        lighthouse,
+        url,
+        "--quiet",
+        "--chrome-flags=--headless --no-sandbox",
+        "--output=json",
+        f"--output-path={output}",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=90, shell=False)
+    except Exception as exc:
+        return {"ok": False, "available": True, "reason": f"Lighthouse execution failed: {exc}"}
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "available": True,
+            "reason": (result.stderr or result.stdout or "Lighthouse failed")[:500],
+        }
+    try:
+        data = json.loads(output.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {"ok": False, "available": True, "reason": f"Could not read Lighthouse report: {exc}"}
+    categories = data.get("categories", {})
+    scores = {
+        key: int((value.get("score") or 0) * 100)
+        for key, value in categories.items()
+        if isinstance(value, dict)
+    }
+    return {"ok": True, "available": True, "report_path": str(output), "scores": scores}
+
+
+def run_runtime_qa(
+    workspace_path: str | Path,
+    *,
+    min_accessibility_score: int = 90,
+    min_performance_score: int = 70,
+) -> dict[str, Any]:
+    workspace = Path(workspace_path).resolve()
+    report_dir = workspace / "runtime-qa"
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    report: dict[str, Any] = {
+        "pass": False,
+        "tooling": "playwright_chromium_axe_lighthouse",
+        "workspace_path": str(workspace),
+        "screenshots": {},
+        "console_errors": [],
+        "accessibility": {"available": False, "score": 0, "violations": []},
+        "performance": {"available": False, "score": 0},
+        "blockers": [],
+        "warnings": [],
+        "checked_at": _now(),
+    }
+
+    if not workspace.exists():
+        report["blockers"].append("Workspace does not exist.")
+        return _persist(report_dir, report)
+
+    url, entry = _entry_url(workspace)
+    if not url:
+        report["blockers"].append("No browser-renderable entry point found for runtime QA.")
+        return _persist(report_dir, report)
+    report["entry_point"] = entry
+    report["url"] = url
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as exc:
+        report["blockers"].append(f"Playwright is not installed or importable: {exc}")
+        return _persist(report_dir, report)
+
+    axe_source = _axe_source()
+
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
+            try:
+                for name, viewport in VIEWPORTS.items():
+                    page = browser.new_page(viewport=viewport)
+                    page.on("console", lambda msg: report["console_errors"].append(msg.text) if msg.type == "error" else None)
+                    page.goto(url, wait_until="networkidle", timeout=30000)
+                    screenshot = report_dir / f"{name}.png"
+                    page.screenshot(path=str(screenshot), full_page=True)
+                    report["screenshots"][name] = str(screenshot)
+                    if name == "desktop" and axe_source:
+                        page.add_script_tag(content=axe_source)
+                        axe_result = page.evaluate("async () => await axe.run(document)")
+                        violations = axe_result.get("violations", [])
+                        score = max(0, 100 - len(violations) * 10)
+                        report["accessibility"] = {
+                            "available": True,
+                            "score": score,
+                            "violations": [
+                                {
+                                    "id": v.get("id"),
+                                    "impact": v.get("impact"),
+                                    "description": v.get("description"),
+                                    "nodes": len(v.get("nodes", [])),
+                                }
+                                for v in violations
+                            ],
+                        }
+                    page.close()
+            finally:
+                browser.close()
+    except Exception as exc:
+        report["blockers"].append(f"Playwright browser execution failed: {exc}")
+        return _persist(report_dir, report)
+
+    if not axe_source:
+        report["blockers"].append("axe-core source is not available to the backend runtime.")
+
+    lighthouse = _run_lighthouse(url, report_dir)
+    report["lighthouse"] = lighthouse
+    if lighthouse.get("ok"):
+        perf = int(lighthouse.get("scores", {}).get("performance", 0))
+        report["performance"] = {"available": True, "score": perf, "scores": lighthouse.get("scores", {})}
+    else:
+        report["blockers"].append(lighthouse.get("reason", "Lighthouse did not produce a report."))
+
+    if report["console_errors"]:
+        report["blockers"].append(f"Runtime console errors detected: {len(report['console_errors'])}.")
+    if report["accessibility"].get("score", 0) < min_accessibility_score:
+        report["blockers"].append(
+            f"Accessibility score {report['accessibility'].get('score', 0)} below {min_accessibility_score}."
+        )
+    if report["performance"].get("score", 0) < min_performance_score:
+        report["blockers"].append(
+            f"Performance score {report['performance'].get('score', 0)} below {min_performance_score}."
+        )
+
+    report["pass"] = not report["blockers"]
+    return _persist(report_dir, report)
+
+
+def _persist(report_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
+    report_path = report_dir / "runtime-qa-report.json"
+    report["report_path"] = str(report_path)
+    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return report

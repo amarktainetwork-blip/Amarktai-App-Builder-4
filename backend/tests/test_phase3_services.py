@@ -146,6 +146,73 @@ class TestGitWorkspaceServiceClone:
     def test_sanitise_ref_name_allows_valid(self):
         assert self.svc._sanitise_ref_name("myorg") == "myorg"
 
+    def test_get_branch_diff_reports_no_changes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir) / "repos" / "owner" / "repo" / "feature"
+            ws.mkdir(parents=True)
+            with patch.object(self.svc, "_builds_root", return_value=Path(tmpdir)):
+                with patch.object(self.svc, "_run_git") as run_git:
+                    run_git.side_effect = [
+                        (0, "", ""),
+                        (0, "", ""),
+                        (0, "", ""),
+                    ]
+                    result = self.svc.get_branch_diff("owner", "repo", "feature", "main")
+        assert result["ok"] is True
+        assert result["has_changes"] is False
+        assert result["changed_files"] == []
+
+    def test_get_branch_diff_reports_changed_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir) / "repos" / "owner" / "repo" / "feature"
+            ws.mkdir(parents=True)
+            with patch.object(self.svc, "_builds_root", return_value=Path(tmpdir)):
+                with patch.object(self.svc, "_run_git") as run_git:
+                    run_git.side_effect = [
+                        (0, "", ""),
+                        (0, "M\tfrontend/src/App.jsx\nA\tREADME.md\n", ""),
+                        (0, " 2 files changed, 12 insertions(+)", ""),
+                    ]
+                    result = self.svc.get_branch_diff("owner", "repo", "feature", "main")
+        assert result["ok"] is True
+        assert result["has_changes"] is True
+        assert "M\tfrontend/src/App.jsx" in result["changed_files"]
+
+
+class TestGithubRepoService:
+
+    def setup_method(self):
+        from app.services import github_repo_service as svc
+        self.svc = svc
+
+    def test_validate_owner_repo_rejects_traversal(self):
+        with pytest.raises(ValueError):
+            self.svc.validate_owner_repo("../../etc", "repo")
+        with pytest.raises(ValueError):
+            self.svc.validate_owner_repo("owner", "../repo")
+
+    def test_normalize_repo_masks_to_public_metadata_only(self):
+        item = {
+            "id": 123,
+            "name": "repo",
+            "full_name": "owner/repo",
+            "owner": {"login": "owner"},
+            "html_url": "https://github.com/owner/repo",
+            "clone_url": "https://github.com/owner/repo.git",
+            "default_branch": "main",
+            "private": True,
+            "description": "demo",
+            "updated_at": "2026-05-14T00:00:00Z",
+        }
+        result = self.svc.normalize_repo(item)
+        assert result["full_name"] == "owner/repo"
+        assert result["private"] is True
+        assert "token" not in result
+
+    def test_normalize_branch(self):
+        result = self.svc.normalize_branch({"name": "main", "commit": {"sha": "abc123"}, "protected": True})
+        assert result == {"name": "main", "commit_sha": "abc123", "protected": True}
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # frontend_detection_service
@@ -294,6 +361,28 @@ class TestCommandRunnerService:
         assert match is not None
         cmd_type, _ = match
         assert cmd_type == "test"
+
+    def test_allowlist_git_status_allowed(self):
+        match = self.svc._match_allowed(["git", "status", "--porcelain"])
+        assert match is not None
+        cmd_type, _ = match
+        assert cmd_type == "git"
+
+    def test_allowlist_git_diff_name_status_allowed(self):
+        match = self.svc._match_allowed(["git", "diff", "--name-status", "origin/main...HEAD"])
+        assert match is not None
+        cmd_type, _ = match
+        assert cmd_type == "git"
+
+    def test_docker_command_requires_env_gate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(self.svc, "_builds_root", return_value=Path(tmpdir)):
+                ws = Path(tmpdir) / "project"
+                ws.mkdir()
+                with patch.dict(os.environ, {"ALLOW_DOCKER_COMMANDS": ""}, clear=False):
+                    result = self.svc.run_command(ws, ["docker", "compose", "config"], project_id="test")
+                assert not result["ok"]
+                assert "ALLOW_DOCKER_COMMANDS" in result["error"]
 
     def test_allowlist_arbitrary_shell_blocked(self):
         assert self.svc._match_allowed(["bash", "-c", "rm -rf /"]) is None
@@ -682,6 +771,71 @@ class TestQualityGateService:
         })
         result = self.svc.check_image_alt(Path(ws))
         assert result["ok"] is True
+
+    def test_strict_gate_blocks_without_runtime_media_motion(self):
+        ws = self._make_workspace({
+            "index.html": "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body><main>Hello</main></body></html>",
+            "README.md": "# App",
+            "preview-manifest.json": "{}",
+        })
+        with patch.object(self.svc, "run_runtime_qa", return_value={
+            "pass": False,
+            "blockers": ["Playwright unavailable"],
+            "report_path": str(Path(ws) / "runtime-qa" / "runtime-qa-report.json"),
+        }):
+            result = self.svc.run_quality_gate(ws, strict=True, require_media=True, require_motion=True)
+        blocker_checks = [b["check"] for b in result["blockers"]]
+        assert "runtime_qa" in blocker_checks
+        assert "media_manifest" in blocker_checks
+        assert "motion_manifest" in blocker_checks
+        assert result["pass"] is False
+
+    def test_media_and_motion_checks_pass_with_real_files(self):
+        ws = Path(self._make_workspace({
+            "index.html": "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body><main>Hello</main><script src='script.js'></script></body></html>",
+            "script.js": "requestAnimationFrame(() => console.log('motion'))",
+            "README.md": "# App",
+            "preview-manifest.json": "{}",
+            "motion_manifest.json": json.dumps({"changed_files": ["script.js"]}),
+            "media_manifest.json": json.dumps({"assets": [{"path": "media/asset.jpg"}]}),
+            "media/asset.jpg": b"\xff\xd8\xff\xe0fakejpeg".decode("latin1"),
+        }))
+        assert self.svc.check_media_manifest(ws)["ok"] is True
+        assert self.svc.check_motion_manifest(ws)["ok"] is True
+
+
+class TestRuntimeMediaMotionServices:
+
+    def test_runtime_qa_returns_blocker_when_playwright_missing(self, tmp_path):
+        from app.services import runtime_qa_service as svc
+        (tmp_path / "index.html").write_text("<html><body>Hello</body></html>")
+        with patch.dict("sys.modules", {"playwright.sync_api": None}):
+            result = svc.run_runtime_qa(tmp_path)
+        assert result["pass"] is False
+        assert any("Playwright" in b for b in result["blockers"])
+
+    def test_motion_patch_writes_manifest_and_files(self):
+        from app.services.motion_runtime_service import patch_motion_files
+        files, manifest = patch_motion_files(
+            [{"path": "index.html", "content": "<html><head></head><body><main><section>Hi</section></main></body></html>", "language": "html"}],
+            prompt="cinematic 3D animated website",
+            mode="website",
+        )
+        paths = {f["path"] for f in files}
+        assert "motion_manifest.json" in paths
+        assert "script.js" in paths
+        assert manifest["reduced_motion_supported"] is True
+
+    def test_media_injects_persisted_assets(self, tmp_path):
+        from app.services.media_runtime_service import inject_media_assets
+        (tmp_path / "index.html").write_text("<html><body><main></main></body></html>")
+        (tmp_path / "styles.css").write_text("")
+        (tmp_path / "media").mkdir()
+        (tmp_path / "media" / "asset.jpg").write_bytes(b"fake")
+        changed = inject_media_assets(tmp_path, [{"path": "media/asset.jpg", "media_type": "image"}])
+        assert "index.html" in changed
+        html = (tmp_path / "index.html").read_text()
+        assert "data-amarktai-media-asset" in html
 
 
 # ════════════════════════════════════════════════════════════════════════════

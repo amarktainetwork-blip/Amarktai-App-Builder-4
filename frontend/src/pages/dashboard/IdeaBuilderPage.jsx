@@ -74,6 +74,8 @@ export default function IdeaBuilderPage() {
         projectName: projectName || "Idea Builder Project",
         mode,
         qualityTier: "premium",
+        mediaChoice: "auto",
+        ideaBuilderSessionId: sessionId,
       },
     });
   };
