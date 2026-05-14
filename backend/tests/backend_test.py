@@ -2405,7 +2405,15 @@ async def test_build_pipeline_missing_audience_reaches_architect_and_coder(monke
 
     monkeypatch.setenv("BUILDS_STORAGE_ROOT", str(tmp_path))
     db, _project, _files, _events, _messages = _make_db()
-    _project.update({"mode": "website", "quality_tier": "premium", "name": "Amarktai Builder"})
+    _project.update({
+        "mode": "website",
+        "quality_tier": "premium",
+        "name": "Amarktai Builder",
+        # Reproduces legacy/live documents seeded with brand: {}. Before the
+        # nested memory-schema repair this crashed after Scout with
+        # KeyError('audience') and surfaced as failed_agent=pipeline.
+        "project_memory": {"brand": {}, "design": {}, "product": {}},
+    })
 
     emitted = []
     async def emit(event):

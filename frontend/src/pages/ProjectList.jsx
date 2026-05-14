@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Projects, System, Clarify } from "@/lib/amk-api";
 import { useAuth } from "@/lib/auth-context";
+import { readinessBlockMessage, readinessBlocksBuild } from "@/lib/readiness";
 
 const PROMPT_TEMPLATES = [
   { name: "Lead Desk",   prompt: "Create a worldwide lead-gen PWA called 'Lead Desk' with a bright design, hero search, and a contact-capture form." },
@@ -46,8 +47,8 @@ export default function ProjectListPage() {
   useEffect(() => { refresh(); refreshReadiness(); }, []);
 
   const doCreate = async (enrichedPrompt, upgradeAcknowledged = false, extraParams = {}) => {
-    if (readiness?.overall !== "PASS") {
-      toast.error("GenX readiness must pass before starting Amarktai Coding Agents.");
+    if (readinessBlocksBuild(readiness)) {
+      toast.error(readinessBlockMessage(readiness));
       return;
     }
     if (!name.trim() || !enrichedPrompt.trim()) {
@@ -85,8 +86,8 @@ export default function ProjectListPage() {
       toast.error("Name and prompt are required.");
       return;
     }
-    if (readiness?.overall !== "PASS") {
-      toast.error("GenX readiness must pass before starting Amarktai Coding Agents.");
+    if (readinessBlocksBuild(readiness)) {
+      toast.error(readinessBlockMessage(readiness));
       return;
     }
     // Phase 1: Check if clarification is needed before launching the build
