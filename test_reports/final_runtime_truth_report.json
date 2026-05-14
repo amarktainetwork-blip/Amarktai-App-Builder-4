@@ -1,0 +1,61 @@
+{
+  "generated_at": "2026-05-14",
+  "implemented": {
+    "runtime_qa": [
+      "backend/app/services/runtime_qa_service.py runs Playwright Chromium against static entrypoints",
+      "axe-core is injected into the Playwright page when axe.min.js is available",
+      "Lighthouse CLI is executed from the backend container PATH and scores are persisted",
+      "backend Dockerfile installs node/npm, lighthouse, Playwright Chromium and dependencies",
+      "runtime QA is exposed through /api/builds/{project_id}/runtime-qa and strict quality gates",
+      "Workspace dashboard displays runtime QA screenshots, accessibility, performance, blockers"
+    ],
+    "media": [
+      "backend/app/services/media_runtime_service.py calls OpenAI-compatible GenX/Qwen image endpoints when keys/models exist",
+      "Pixabay image/video fallback downloads real assets when configured",
+      "Assets are validated, saved under workspace media/, and media_manifest.json is persisted",
+      "Media assets are injected into static HTML/CSS when generated output omitted them",
+      "Media runtime endpoint persists media evidence to the project"
+    ],
+    "motion": [
+      "backend/app/services/motion_runtime_service.py patches generated files with CSS/canvas motion runtime",
+      "motion_manifest.json is produced and emitted by orchestrator for prompts requiring motion/3D",
+      "Reduced-motion support is included in patched CSS",
+      "Strict quality gate requires motion_manifest and source animation evidence when motion is required"
+    ],
+    "repo_workbench": [
+      "Repo listing/branch listing endpoints and dashboard browse UI exist",
+      "Build Storage clone/import, command runner, repair diff/apply, versioning, logs, quality gate endpoints exist",
+      "New repo-workflow endpoint analyzes, plans, diffs/applies workflow docs, runs build/tests, persists status",
+      "Empty PRs are blocked and failed test/build/quality statuses block PR unless allow_failing_pr is explicit",
+      "PR URL persists to project and workspace metadata"
+    ],
+    "idea_builder": [
+      "Idea Builder chat persists sessions/messages in backend",
+      "Final prompt generation exists",
+      "Idea Builder handoff passes prompt, project name, mode, premium quality tier, media choice, and session id into New Build"
+    ],
+    "production": [
+      "Readiness checks Playwright and Lighthouse runtime availability in production",
+      "Dashboard-managed secrets remain the runtime truth through _runtime_secret/safe_get_secret",
+      "Verification scripts added for production runtime, repo workbench, and premium build smoke"
+    ]
+  },
+  "phase4_runtime_wiring": {
+    "runtime_qa_service": "backend/app/services/runtime_qa_service.py",
+    "media_runtime_service": "backend/app/services/media_runtime_service.py",
+    "motion_runtime_service": "backend/app/services/motion_runtime_service.py",
+    "strict_quality_gate": "backend/app/services/quality_gate_service.py",
+    "orchestrator_wiring": "backend/agents/orchestrator.py",
+    "dashboard_evidence": "frontend/src/pages/Workspace.jsx",
+    "verification_scripts": [
+      "scripts/verify_production_runtime.sh",
+      "scripts/verify_repo_workbench_live.sh",
+      "scripts/verify_premium_build_live.sh"
+    ],
+    "tests": {
+      "backend_full": "794 passed, 2 skipped, 1 warning",
+      "frontend_tests": "35 passed",
+      "frontend_build": "PASS"
+    }
+  }
+}

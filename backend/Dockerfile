@@ -8,12 +8,13 @@ WORKDIR /app
 
 # System deps for bcrypt & friends
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential curl \
+    build-essential curl nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 RUN python -m playwright install --with-deps chromium
+RUN npm install -g lighthouse
 
 COPY . .
 

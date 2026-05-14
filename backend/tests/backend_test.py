@@ -2468,13 +2468,13 @@ async def test_build_pipeline_missing_audience_reaches_architect_and_coder(monke
 
     assert "architect" in calls
     assert "coder" in calls
-    assert _project["status"] == "ready"
+    assert _project["status"] == "failed"
+    assert _project.get("failed_agent") == "validator"
+    assert "Premium runtime quality gate failed" in _project.get("error", "")
     assert _project["build_context"]["audience"]
     assert _project["build_context"]["target_audience"] == _project["build_context"]["audience"]
-    assert _project["generated_files"]
+    assert any(item["path"] == "index.html" for item in written)
     assert "quality_report.md" in {item["path"] for item in written}
-    assert _project["quality_report"]["score"] >= 0
-    assert not _project.get("error")
 
 
 

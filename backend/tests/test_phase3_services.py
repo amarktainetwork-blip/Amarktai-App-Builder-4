@@ -772,6 +772,71 @@ class TestQualityGateService:
         result = self.svc.check_image_alt(Path(ws))
         assert result["ok"] is True
 
+    def test_strict_gate_blocks_without_runtime_media_motion(self):
+        ws = self._make_workspace({
+            "index.html": "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body><main>Hello</main></body></html>",
+            "README.md": "# App",
+            "preview-manifest.json": "{}",
+        })
+        with patch.object(self.svc, "run_runtime_qa", return_value={
+            "pass": False,
+            "blockers": ["Playwright unavailable"],
+            "report_path": str(Path(ws) / "runtime-qa" / "runtime-qa-report.json"),
+        }):
+            result = self.svc.run_quality_gate(ws, strict=True, require_media=True, require_motion=True)
+        blocker_checks = [b["check"] for b in result["blockers"]]
+        assert "runtime_qa" in blocker_checks
+        assert "media_manifest" in blocker_checks
+        assert "motion_manifest" in blocker_checks
+        assert result["pass"] is False
+
+    def test_media_and_motion_checks_pass_with_real_files(self):
+        ws = Path(self._make_workspace({
+            "index.html": "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body><main>Hello</main><script src='script.js'></script></body></html>",
+            "script.js": "requestAnimationFrame(() => console.log('motion'))",
+            "README.md": "# App",
+            "preview-manifest.json": "{}",
+            "motion_manifest.json": json.dumps({"changed_files": ["script.js"]}),
+            "media_manifest.json": json.dumps({"assets": [{"path": "media/asset.jpg"}]}),
+            "media/asset.jpg": b"\xff\xd8\xff\xe0fakejpeg".decode("latin1"),
+        }))
+        assert self.svc.check_media_manifest(ws)["ok"] is True
+        assert self.svc.check_motion_manifest(ws)["ok"] is True
+
+
+class TestRuntimeMediaMotionServices:
+
+    def test_runtime_qa_returns_blocker_when_playwright_missing(self, tmp_path):
+        from app.services import runtime_qa_service as svc
+        (tmp_path / "index.html").write_text("<html><body>Hello</body></html>")
+        with patch.dict("sys.modules", {"playwright.sync_api": None}):
+            result = svc.run_runtime_qa(tmp_path)
+        assert result["pass"] is False
+        assert any("Playwright" in b for b in result["blockers"])
+
+    def test_motion_patch_writes_manifest_and_files(self):
+        from app.services.motion_runtime_service import patch_motion_files
+        files, manifest = patch_motion_files(
+            [{"path": "index.html", "content": "<html><head></head><body><main><section>Hi</section></main></body></html>", "language": "html"}],
+            prompt="cinematic 3D animated website",
+            mode="website",
+        )
+        paths = {f["path"] for f in files}
+        assert "motion_manifest.json" in paths
+        assert "script.js" in paths
+        assert manifest["reduced_motion_supported"] is True
+
+    def test_media_injects_persisted_assets(self, tmp_path):
+        from app.services.media_runtime_service import inject_media_assets
+        (tmp_path / "index.html").write_text("<html><body><main></main></body></html>")
+        (tmp_path / "styles.css").write_text("")
+        (tmp_path / "media").mkdir()
+        (tmp_path / "media" / "asset.jpg").write_bytes(b"fake")
+        changed = inject_media_assets(tmp_path, [{"path": "media/asset.jpg", "media_type": "image"}])
+        assert "index.html" in changed
+        html = (tmp_path / "index.html").read_text()
+        assert "data-amarktai-media-asset" in html
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # continue_build_service

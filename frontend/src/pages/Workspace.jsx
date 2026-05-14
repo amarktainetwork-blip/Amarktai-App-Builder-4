@@ -59,6 +59,10 @@ export default function WorkspacePage() {
   const [buildPlan, setBuildPlan] = useState(null);
   // Phase 2: AI Product Advisor result
   const [advisorResult, setAdvisorResult] = useState(null);
+  const [runtimeQa, setRuntimeQa] = useState(null);
+  const [mediaRuntime, setMediaRuntime] = useState(null);
+  const [motionManifest, setMotionManifest] = useState(null);
+  const [qualityReport, setQualityReport] = useState(null);
 
   const wsRef = useRef(null);
   // Auto-reconnect state: "connecting" = initial attempt, "connected" = live, "reconnecting" = retrying after drop
@@ -87,6 +91,10 @@ export default function WorkspacePage() {
       // Seed Phase 4 + Phase 2 state from stored project data
       if (p?.build_plan) setBuildPlan(p.build_plan);
       if (p?.advisor_result) setAdvisorResult(p.advisor_result);
+      if (p?.runtime_qa) setRuntimeQa(p.runtime_qa);
+      if (p?.media_runtime || p?.media_manifest) setMediaRuntime(p.media_runtime || p.media_manifest);
+      if (p?.motion_manifest) setMotionManifest(p.motion_manifest);
+      if (p?.quality_report) setQualityReport(p.quality_report);
     }).catch(() => toast.error("Failed to load project"));
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -190,6 +198,17 @@ export default function WorkspacePage() {
     } else if (evt.type === "coverage_score") {
       // Live coverage score from orchestrator
       if (evt.data) setCoverageResult(evt.data);
+    } else if (evt.type === "runtime_qa" || evt.type === "runtime_qa_result") {
+      if (evt.data) setRuntimeQa(evt.data);
+    } else if (evt.type === "media_runtime" || evt.type === "media_manifest") {
+      if (evt.data) setMediaRuntime(evt.data);
+    } else if (evt.type === "motion_manifest") {
+      if (evt.data) setMotionManifest(evt.data);
+    } else if (evt.type === "quality_report") {
+      if (evt.data) {
+        setQualityReport(evt.data);
+        if (evt.data.runtime_qa) setRuntimeQa(evt.data.runtime_qa);
+      }
     } else if (evt.type === "request_coverage_passed") {
       if (evt.data) setCoverageResult(evt.data);
       toast.success("Coverage check passed.");
@@ -566,6 +585,12 @@ export default function WorkspacePage() {
           <BuildPlanBanner plan={buildPlan} />
           {/* Phase 2: AI Product Advisor (shown after build completes) */}
           <AdvisorPanel advisor={advisorResult} />
+          <RuntimeEvidencePanel
+            runtimeQa={runtimeQa}
+            mediaRuntime={mediaRuntime}
+            motionManifest={motionManifest}
+            qualityReport={qualityReport}
+          />
           {/* Phase 4: Repo workbench (shown for imported repos) */}
           {isRepoProject && (
             <RepoWorkbenchPanel
@@ -819,6 +844,12 @@ export default function WorkspacePage() {
             <ValidationPanel validation={validation} />
             <BuildPlanBanner plan={buildPlan} />
             <AdvisorPanel advisor={advisorResult} />
+            <RuntimeEvidencePanel
+              runtimeQa={runtimeQa}
+              mediaRuntime={mediaRuntime}
+              motionManifest={motionManifest}
+              qualityReport={qualityReport}
+            />
             {isRepoProject && (
               <RepoWorkbenchPanel
                 projectId={projectId}
@@ -842,6 +873,50 @@ export default function WorkspacePage() {
         onOpenChange={setMediaLibraryOpen}
         projectId={projectId}
       />
+    </div>
+  );
+}
+
+function RuntimeEvidencePanel({ runtimeQa, mediaRuntime, motionManifest, qualityReport }) {
+  if (!runtimeQa && !mediaRuntime && !motionManifest && !qualityReport) return null;
+  const runtimePass = runtimeQa?.pass;
+  const mediaCount = mediaRuntime?.asset_count ?? mediaRuntime?.assets?.length;
+  const motionFiles = motionManifest?.changed_files || [];
+  const blockers = [
+    ...(qualityReport?.blockers || []).map((b) => b.message || String(b)),
+    ...(runtimeQa?.blockers || []),
+  ].filter(Boolean);
+  return (
+    <div data-testid="runtime-evidence-panel" className="border-y border-amk-line bg-amk-panel px-3 py-2 font-mono text-[10px]">
+      <div className="flex items-center gap-2">
+        <span className="uppercase tracking-wider text-amk-accent">Runtime evidence</span>
+        {runtimeQa && (
+          <span style={{ color: runtimePass ? "#00E676" : "#FF5722" }}>
+            QA {runtimePass ? "PASS" : "BLOCKED"}
+          </span>
+        )}
+        {qualityReport && <span className="text-amk-fg3">Quality {qualityReport.score}/100</span>}
+      </div>
+      <div className="mt-1 grid gap-1 text-amk-fg2">
+        {runtimeQa && (
+          <div>
+            Screenshots: {Object.keys(runtimeQa.screenshots || {}).join(", ") || "none"} ·
+            Accessibility {runtimeQa.accessibility?.score ?? 0} ·
+            Performance {runtimeQa.performance?.score ?? 0}
+          </div>
+        )}
+        {mediaRuntime && (
+          <div>Media assets: {mediaCount ?? 0} · status {mediaRuntime.status || (mediaCount ? "ready" : "missing")}</div>
+        )}
+        {motionManifest && (
+          <div>Motion: {motionManifest.strategy || "patched"} · files {motionFiles.join(", ") || "none"}</div>
+        )}
+        {blockers.length > 0 && (
+          <div className="text-agent-scout">
+            Blockers: {blockers.slice(0, 3).join("; ")}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -147,6 +147,9 @@ export const Builds = {
   gitCommit: (projectId, body) => api.post(`/builds/${projectId}/git/commit`, body).then((r) => r.data),
   gitPush: (projectId, body) => api.post(`/builds/${projectId}/git/push`, body).then((r) => r.data),
   gitOpenPR: (projectId, body) => api.post(`/builds/${projectId}/git/open-pr`, body).then((r) => r.data),
+  repoWorkflowRun: (projectId, body) => api.post(`/builds/${projectId}/repo-workflow/run`, body).then((r) => r.data),
+  runtimeQA: (projectId, body) => api.post(`/builds/${projectId}/runtime-qa`, body).then((r) => r.data),
+  mediaRuntime: (projectId, body) => api.post(`/builds/${projectId}/media-runtime`, body).then((r) => r.data),
   storageUsage: () => api.get("/builds/storage-usage").then((r) => r.data),
   archive: (workspacePath, confirmed = true) =>
     api.post("/builds/archive", { workspace_path: workspacePath, confirmed }).then((r) => r.data),

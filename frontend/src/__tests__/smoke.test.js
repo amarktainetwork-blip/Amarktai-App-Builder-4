@@ -95,6 +95,22 @@ test("frontend API has GitHub workbench and git PR clients", () => {
   expect(content).toMatch(/githubRepos/);
   expect(content).toMatch(/githubBranches/);
   expect(content).toMatch(/gitOpenPR/);
+  expect(content).toMatch(/repoWorkflowRun/);
+  expect(content).toMatch(/runtimeQA/);
+  expect(content).toMatch(/mediaRuntime/);
+});
+
+test("workspace shows runtime media motion QA evidence", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/RuntimeEvidencePanel/);
+  expect(content).toMatch(/runtime-evidence-panel/);
+  expect(content).toMatch(/motion_manifest/);
+  expect(content).toMatch(/media_runtime/);
+  expect(content).toMatch(/runtime_qa/);
 });
 
 // ── Workspace navigation ──────────────────────────────────────────────────────

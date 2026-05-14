@@ -29,6 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.services.runtime_qa_service import run_runtime_qa
+
 logger = logging.getLogger("amarktai.quality_gate")
 
 # ── Patterns ──────────────────────────────────────────────────────────────────
@@ -311,7 +313,50 @@ def check_preview_manifest(ws: Path) -> dict[str, Any]:
 
 # ── Main gate ─────────────────────────────────────────────────────────────────
 
-def run_quality_gate(workspace_path: str | Path) -> dict[str, Any]:
+def check_media_manifest(ws: Path) -> dict[str, Any]:
+    """Require persisted real media assets when media is mandatory."""
+    for rel in ("media_manifest.json", "media-manifest.json", "media/manifest.json"):
+        path = ws / rel
+        if not path.exists():
+            continue
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {"ok": False, "blocker": True, "message": f"Media manifest {rel} is invalid JSON."}
+        assets = manifest.get("assets") or manifest.get("items") or manifest.get("media") or []
+        existing = []
+        for item in assets:
+            raw = item.get("path") or item.get("file") or item.get("url") if isinstance(item, dict) else str(item)
+            if not raw or str(raw).startswith(("http://", "https://", "data:")):
+                continue
+            if (ws / str(raw).lstrip("/")).exists():
+                existing.append(raw)
+        if existing:
+            return {"ok": True, "manifest": rel, "asset_count": len(existing)}
+        return {"ok": False, "blocker": True, "message": f"Media manifest {rel} contains no existing local asset files."}
+    return {"ok": False, "blocker": True, "message": "Premium/media build requires persisted media_manifest.json with real asset files."}
+
+
+def check_motion_manifest(ws: Path) -> dict[str, Any]:
+    """Require motion manifest and source-level animation evidence."""
+    manifest = next((rel for rel in ("motion_manifest.json", "motion-manifest.json") if (ws / rel).exists()), None)
+    if not manifest:
+        return {"ok": False, "blocker": True, "message": "Premium/motion build requires motion_manifest.json."}
+    source_files = _iter_source_files(ws, {".html", ".css", ".js", ".jsx", ".ts", ".tsx"})
+    combined = "\n".join(p.read_text(errors="replace")[:50000] for p in source_files[:50])
+    if not re.search(r"gsap|three|@react-three/fiber|framer-motion|requestAnimationFrame|@keyframes|animation\s*:", combined, re.IGNORECASE):
+        return {"ok": False, "blocker": True, "message": "Motion manifest exists but no motion implementation was found in source files."}
+    return {"ok": True, "manifest": manifest}
+
+
+def run_quality_gate(
+    workspace_path: str | Path,
+    *,
+    strict: bool = False,
+    require_runtime: bool = False,
+    require_media: bool = False,
+    require_motion: bool = False,
+) -> dict[str, Any]:
     """
     Run all quality checks on a project workspace.
 
@@ -349,6 +394,19 @@ def run_quality_gate(workspace_path: str | Path) -> dict[str, Any]:
         "dead_ctas":    check_dead_ctas(ws),
         "preview_manifest": check_preview_manifest(ws),
     }
+    if strict or require_media:
+        checks["media_manifest"] = check_media_manifest(ws)
+    if strict or require_motion:
+        checks["motion_manifest"] = check_motion_manifest(ws)
+    runtime_report: dict[str, Any] | None = None
+    if strict or require_runtime:
+        runtime_report = run_runtime_qa(ws)
+        checks["runtime_qa"] = {
+            "ok": bool(runtime_report.get("pass")),
+            "blocker": True,
+            "message": "; ".join(runtime_report.get("blockers", [])) or "Runtime QA failed.",
+            "report_path": runtime_report.get("report_path"),
+        }
 
     blockers = []
     warnings = []
@@ -384,6 +442,8 @@ def run_quality_gate(workspace_path: str | Path) -> dict[str, Any]:
         "fixes_applied": [],
         "files_checked": files_checked,
         "checks": checks,
+        "strict": strict,
+        "runtime_qa": runtime_report,
         "repair_suggestions": suggestions,
         "workspace_path": str(ws),
         "checked_at": _now(),
