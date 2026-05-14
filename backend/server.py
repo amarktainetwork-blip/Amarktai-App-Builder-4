@@ -41,6 +41,7 @@ from agents.logo_agent import run_logo_agent, logo_agent_prompt_block
 from agents.agent_contracts import get_all_contracts, get_contract
 from agents.html_validator import validate_project_files_enhanced
 from agents.mode_classifier import classify_build_mode, ModeClassification
+from agents.project_memory import make_empty_memory
 from app.versioning.version_store import (
     create_version,
     list_versions,
@@ -2883,22 +2884,18 @@ async def get_agent_contract(agent_name: str, _: dict = Depends(require_user)) -
 # ── Project Memory Endpoints ─────────────────────────────────────────────────
 
 def _empty_project_memory() -> dict:
-    return {
-        "brand": {},
-        "designTokens": {},
-        "fontPair": {},
-        "logo": {},
+    memory = make_empty_memory()
+    memory.update({
         "mediaAssets": [],
         "stack": {},
         "database": {},
         "auth": {},
         "envRequirements": [],
         "deploymentTarget": "",
-        "iterationHistory": [],
         "modelCalls": [],
         "decisions": [],
-        "designSignatures": [],
-    }
+    })
+    return memory
 
 
 @secured.get("/projects/{project_id}/memory")

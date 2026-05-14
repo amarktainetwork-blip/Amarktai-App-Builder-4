@@ -6,6 +6,7 @@ import ClarificationModal from "@/components/ClarificationModal";
 import CapabilityStatus from "@/components/CapabilityStatus";
 import { Button } from "@/components/ui/button";
 import { Clarify, Projects, System } from "@/lib/amk-api";
+import { readinessBlockMessage, readinessBlocksBuild } from "@/lib/readiness";
 
 const MODES = [
   ["landing_page", "Landing page", "Static, image-rich page"],
@@ -41,8 +42,8 @@ export default function NewBuildPage() {
   useEffect(() => { System.readiness().then(setReadiness).catch(() => setReadiness(null)); }, []);
 
   const doCreate = async (enrichedPrompt, upgradeAcknowledged = false, extraParams = {}) => {
-    if (readiness?.overall && readiness.overall !== "PASS") {
-      toast.error("Readiness is not passing. Check Settings and System before starting agents.");
+    if (readinessBlocksBuild(readiness)) {
+      toast.error(readinessBlockMessage(readiness));
       return;
     }
     if (!name.trim() || !enrichedPrompt.trim()) {

@@ -29,6 +29,7 @@ updated version; callers must persist it with ``save_memory``.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
@@ -109,13 +110,25 @@ def make_empty_memory() -> dict:
     }
 
 
+def _merge_schema_defaults(current: Any, default: Any) -> Any:
+    """Recursively fill missing schema keys while preserving stored values."""
+    if isinstance(default, dict) and not isinstance(current, dict):
+        return deepcopy(default)
+    if isinstance(current, dict) and isinstance(default, dict):
+        for key, default_val in default.items():
+            if key not in current:
+                current[key] = deepcopy(default_val)
+            else:
+                current[key] = _merge_schema_defaults(current[key], default_val)
+    return current
+
+
 def _ensure_schema(memory: dict) -> dict:
-    """Fill any missing top-level keys so older memory docs are safe."""
+    """Fill missing nested keys so older memory docs are safe."""
     default = make_empty_memory()
-    for key, default_val in default.items():
-        if key not in memory:
-            memory[key] = default_val
-    return memory
+    if not isinstance(memory, dict):
+        return default
+    return _merge_schema_defaults(memory, default)
 
 
 # ── Persistence helpers ──────────────────────────────────────────────────────

@@ -34,6 +34,16 @@ def test_normalize_build_context_missing_audience_does_not_crash():
     assert partial["target_audience"] == DEFAULT_AUDIENCE
 
 
+def test_project_memory_schema_repairs_legacy_empty_brand():
+    from agents.project_memory import _ensure_schema, update_memory_brand
+
+    memory = _ensure_schema({"brand": {}, "design": {}, "product": {}})
+
+    assert memory["brand"]["audience"] == ""
+    updated = update_memory_brand(memory, {"summary": "Premium builder site"}, "website")
+    assert updated["brand"]["audience"] == ""
+
+
 def test_landing_page_required_files_are_react_contract():
     from agents.build_contract import get_required_files
 
