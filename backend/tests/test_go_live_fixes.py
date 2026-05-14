@@ -136,3 +136,48 @@ document.documentElement.dataset.ready = "true";
 
     assert {"index.html", "styles.css", "script.js"}.issubset(paths)
     assert not any("No structured files" in warning for warning in warnings)
+
+
+def test_extract_files_from_markdown_heading_paths():
+    from agents.build_contract import extract_files_from_model_output
+
+    raw = """
+### src/App.jsx
+```jsx
+export default function App(){ return <main>Amarktai Builder</main>; }
+```
+
+**src/App.css**
+```css
+main { min-height: 100vh; }
+```
+"""
+    files, warnings, _summary = extract_files_from_model_output(raw)
+    paths = {item["path"] for item in files}
+
+    assert {"src/App.jsx", "src/App.css"}.issubset(paths)
+    assert not any("No structured files" in warning for warning in warnings)
+
+
+def test_production_static_config_allows_settings_backed_genx(monkeypatch, tmp_path):
+    from config import assert_startup_config, validate_static_config
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("JWT_SECRET", "x" * 48)
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("ADMIN_PASSWORD", "strong-password-123")
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", "YW1hcmt0YWktZGV2LWZlcm5ldC1rZXktMzItYnl0ZSE=")
+    monkeypatch.setenv("MONGO_URL", "mongodb://mongo:27017")
+    monkeypatch.setenv("DB_NAME", "amarktai_builder")
+    monkeypatch.setenv("CORS_ORIGINS", "https://builder.amarktai.com")
+    monkeypatch.setenv("BUILDS_STORAGE_ROOT", str(tmp_path))
+    monkeypatch.delenv("GENX_API_KEY", raising=False)
+
+    checks = validate_static_config()
+    blockers = [check for check in checks if check.status == "FAIL" and check.severity == "blocker"]
+    genx_source = next(check for check in checks if check.name == "GENX provider source")
+
+    assert blockers == []
+    assert genx_source.status == "WARN"
+    assert "dashboard Settings" in genx_source.detail
+    assert_startup_config()

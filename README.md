@@ -1,6 +1,6 @@
 # Amarktai App Builder
 
-Amarktai App Builder is a self-hosted real-time app builder with Amarktai Assistant built in. Amarktai Coding Agents run Scout, Architect, Coder, Reviewer, and Iteration through GenX Router using one required AI key: `GENX_API_KEY`.
+Amarktai App Builder is a self-hosted real-time app builder with Amarktai Assistant built in. Amarktai Coding Agents run Scout, Architect, Coder, Reviewer, and Iteration through GenX Router using one required runtime AI key: `GENX_API_KEY`, supplied either by environment or encrypted dashboard Settings.
 
 ## Features
 
@@ -54,7 +54,6 @@ Deployment target:
 ## Required Environment
 
 - `APP_ENV=production`
-- `GENX_API_KEY`
 - `JWT_SECRET`
 - `ADMIN_EMAIL`
 - `ADMIN_PASSWORD`
@@ -65,7 +64,7 @@ Deployment target:
 - `CORS_ORIGINS`
 - `BUILDS_STORAGE_ROOT`
 
-Production startup fails if critical secrets are missing or weak. `JWT_SECRET` must be at least 32 characters, `ADMIN_PASSWORD` at least 12 characters, `SETTINGS_ENCRYPTION_KEY` must be a Fernet-compatible key, `GENX_API_KEY` must be present, `BUILDS_STORAGE_ROOT` must be writable, and `CORS_ORIGINS` cannot be `*`.
+Production startup fails if critical static secrets are missing or weak. `JWT_SECRET` must be at least 32 characters, `ADMIN_PASSWORD` at least 12 characters, `SETTINGS_ENCRYPTION_KEY` must be a Fernet-compatible key, `BUILDS_STORAGE_ROOT` must be writable, and `CORS_ORIGINS` cannot be `*`. `GENX_API_KEY` is required at runtime for builder agents, but may be supplied through encrypted dashboard Settings; readiness fails clearly if neither Settings nor environment provides a valid key.
 
 ## Optional Environment
 

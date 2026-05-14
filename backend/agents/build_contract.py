@@ -639,6 +639,10 @@ def extract_files_from_model_output(text: str) -> tuple[list[dict], list[str], s
                 if m:
                     path = m.group(1)
                     break
+                cleaned_line = re.sub(r"^[#*\-\s`]+|[`*:]+$", "", line.strip())
+                if re.fullmatch(r"[\w./-]+\.[A-Za-z0-9]+", cleaned_line):
+                    path = cleaned_line
+                    break
         if not path:
             default_path = default_path_by_lang.get(lang.lower())
             content = match.group("content")

@@ -2472,6 +2472,7 @@ async def test_build_pipeline_missing_audience_reaches_architect_and_coder(monke
     assert _project["build_context"]["audience"]
     assert _project["build_context"]["target_audience"] == _project["build_context"]["audience"]
     assert _project["generated_files"]
+    assert "quality_report.md" in {item["path"] for item in written}
     assert _project["quality_report"]["score"] >= 0
     assert not _project.get("error")
 
@@ -2533,7 +2534,7 @@ async def test_build_pipeline_malformed_coder_output_uses_fallback_preview(monke
     assert "coder" in calls
     assert "repair" in calls
     assert _project["status"] == "ready"
-    assert {"index.html", "styles.css", "script.js", "quality_report.md"}.issubset(paths)
+    assert {"index.html", "styles.css", "script.js", "quality_report.md", "README.md"}.issubset(paths)
     assert _project["preview_manifest"]["status"] == "ready"
     assert _project["quality_report"]["score"] >= 0
     assert "agent_raw_responses.coder" in _project
@@ -2565,6 +2566,32 @@ async def test_run_agent_blocks_accepts_markdown_fenced_json():
     assert result["data"]["files"][0]["path"] == "index.html"
     assert result["data"]["summary"] == "ok"
     assert "agent_raw_responses.coder" not in _project
+
+
+@pytest.mark.asyncio
+async def test_run_agent_blocks_non_coder_uses_new_error_and_sanitized_snippet():
+    """The old fatal parser wording must not leak, and snippets must redact secret-like values."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    db, _project, _files, _events, _messages = _make_db()
+    provider = MagicMock()
+    provider.complete = AsyncMock(side_effect=[
+        {"text": "bad output with api_key=super-secret-value", "model_label": "test-model", "session_id": "s", "usage": {}},
+        {"text": "still not json", "model_label": "repair-model", "session_id": "s2", "usage": {}},
+    ])
+    emitted = []
+
+    async def emit(event):
+        emitted.append(event)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    with pytest.raises(ValueError) as exc:
+        await orch._run_agent_blocks("motion_3d", "system", "{}")
+
+    assert "neither valid AMARKTAI file blocks nor valid JSON" not in str(exc.value)
+    assert "did not contain usable files or JSON after repair" in str(exc.value)
+    assert "super-secret-value" not in _messages[-1]["content"]
+    assert "[redacted]" in _messages[-1]["content"]
 
 
 def test_preview_executor_static_returns_can_preview():
@@ -2833,7 +2860,7 @@ def test_create_branch_pr_body_includes_scores():
         return result
 
     # Run in asyncio
-    result = asyncio.get_event_loop().run_until_complete(run())
+    result = asyncio.run(run())
     assert result == mock_result
 
 
@@ -3384,9 +3411,7 @@ def test_attribute_error_not_raised_on_none_model_data():
 
     # Must not raise AttributeError
     try:
-        asyncio.get_event_loop().run_until_complete(
-            orch.run_iteration("Make the hero darker")
-        )
+        asyncio.run(orch.run_iteration("Make the hero darker"))
     except AttributeError as exc:
         raise AssertionError(
             f"AttributeError (NoneType crash) reached caller: {exc}"
