@@ -2482,7 +2482,7 @@ async def test_build_pipeline_missing_audience_reaches_architect_and_coder(monke
 
 @pytest.mark.asyncio
 async def test_build_pipeline_malformed_coder_output_uses_fallback_preview(monkeypatch, tmp_path):
-    """Malformed Coder prose must not fail the project when fallback files can be generated."""
+    """Malformed Coder prose may create recovery files, but premium builds must not be marked ready."""
     from unittest.mock import AsyncMock, MagicMock
 
     monkeypatch.setenv("BUILDS_STORAGE_ROOT", str(tmp_path))
@@ -2533,13 +2533,14 @@ async def test_build_pipeline_malformed_coder_output_uses_fallback_preview(monke
     paths = {item["path"] for item in written}
     assert "coder" in calls
     assert "repair" in calls
-    assert _project["status"] == "ready"
+    assert _project["status"] == "failed"
+    assert _project["failed_agent"] == "coder"
+    assert _project["fallback_used"] is True
+    assert _project["can_finalize"] is False
     assert {"index.html", "styles.css", "script.js", "quality_report.md", "README.md"}.issubset(paths)
-    assert _project["preview_manifest"]["status"] == "ready"
-    assert _project["quality_report"]["score"] >= 0
     assert "agent_raw_responses.coder" in _project
-    assert any(evt["agent"] == "coder" and evt["status"] == "completed" for evt in _events)
-    assert not _project.get("error")
+    assert any(evt["agent"] == "coder" and evt["status"] == "failed" for evt in _events)
+    assert "fallback output cannot be marked ready" in _project.get("error", "")
 
 
 @pytest.mark.asyncio
