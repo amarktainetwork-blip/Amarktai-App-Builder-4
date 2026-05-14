@@ -9,12 +9,17 @@ Amarktai App Builder is a self-hosted real-time app builder with Amarktai Assist
 - Real-time workspace updates over WebSocket.
 - Persisted agent events, messages, generated files, usage estimates, and failure reasons.
 - Authenticated live preview.
+- Idea Builder chat for refining rough ideas into build-ready prompts.
 - Amarktai Assistant chat for project iteration.
 - Pull request creation for imported repositories when `GITHUB_PAT` is configured.
 - New GitHub repository creation during finalize when `GITHUB_PAT` is configured.
 - Encrypted settings storage in MongoDB for `GENX_API_KEY`, `GITHUB_PAT`, and `BRAVE_SEARCH_API_KEY`.
 - Admin user management.
 - Truthful `/api/health` and `/api/readiness` endpoints.
+
+## Idea Builder
+
+Idea Builder is available at `Dashboard -> Idea Builder`. It stores authenticated brainstorming sessions, asks product/design/workflow questions, generates a final build prompt, and hands that prompt to New Build. If GenX is unavailable, it falls back to deterministic prompt shaping and does not claim model-backed brainstorming occurred. API details are documented in `docs/idea-builder.md`.
 
 ## Docker Quick Start
 

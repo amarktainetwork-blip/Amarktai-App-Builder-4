@@ -330,7 +330,8 @@ AGENT_REGISTRY: dict[str, dict[str, Any]] = {
         "role": "Checks layout quality, typography, contrast, spacing, mobile responsiveness, "
                 "and screenshot-based quality.",
         "status": ACTIVE,
-        "implementation": "VISUAL_QA_PROMPT + quality_validator scoring",
+        "implementation": "orchestrator._static_visual_qa_result() + quality_validator scoring; "
+                          "VISUAL_QA_PROMPT remains available for future browser-backed review",
         "prompt_key": "VISUAL_QA_PROMPT",
         "tools": [
             "layout_checker", "typography_validator", "contrast_checker",
@@ -342,7 +343,8 @@ AGENT_REGISTRY: dict[str, dict[str, Any]] = {
         "called_from": ["_run_build_pipeline (post-build gate)"],
         "connected_to_memory": True,
         "connected_to_capability_registry": True,
-        "notes": "Runs deterministic quality_validator + LLM visual review for premium builds.",
+        "notes": "Runs deterministic static Visual QA for every completed build and persists "
+                 "visual_qa_result. Browser screenshots require a future Playwright runtime.",
     },
 
     # ── 14. Accessibility Agent ───────────────────────────────────────────────

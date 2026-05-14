@@ -1,9 +1,10 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Activity, Boxes, Database, Github, Image, LayoutDashboard, LogOut, Plus, Settings, Sparkles } from "lucide-react";
+import { Activity, Boxes, Database, Github, Image, LayoutDashboard, Lightbulb, LogOut, Plus, Settings, Sparkles } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
 const NAV = [
   { to: "/dashboard", label: "Overview", icon: LayoutDashboard, end: true },
+  { to: "/dashboard/idea-builder", label: "Idea Builder", icon: Lightbulb },
   { to: "/dashboard/new", label: "New Build", icon: Plus },
   { to: "/dashboard/projects", label: "Projects", icon: Boxes },
   { to: "/dashboard/repo", label: "Repo Workbench", icon: Github },

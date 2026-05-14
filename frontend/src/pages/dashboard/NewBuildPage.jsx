@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Cpu, Image, Palette, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import ClarificationModal from "@/components/ClarificationModal";
@@ -28,6 +28,7 @@ const MEDIA_OPTIONS = [
 
 export default function NewBuildPage() {
   const nav = useNavigate();
+  const location = useLocation();
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState("web_app");
@@ -40,6 +41,13 @@ export default function NewBuildPage() {
   const [pendingCreate, setPendingCreate] = useState(null);
 
   useEffect(() => { System.readiness().then(setReadiness).catch(() => setReadiness(null)); }, []);
+  useEffect(() => {
+    const state = location.state || {};
+    if (state.ideaPrompt) setPrompt(state.ideaPrompt);
+    if (state.projectName) setName(state.projectName);
+    if (state.mode) setMode(state.mode);
+    if (state.qualityTier) setQualityTier(state.qualityTier);
+  }, [location.state]);
 
   const doCreate = async (enrichedPrompt, upgradeAcknowledged = false, extraParams = {}) => {
     if (readinessBlocksBuild(readiness)) {
