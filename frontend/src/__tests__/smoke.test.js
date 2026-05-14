@@ -74,6 +74,29 @@ test("dashboard has top navigation routes", () => {
   expect(content).toMatch(/Repo Workbench/);
 });
 
+test("repo workbench exposes GitHub browse and branch selection", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/dashboard/RepoWorkbenchPage.jsx"),
+    "utf8"
+  );
+  expect(content).toMatch(/Load repos/);
+  expect(content).toMatch(/githubBranches/);
+  expect(content).toMatch(/clone-selected-repo-btn/);
+  expect(content).toMatch(/github-branch-select/);
+});
+
+test("frontend API has GitHub workbench and git PR clients", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../lib/amk-api.js"),
+    "utf8"
+  );
+  expect(content).toMatch(/githubRepos/);
+  expect(content).toMatch(/githubBranches/);
+  expect(content).toMatch(/gitOpenPR/);
+});
+
 // ── Workspace navigation ──────────────────────────────────────────────────────
 
 test("workspace has Back to Projects button", () => {

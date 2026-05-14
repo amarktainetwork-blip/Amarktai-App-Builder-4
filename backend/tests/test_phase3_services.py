@@ -146,6 +146,73 @@ class TestGitWorkspaceServiceClone:
     def test_sanitise_ref_name_allows_valid(self):
         assert self.svc._sanitise_ref_name("myorg") == "myorg"
 
+    def test_get_branch_diff_reports_no_changes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir) / "repos" / "owner" / "repo" / "feature"
+            ws.mkdir(parents=True)
+            with patch.object(self.svc, "_builds_root", return_value=Path(tmpdir)):
+                with patch.object(self.svc, "_run_git") as run_git:
+                    run_git.side_effect = [
+                        (0, "", ""),
+                        (0, "", ""),
+                        (0, "", ""),
+                    ]
+                    result = self.svc.get_branch_diff("owner", "repo", "feature", "main")
+        assert result["ok"] is True
+        assert result["has_changes"] is False
+        assert result["changed_files"] == []
+
+    def test_get_branch_diff_reports_changed_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir) / "repos" / "owner" / "repo" / "feature"
+            ws.mkdir(parents=True)
+            with patch.object(self.svc, "_builds_root", return_value=Path(tmpdir)):
+                with patch.object(self.svc, "_run_git") as run_git:
+                    run_git.side_effect = [
+                        (0, "", ""),
+                        (0, "M\tfrontend/src/App.jsx\nA\tREADME.md\n", ""),
+                        (0, " 2 files changed, 12 insertions(+)", ""),
+                    ]
+                    result = self.svc.get_branch_diff("owner", "repo", "feature", "main")
+        assert result["ok"] is True
+        assert result["has_changes"] is True
+        assert "M\tfrontend/src/App.jsx" in result["changed_files"]
+
+
+class TestGithubRepoService:
+
+    def setup_method(self):
+        from app.services import github_repo_service as svc
+        self.svc = svc
+
+    def test_validate_owner_repo_rejects_traversal(self):
+        with pytest.raises(ValueError):
+            self.svc.validate_owner_repo("../../etc", "repo")
+        with pytest.raises(ValueError):
+            self.svc.validate_owner_repo("owner", "../repo")
+
+    def test_normalize_repo_masks_to_public_metadata_only(self):
+        item = {
+            "id": 123,
+            "name": "repo",
+            "full_name": "owner/repo",
+            "owner": {"login": "owner"},
+            "html_url": "https://github.com/owner/repo",
+            "clone_url": "https://github.com/owner/repo.git",
+            "default_branch": "main",
+            "private": True,
+            "description": "demo",
+            "updated_at": "2026-05-14T00:00:00Z",
+        }
+        result = self.svc.normalize_repo(item)
+        assert result["full_name"] == "owner/repo"
+        assert result["private"] is True
+        assert "token" not in result
+
+    def test_normalize_branch(self):
+        result = self.svc.normalize_branch({"name": "main", "commit": {"sha": "abc123"}, "protected": True})
+        assert result == {"name": "main", "commit_sha": "abc123", "protected": True}
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # frontend_detection_service
@@ -294,6 +361,28 @@ class TestCommandRunnerService:
         assert match is not None
         cmd_type, _ = match
         assert cmd_type == "test"
+
+    def test_allowlist_git_status_allowed(self):
+        match = self.svc._match_allowed(["git", "status", "--porcelain"])
+        assert match is not None
+        cmd_type, _ = match
+        assert cmd_type == "git"
+
+    def test_allowlist_git_diff_name_status_allowed(self):
+        match = self.svc._match_allowed(["git", "diff", "--name-status", "origin/main...HEAD"])
+        assert match is not None
+        cmd_type, _ = match
+        assert cmd_type == "git"
+
+    def test_docker_command_requires_env_gate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(self.svc, "_builds_root", return_value=Path(tmpdir)):
+                ws = Path(tmpdir) / "project"
+                ws.mkdir()
+                with patch.dict(os.environ, {"ALLOW_DOCKER_COMMANDS": ""}, clear=False):
+                    result = self.svc.run_command(ws, ["docker", "compose", "config"], project_id="test")
+                assert not result["ok"]
+                assert "ALLOW_DOCKER_COMMANDS" in result["error"]
 
     def test_allowlist_arbitrary_shell_blocked(self):
         assert self.svc._match_allowed(["bash", "-c", "rm -rf /"]) is None

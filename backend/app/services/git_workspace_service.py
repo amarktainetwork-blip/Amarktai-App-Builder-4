@@ -417,6 +417,56 @@ def push_branch(
     }
 
 
+def get_branch_diff(
+    owner: str,
+    repo: str,
+    branch: str,
+    base_branch: str = "main",
+) -> dict[str, Any]:
+    """Return changed files between base_branch and branch for PR gating."""
+    owner = _sanitise_ref_name(owner)
+    repo = _sanitise_ref_name(repo)
+    branch = _sanitise_branch(branch)
+    base_branch = _sanitise_branch(base_branch)
+    ws = _workspace_path(owner, repo, branch)
+
+    if not ws.exists():
+        return {"ok": False, "error": "Workspace not found", "changed_files": []}
+
+    # Fetch base refs first. If that fails, still try local refs so a user gets
+    # a useful deterministic response in offline/dev workspaces.
+    _run_git(["fetch", "origin", base_branch], cwd=ws)
+    candidates = [
+        f"origin/{base_branch}...HEAD",
+        f"{base_branch}...HEAD",
+    ]
+    last_error = ""
+    for revision_range in candidates:
+        rc, so, se = _run_git(["diff", "--name-status", revision_range], cwd=ws)
+        if rc == 0:
+            changed_files = [line.strip() for line in so.splitlines() if line.strip()]
+            rc_stat, stat, _ = _run_git(["diff", "--stat", revision_range], cwd=ws)
+            return {
+                "ok": True,
+                "base_branch": base_branch,
+                "head_branch": branch,
+                "has_changes": bool(changed_files),
+                "changed_files": changed_files,
+                "diff_stat": stat.strip() if rc_stat == 0 else "",
+                "checked_at": _now(),
+            }
+        last_error = se[:300]
+
+    return {
+        "ok": False,
+        "error": last_error or "Could not compare branch diff",
+        "base_branch": base_branch,
+        "head_branch": branch,
+        "changed_files": [],
+        "has_changes": False,
+    }
+
+
 def open_pull_request(
     owner: str,
     repo: str,

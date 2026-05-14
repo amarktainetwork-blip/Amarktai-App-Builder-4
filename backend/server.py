@@ -81,6 +81,7 @@ from app.services.build_storage_service import (
     detect_and_save_stack,
 )
 from app.services import git_workspace_service as _git_svc
+from app.services import github_repo_service as _github_repo_svc
 from app.services.frontend_detection_service import detect_frontend, list_project_files
 from app.services.command_runner_service import (
     run_command, run_install, run_build, run_tests, get_logs as get_runner_logs,
@@ -2646,6 +2647,34 @@ async def github_status() -> dict:
         return {"configured": True, "valid": False, "detail": str(exc)}
 
 
+@secured.get("/integrations/github/repos")
+async def github_repositories(
+    visibility: str = Query("all", pattern="^(all|public|private)$"),
+    per_page: int = Query(100, ge=1, le=100),
+) -> dict:
+    """List repositories visible to the configured GitHub PAT for dashboard import."""
+    pat = await _runtime_secret("GITHUB_PAT")
+    return await _github_repo_svc.list_repositories(
+        pat or "",
+        visibility=visibility,
+        per_page=per_page,
+    )
+
+
+@secured.get("/integrations/github/repos/{owner}/{repo}/branches")
+async def github_repository_branches(
+    owner: str,
+    repo: str,
+    per_page: int = Query(100, ge=1, le=100),
+) -> dict:
+    """List branches for a selected GitHub repository."""
+    pat = await _runtime_secret("GITHUB_PAT")
+    try:
+        return await _github_repo_svc.list_branches(pat or "", owner, repo, per_page=per_page)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @admin_api.get("/users")
 async def admin_list_users() -> list[dict]:
     docs = await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(500)
@@ -3974,6 +4003,16 @@ async def builds_git_open_pr(project_id: str, body: GitPRBody, claims: dict = De
     """Open a GitHub pull request."""
     github_pat = await _runtime_secret("GITHUB_PAT")
     try:
+        diff = _git_svc.get_branch_diff(
+            owner=body.owner,
+            repo=body.repo,
+            branch=body.head_branch,
+            base_branch=body.base_branch,
+        )
+        if not diff.get("ok"):
+            raise HTTPException(400, diff.get("error", "Could not verify branch diff before PR creation"))
+        if not diff.get("has_changes"):
+            raise HTTPException(400, "No branch diff found. Refusing to create an empty GitHub PR.")
         result = _git_svc.open_pull_request(
             owner=body.owner,
             repo=body.repo,
@@ -3985,11 +4024,33 @@ async def builds_git_open_pr(project_id: str, body: GitPRBody, claims: dict = De
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(500, f"Open PR failed: {exc}")
     if not result.get("ok"):
         raise HTTPException(400, result.get("error", "PR creation failed"))
-    return result
+    pr_url = result.get("pr_url") or ""
+    if pr_url:
+        await db.projects.update_one(
+            {"id": project_id},
+            {"$set": {"github_pr_url": pr_url, "updated_at": _now()}},
+        )
+        for workspace in list_workspaces():
+            if (
+                workspace.get("github_owner") == body.owner
+                and workspace.get("github_repo") == body.repo
+                and workspace.get("branch") == body.head_branch
+            ):
+                try:
+                    update_workspace_metadata(Path(workspace["local_path"]), {
+                        "github_pr_url": pr_url,
+                        "last_deploy_status": "github_pr_opened",
+                    })
+                except Exception as exc:
+                    logger.warning("Could not persist GitHub PR URL to workspace metadata: %s", exc)
+                break
+    return {**result, "diff": diff}
 
 
 # ════════════════════════════════════════════════════════════════════════════

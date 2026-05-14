@@ -9,6 +9,7 @@ Supported commands:
   pnpm install / pnpm run build / pnpm test
   yarn install / yarn build / yarn test
   python -m pytest / python -m unittest
+  git status / git diff / git log / git branch
   (docker commands require explicit confirmation)
 
 Security:
@@ -42,6 +43,8 @@ TIMEOUTS = {
     "build":   int(os.environ.get("RUNNER_BUILD_TIMEOUT", "300")),
     "test":    int(os.environ.get("RUNNER_TEST_TIMEOUT", "180")),
     "lint":    int(os.environ.get("RUNNER_LINT_TIMEOUT", "60")),
+    "git":     int(os.environ.get("RUNNER_GIT_TIMEOUT", "60")),
+    "docker":  int(os.environ.get("RUNNER_DOCKER_TIMEOUT", "300")),
     "default": int(os.environ.get("RUNNER_DEFAULT_TIMEOUT", "120")),
 }
 
@@ -79,6 +82,19 @@ ALLOWED_COMMANDS: list[tuple[str, tuple[str, ...]]] = [
     # pip (install only, inside workspace)
     ("install", ("pip", "install", "-r")),
     ("install", ("pip3", "install", "-r")),
+    # git read-only / branch inspection
+    ("git",     ("git", "status")),
+    ("git",     ("git", "status", "--porcelain")),
+    ("git",     ("git", "diff")),
+    ("git",     ("git", "diff", "--stat")),
+    ("git",     ("git", "diff", "--name-status")),
+    ("git",     ("git", "log")),
+    ("git",     ("git", "branch")),
+    # docker compose validation/build: gated by ALLOW_DOCKER_COMMANDS=true
+    ("docker",  ("docker", "compose", "config")),
+    ("docker",  ("docker", "compose", "build")),
+    ("docker",  ("docker-compose", "config")),
+    ("docker",  ("docker-compose", "build")),
 ]
 
 _SAFE_EXTRA_ARG_RE = re.compile(r"^[a-zA-Z0-9_\-\./=:]{1,200}$")
@@ -155,6 +171,14 @@ def run_command(
         }
 
     cmd_type, timeout = match
+    if cmd_type == "docker" and os.environ.get("ALLOW_DOCKER_COMMANDS", "").lower() not in {"1", "true", "yes"}:
+        return {
+            "ok": False,
+            "error": "Docker command requires ALLOW_DOCKER_COMMANDS=true",
+            "exit_code": -1,
+            "command": cmd_args,
+            "command_type": cmd_type,
+        }
 
     # Build environment
     env = {**os.environ}
