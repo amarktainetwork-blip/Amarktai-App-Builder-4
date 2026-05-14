@@ -29,6 +29,7 @@ from .build_contract import (
     get_required_files,
     infer_build_mode,
     infer_project_type,
+    remove_legacy_template_contamination,
     validate_project_files,
 )
 from .mcp_tools import ProjectFS
@@ -79,7 +80,7 @@ from app.services.build_storage_service import create_generated_workspace, updat
 from app.services.quality_gate_service import run_quality_gate
 from app.services.media_runtime_service import execute_media_plan
 from app.services.motion_runtime_service import patch_motion_files, prompt_requires_motion
-from settings_store import get_secret
+from settings_store import safe_get_secret
 
 # Per-agent timeout in seconds
 AGENT_TIMEOUTS = {
@@ -644,6 +645,10 @@ class BuildCancelled(Exception):
     """Raised when the build is cancelled by the user."""
 
 
+class MediaRuntimeBlocker(RuntimeError):
+    """Raised when required real media assets could not be persisted."""
+
+
 class Orchestrator:
     def __init__(self, db, provider: GenXProvider, project_id: str, emit: EmitFn):
         self.db = db
@@ -768,6 +773,14 @@ class Orchestrator:
         await self.emit({"type": "usage", "data": {
             "delta_tokens": tokens, "delta_cost": cost_usd, "model": model_label,
         }})
+
+    async def _secret_value(self, key: str, fallback: str = "") -> str:
+        """Resolve dashboard-managed secrets safely, with env fallback."""
+        try:
+            resolved = await safe_get_secret(self.db, key, env_fallback=True)
+            return str(resolved.get("value") or fallback or "")
+        except Exception:
+            return str(os.environ.get(key, fallback) or "")
 
     async def _persist_raw_agent_response(
         self,
@@ -1306,6 +1319,18 @@ class Orchestrator:
         """Mirror generated Mongo files to build storage and run quality reporting."""
         meta = create_generated_workspace(self.project_id)
         workspace = Path(meta["local_path"]).resolve()
+        files, removed_contamination = remove_legacy_template_contamination(
+            files,
+            prompt=prompt,
+            plan={"mode": mode, "quality_tier": quality_tier},
+        )
+        if removed_contamination:
+            await self._record_event(
+                "validator",
+                "warn",
+                "Removed legacy automotive template contamination before build storage persistence.",
+                meta={"removed_files": removed_contamination},
+            )
         written: list[str] = []
         for item in files:
             if not isinstance(item, dict):
@@ -1356,15 +1381,17 @@ class Orchestrator:
                 project_id=self.project_id,
                 prompt=prompt,
                 sections=[],
-                genx_api_key=(await get_secret(self.db, "GENX_API_KEY")) or "",
-                genx_base_url=(await get_secret(self.db, "GENX_BASE_URL")) or os.environ.get("GENX_BASE_URL", "https://query.genx.sh/v1"),
-                genx_image_model=(await get_secret(self.db, "GENX_MODEL_IMAGE")) or os.environ.get("GENX_MODEL_IMAGE", ""),
-                qwen_api_key=(await get_secret(self.db, "QWEN_API_KEY")) or "",
-                qwen_base_url=(await get_secret(self.db, "QWEN_BASE_URL")) or os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-                qwen_image_model=(await get_secret(self.db, "QWEN_MODEL_IMAGE")) or os.environ.get("QWEN_MODEL_IMAGE", ""),
-                pixabay_api_key=(await get_secret(self.db, "PIXABAY_API_KEY")) or "",
+                genx_api_key=await self._secret_value("GENX_API_KEY"),
+                genx_base_url=await self._secret_value("GENX_BASE_URL", "https://query.genx.sh/v1"),
+                genx_image_model=await self._secret_value("GENX_MODEL_IMAGE"),
+                qwen_api_key=await self._secret_value("QWEN_API_KEY"),
+                qwen_base_url=await self._secret_value("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+                qwen_image_model=await self._secret_value("QWEN_MODEL_IMAGE"),
+                pixabay_api_key=await self._secret_value("PIXABAY_API_KEY"),
             )
             await self.emit({"type": "media_runtime", "data": media_manifest})
+            await self.fs.write("media_manifest.json", json.dumps(media_manifest, indent=2), "json")
+            await self.emit({"type": "file_written", "data": {"path": "media_manifest.json"}})
             for changed_rel in media_manifest.get("injected_files", []):
                 changed_path = workspace / str(changed_rel).lstrip("/")
                 if changed_path.exists() and changed_path.is_file():
@@ -1376,6 +1403,8 @@ class Orchestrator:
                 f"Media runtime persisted {media_manifest.get('asset_count', 0)} asset(s).",
                 meta=media_manifest,
             )
+            if media_manifest.get("asset_count", 0) <= 0:
+                raise MediaRuntimeBlocker("Media runtime produced zero persisted assets for a media-required build.")
         quality_report = run_quality_gate(
             workspace,
             strict=quality_tier == "premium",
@@ -1406,13 +1435,17 @@ class Orchestrator:
                 "preview_manifest": preview_manifest,
                 "quality_report": quality_report,
                 "runtime_qa": quality_report.get("runtime_qa"),
+                "runtime_qa_result": quality_report.get("runtime_qa"),
                 "media_runtime": media_manifest,
+                "media_manifest": media_manifest,
                 "quality_report_path": str(workspace / "quality-report.json"),
                 "updated_at": _now(),
             }},
         )
         await self.emit({"type": "preview_manifest", "data": preview_manifest})
         await self.emit({"type": "quality_report", "data": quality_report})
+        if quality_report.get("runtime_qa"):
+            await self.emit({"type": "runtime_qa_result", "data": quality_report.get("runtime_qa")})
         if quality_tier == "premium" and not quality_report.get("pass"):
             first = (quality_report.get("blockers") or [{}])[0].get("message", "Premium quality gate failed.")
             raise RuntimeError(f"Premium quality gate blocked readiness: {first}")
@@ -1759,6 +1792,19 @@ class Orchestrator:
         await self._check_cancel()
         coder_data = coder["data"]
         generated_files = coder_data.get("files", [])
+        generated_files, removed_contamination = remove_legacy_template_contamination(
+            generated_files,
+            prompt=user_prompt,
+            requirements=scout_data,
+            plan=arch_data,
+        )
+        if removed_contamination:
+            await self._record_event(
+                "validator",
+                "warn",
+                "Removed legacy automotive template contamination before writing generated files.",
+                meta={"removed_files": removed_contamination},
+            )
 
         # Verify coder produced actual app files
         if not generated_files:
@@ -2198,7 +2244,8 @@ class Orchestrator:
         except Exception as qa_err:
             if project_after.get("quality_tier", "balanced") == "premium":
                 err = f"Premium runtime quality gate failed: {qa_err}"
-                await self._fail_project("validator", err)
+                failed_agent = "media_director" if isinstance(qa_err, MediaRuntimeBlocker) else "validator"
+                await self._fail_project(failed_agent, err)
                 await self._record_message("system", None, err, meta={"error": err})
                 return
             await self._record_event(

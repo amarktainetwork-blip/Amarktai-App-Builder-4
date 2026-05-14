@@ -4591,7 +4591,7 @@ async def builds_runtime_qa(project_id: str, body: QualityGateBody, claims: dict
         raise HTTPException(500, f"Runtime QA failed: {exc}")
     await db.projects.update_one(
         {"id": project_id},
-        {"$set": {"runtime_qa": result, "updated_at": _now()}},
+        {"$set": {"runtime_qa": result, "runtime_qa_result": result, "updated_at": _now()}},
     )
     return result
 

@@ -98,7 +98,9 @@ def run_runtime_qa(
 ) -> dict[str, Any]:
     workspace = Path(workspace_path).resolve()
     report_dir = workspace / "runtime-qa"
+    screenshots_dir = report_dir / "screenshots"
     report_dir.mkdir(parents=True, exist_ok=True)
+    screenshots_dir.mkdir(parents=True, exist_ok=True)
 
     report: dict[str, Any] = {
         "pass": False,
@@ -108,6 +110,7 @@ def run_runtime_qa(
         "console_errors": [],
         "accessibility": {"available": False, "score": 0, "violations": []},
         "performance": {"available": False, "score": 0},
+        "motion": {"available": False, "selectors_found": 0, "ok": True},
         "blockers": [],
         "warnings": [],
         "checked_at": _now(),
@@ -140,9 +143,16 @@ def run_runtime_qa(
                     page = browser.new_page(viewport=viewport)
                     page.on("console", lambda msg: report["console_errors"].append(msg.text) if msg.type == "error" else None)
                     page.goto(url, wait_until="networkidle", timeout=30000)
-                    screenshot = report_dir / f"{name}.png"
+                    screenshot = screenshots_dir / f"{name}.png"
                     page.screenshot(path=str(screenshot), full_page=True)
                     report["screenshots"][name] = str(screenshot)
+                    if name == "desktop":
+                        selectors_found = page.locator("[data-amarktai-motion-scene], [data-motion-runtime]").count()
+                        report["motion"] = {
+                            "available": selectors_found > 0,
+                            "selectors_found": selectors_found,
+                            "ok": selectors_found > 0 or not (workspace / "motion_manifest.json").exists(),
+                        }
                     if name == "desktop" and axe_source:
                         page.add_script_tag(content=axe_source)
                         axe_result = page.evaluate("async () => await axe.run(document)")
@@ -170,6 +180,8 @@ def run_runtime_qa(
 
     if not axe_source:
         report["blockers"].append("axe-core source is not available to the backend runtime.")
+    if (workspace / "motion_manifest.json").exists() and not report.get("motion", {}).get("ok"):
+        report["blockers"].append("Motion manifest exists but runtime motion selectors were not found.")
 
     lighthouse = _run_lighthouse(url, report_dir)
     report["lighthouse"] = lighthouse
@@ -196,6 +208,12 @@ def run_runtime_qa(
 
 def _persist(report_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
     report_path = report_dir / "runtime-qa-report.json"
+    accessibility_path = report_dir / "accessibility-report.json"
+    performance_path = report_dir / "performance-report.json"
     report["report_path"] = str(report_path)
+    report["accessibility_report_path"] = str(accessibility_path)
+    report["performance_report_path"] = str(performance_path)
+    accessibility_path.write_text(json.dumps(report.get("accessibility", {}), indent=2), encoding="utf-8")
+    performance_path.write_text(json.dumps(report.get("performance", {}), indent=2), encoding="utf-8")
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report

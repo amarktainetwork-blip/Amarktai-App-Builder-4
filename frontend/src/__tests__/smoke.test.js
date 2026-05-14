@@ -123,9 +123,31 @@ test("live verification scripts cover runtime, repo, premium, idea, and agent ma
     "scripts/verify_premium_build_live.sh",
     "scripts/verify_idea_builder_live.sh",
     "scripts/verify_agent_matrix.sh",
+    "scripts/verify_no_legacy_template_contamination.sh",
   ].forEach((rel) => {
     expect(fs.existsSync(path.join(root, rel))).toBe(true);
   });
+});
+
+test("frontend Dockerfile uses package-lock npm ci and does not require yarn.lock", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const root = path.join(__dirname, "../../..");
+  const dockerfile = fs.readFileSync(path.join(root, "frontend/Dockerfile"), "utf8");
+  expect(dockerfile).toMatch(/COPY package\.json package-lock\.json/);
+  expect(dockerfile).toMatch(/npm ci/);
+  expect(dockerfile).toMatch(/npm run build/);
+  expect(dockerfile).not.toMatch(/COPY package\.json yarn\.lock/);
+  expect(fs.existsSync(path.join(root, "frontend/package-lock.json"))).toBe(true);
+});
+
+test("dockerignore excludes frontend build context junk", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const content = fs.readFileSync(path.join(__dirname, "../../../frontend/.dockerignore"), "utf8");
+  expect(content).toMatch(/node_modules/);
+  expect(content).toMatch(/build/);
+  expect(content).toMatch(/\.cache/);
 });
 
 // ── Workspace navigation ──────────────────────────────────────────────────────

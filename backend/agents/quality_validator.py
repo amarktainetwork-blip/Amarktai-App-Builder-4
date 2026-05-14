@@ -19,6 +19,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .template_policy import AUTOMOTIVE_TEMPLATE_FILES, is_automotive_prompt
+
 # ── HTML content helpers ────────────────────────────────────────────────────
 
 # Tags that represent distinct semantic sections in a page
@@ -1104,23 +1106,35 @@ def score_project_quality(
         # Multi-page: check extra pages exist
         if project_type == "multi-page-site":
             prompt_lower = prompt.lower()
+            automotive_prompt = is_automotive_prompt(prompt)
             page_keywords = {
                 "about": "about.html",
                 "service": "services.html",
                 "pricing": "pricing.html",
                 "contact": "contact.html",
-                "inventory": "inventory.html",
-                "vehicle": "vehicle-detail.html",
-                "financ": "finance.html",
                 "team": "team.html",
                 "portfolio": "portfolio.html",
                 "blog": "blog.html",
             }
+            if automotive_prompt:
+                page_keywords.update({
+                    "inventory": "inventory.html",
+                    "vehicle": "vehicle-detail.html",
+                    "financ": "finance.html",
+                })
             for keyword, page_file in page_keywords.items():
                 if keyword in prompt_lower and page_file not in files_by_path:
                     quality_score -= 8
                     quality_errors.append(
                         f"Prompt mentions '{keyword}' but {page_file} was not generated."
+                    )
+            if not automotive_prompt:
+                contaminated = sorted(path for path in files_by_path if path in AUTOMOTIVE_TEMPLATE_FILES)
+                if contaminated:
+                    quality_score -= 50
+                    quality_errors.append(
+                        "Automotive starter pages appeared in a non-automotive build: "
+                        + ", ".join(contaminated)
                     )
 
             # Strict page count enforcement: if prompt requests N pages, require N .html files

@@ -13,6 +13,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from .quality_validator import score_project_quality
+from .template_policy import is_automotive_prompt, remove_legacy_template_contamination
 
 
 def safe_dict(value: Any) -> dict:
@@ -133,11 +134,7 @@ def get_required_files(project_type: str, build_mode: str | None = None,
 
         # Domain-specific page sets
         domain_pages: list[str] = []
-        is_automotive = any(
-            kw in prompt_lower for kw in ["bmw", "mercedes", "audi", "lexus", "porsche",
-                                           "automotive", "dealership", "car dealer",
-                                           "used car", "luxury car", "vehicle", "automobile"]
-        )
+        is_automotive = is_automotive_prompt(prompt, plan=plan)
         if is_automotive:
             domain_pages = ["inventory.html", "vehicle-detail.html", "about.html",
                             "finance.html", "contact.html"]
@@ -154,9 +151,6 @@ def get_required_files(project_type: str, build_mode: str | None = None,
                 "service": "services.html",
                 "pric": "pricing.html",
                 "contact": "contact.html",
-                "inventory": "inventory.html",
-                "vehicle": "vehicle-detail.html",
-                "financ": "finance.html",
                 "team": "team.html",
                 "blog": "blog.html",
                 "portfolio": "portfolio.html",
@@ -413,6 +407,14 @@ def ensure_required_files(project: dict, prompt: str, plan: dict | None, generat
     files_by_path: dict[str, dict] = {}
     changed: list[str] = []
 
+    generated_files, removed_contamination = remove_legacy_template_contamination(
+        generated_files or [],
+        prompt=prompt,
+        requirements=project,
+        plan=plan,
+    )
+    changed.extend(removed_contamination)
+
     for item in generated_files or []:
         try:
             path = safe_generated_path(str(item.get("path", "")))
@@ -446,7 +448,14 @@ def ensure_required_files(project: dict, prompt: str, plan: dict | None, generat
         files_by_path[manifest_path] = _file(manifest_path, manifest)
         if manifest_path not in changed:
             changed.append(manifest_path)
-    return list(files_by_path.values()), changed
+    final_files, removed_final = remove_legacy_template_contamination(
+        list(files_by_path.values()),
+        prompt=prompt,
+        requirements=project,
+        plan=plan,
+    )
+    changed.extend(path for path in removed_final if path not in changed)
+    return final_files, changed
 
 
 _SECRET_PATTERNS = [
