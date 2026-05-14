@@ -90,6 +90,18 @@ from app.services import live_probe_service as _probe_svc
 from app.services import genx_model_sync as _genx_sync
 from app.services.model_router import route_task, get_router_status, TASK_ROUTING
 from app.services.quality_gate_service import run_quality_gate
+from app.services.idea_builder_service import (
+    IDEA_BUILDER_SYSTEM_PROMPT,
+    compose_final_prompt,
+    deterministic_reply,
+    final_model_user_message,
+    make_message,
+    make_session_doc,
+    model_user_message,
+    normalize_mode,
+    normalize_model_reply,
+    utc_now,
+)
 from app.services.preview_process_service import (
     load_preview_state,
     start_preview,
@@ -451,6 +463,20 @@ class AssistantMessage(BaseModel):
 
 
 MessageCreate = AssistantMessage  # backward compat alias
+
+
+class IdeaBuilderSessionCreate(BaseModel):
+    seed_prompt: Optional[str] = Field(default="", max_length=12000)
+    mode: Optional[str] = "website"
+
+
+class IdeaBuilderMessageCreate(BaseModel):
+    message: str = Field(min_length=1, max_length=6000)
+
+
+class IdeaBuilderFinalizeBody(BaseModel):
+    project_name: Optional[str] = Field(default=None, max_length=120)
+    mode: Optional[str] = None
 
 
 class IterateBody(BaseModel):
@@ -1555,6 +1581,125 @@ async def apply_clarification(body: ClarificationAnswers) -> dict:
     """
     enriched_prompt, params = apply_clarification_answers(body.original_prompt, body.answers)
     return {"enriched_prompt": enriched_prompt, "params": params}
+
+
+async def _load_idea_session(session_id: str, owner_id: str) -> dict:
+    doc = await db.idea_builder_sessions.find_one({"id": session_id, "owner_id": owner_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Idea Builder session not found.")
+    return doc
+
+
+@secured.post("/idea-builder/sessions")
+async def create_idea_builder_session(
+    body: IdeaBuilderSessionCreate,
+    claims: dict = Depends(require_user),
+) -> dict:
+    doc = make_session_doc(
+        owner_id=claims["sub"],
+        seed_prompt=body.seed_prompt or "",
+        mode=body.mode,
+    )
+    await db.idea_builder_sessions.insert_one(dict(doc))
+    return doc
+
+
+@secured.get("/idea-builder/sessions/{session_id}")
+async def get_idea_builder_session(session_id: str, claims: dict = Depends(require_user)) -> dict:
+    return await _load_idea_session(session_id, claims["sub"])
+
+
+@secured.post("/idea-builder/sessions/{session_id}/messages")
+async def add_idea_builder_message(
+    session_id: str,
+    body: IdeaBuilderMessageCreate,
+    claims: dict = Depends(require_user),
+) -> dict:
+    doc = await _load_idea_session(session_id, claims["sub"])
+    mode = normalize_mode(doc.get("mode"))
+    user_msg = make_message("user", body.message)
+    messages = [*doc.get("messages", []), user_msg]
+
+    model_reply: str | None = None
+    source = "deterministic"
+    if await _runtime_secret("GENX_API_KEY"):
+        try:
+            provider = await _genx_provider("balanced")
+            result = await provider.complete(
+                agent="idea_builder",
+                system_prompt=IDEA_BUILDER_SYSTEM_PROMPT,
+                user_message=model_user_message(messages, mode),
+                session_id=f"idea-builder:{session_id}",
+            )
+            model_reply = result.get("text")
+            source = result.get("model_label") or "model"
+        except Exception as exc:
+            logger.warning("Idea Builder model fallback for %s: %s", session_id, type(exc).__name__)
+
+    assistant_msg = make_message(
+        "assistant",
+        normalize_model_reply(model_reply, messages, mode)
+        if model_reply
+        else deterministic_reply(messages, mode),
+    )
+    messages.append(assistant_msg)
+    updated = utc_now()
+    await db.idea_builder_sessions.update_one(
+        {"id": session_id, "owner_id": claims["sub"]},
+        {"$set": {"messages": messages, "updated_at": updated}},
+    )
+    return {
+        "session_id": session_id,
+        "message": assistant_msg,
+        "messages": messages,
+        "source": source,
+        "updated_at": updated,
+    }
+
+
+@secured.post("/idea-builder/sessions/{session_id}/finalize")
+async def finalize_idea_builder_session(
+    session_id: str,
+    body: IdeaBuilderFinalizeBody,
+    claims: dict = Depends(require_user),
+) -> dict:
+    doc = await _load_idea_session(session_id, claims["sub"])
+    mode = normalize_mode(body.mode or doc.get("mode"))
+    messages = doc.get("messages", [])
+    model_prompt: str | None = None
+    source = "deterministic"
+    if await _runtime_secret("GENX_API_KEY"):
+        try:
+            provider = await _genx_provider("balanced")
+            result = await provider.complete(
+                agent="idea_builder",
+                system_prompt=IDEA_BUILDER_SYSTEM_PROMPT,
+                user_message=final_model_user_message(messages, mode, body.project_name),
+                session_id=f"idea-builder:{session_id}:final",
+            )
+            model_prompt = result.get("text")
+            source = result.get("model_label") or "model"
+        except Exception as exc:
+            logger.warning("Idea Builder final prompt fallback for %s: %s", session_id, type(exc).__name__)
+
+    final_prompt = compose_final_prompt(messages, mode, body.project_name, model_prompt)
+    updated = utc_now()
+    await db.idea_builder_sessions.update_one(
+        {"id": session_id, "owner_id": claims["sub"]},
+        {"$set": {
+            "mode": mode,
+            "status": "finalized",
+            "final_prompt": final_prompt,
+            "updated_at": updated,
+        }},
+    )
+    return {
+        "session_id": session_id,
+        "mode": mode,
+        "final_prompt": final_prompt,
+        "source": source,
+        "updated_at": updated,
+    }
 
 
 # ── Pixabay media endpoints ───────────────────────────────────────────────────

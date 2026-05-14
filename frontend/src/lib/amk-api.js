@@ -83,6 +83,15 @@ export const Clarify = {
     api.post("/clarify/apply", { original_prompt, answers }).then((r) => r.data),
 };
 
+export const IdeaBuilder = {
+  createSession: (body = {}) => api.post("/idea-builder/sessions", body).then((r) => r.data),
+  getSession: (sessionId) => api.get(`/idea-builder/sessions/${sessionId}`).then((r) => r.data),
+  sendMessage: (sessionId, message) =>
+    api.post(`/idea-builder/sessions/${sessionId}/messages`, { message }).then((r) => r.data),
+  finalize: (sessionId, body = {}) =>
+    api.post(`/idea-builder/sessions/${sessionId}/finalize`, body).then((r) => r.data),
+};
+
 export const Media = {
   images: (query, opts = {}) =>
     api.get("/media/images", { params: { query, ...opts } }).then((r) => r.data),

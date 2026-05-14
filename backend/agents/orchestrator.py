@@ -414,6 +414,85 @@ def _quality_report_markdown(coverage: dict[str, Any], validation_state: dict[st
     return "\n".join(str(line) for line in lines) + "\n"
 
 
+def _static_visual_qa_result(
+    files: list[dict[str, Any]],
+    validation: dict[str, Any],
+    *,
+    mode: str,
+    quality_tier: str,
+) -> dict[str, Any]:
+    """Deterministic Visual QA for production paths without a browser runtime."""
+    html = "\n".join(
+        f.get("content", "")
+        for f in files
+        if str(f.get("path", "")).endswith((".html", ".htm", ".jsx", ".tsx"))
+    )
+    css = "\n".join(
+        f.get("content", "")
+        for f in files
+        if str(f.get("path", "")).endswith(".css")
+    )
+    combined = f"{html}\n{css}"
+    section_count = len(re.findall(r"<section\b", html, re.IGNORECASE))
+    word_count = len(re.findall(r"\b[A-Za-z][A-Za-z0-9'-]{2,}\b", html))
+    has_css = bool(css.strip()) or "<style" in html.lower()
+    has_motion = bool(re.search(r"@keyframes|animation\s*:|transition\s*:|transform\s*:|framer-motion|three\.js|canvas", combined, re.IGNORECASE))
+    has_media_signal = bool(re.search(r"<img\b|<svg\b|<video\b|<canvas\b|gradient|background-image", combined, re.IGNORECASE))
+
+    issues: list[str] = []
+    warnings: list[str] = []
+    score = int(validation.get("designScore", 70) or 70)
+
+    if not has_css:
+        issues.append("Visual QA: CSS is missing or not detectable.")
+        score -= 25
+    if quality_tier == "premium" and mode in {"landing_page", "website", "web_app"}:
+        if section_count < 6:
+            issues.append("Visual QA: premium website output needs at least 6 meaningful sections.")
+            score -= 15
+        if word_count < 500:
+            warnings.append("Visual QA: premium website copy is thin; target 500+ meaningful words.")
+            score -= 8
+        if not has_motion:
+            issues.append("Visual QA: premium output needs motion or animation cues.")
+            score -= 15
+        if not has_media_signal:
+            issues.append("Visual QA: premium output needs media, SVG, canvas, or CSS visual art.")
+            score -= 15
+
+    score = max(0, min(100, score))
+    passed = not issues and score >= (80 if quality_tier == "premium" else 70)
+    return {
+        "agent": "visual_qa",
+        "tooling": "static_html_css_analysis",
+        "screenshot_runtime": "not_available",
+        "passed": passed,
+        "score": score,
+        "issues": issues,
+        "warnings": warnings,
+        "metrics": {
+            "section_count": section_count,
+            "word_count": word_count,
+            "has_css": has_css,
+            "has_motion": has_motion,
+            "has_media_signal": has_media_signal,
+        },
+    }
+
+
+def _media_source_for_director(media_strategy: dict[str, Any]) -> str:
+    mode = str((media_strategy or {}).get("mode") or "auto").lower()
+    source = str((media_strategy or {}).get("source") or "").lower()
+    joined = f"{mode} {source}"
+    if "pixabay" in joined:
+        return "pixabay"
+    if "ai" in joined or "genx" in joined or "qwen" in joined:
+        return "ai"
+    if "css" in joined or "svg" in joined or "placeholder" in joined or "free_assets" in joined:
+        return "css_svg"
+    return "auto"
+
+
 def _parse_amarktai_blocks(text: str) -> dict:
     """Parse AMARKTAI file block format output from Coder/Iteration/RepoFix agents.
 
@@ -1543,6 +1622,61 @@ class Orchestrator:
             "label": design_direction["label"],
         }})
 
+        media_director_result: dict[str, Any] = {}
+        try:
+            await self._record_event("media_director", "started", "Media Director selecting truthful visual strategy.")
+            section_names = normalized_context.get("sections") or ["hero", "features", "workflow", "pricing", "faq", "cta"]
+            page_context = [
+                {"section": str(section), "subject": f"{project_name} {section}"}
+                for section in section_names[:10]
+            ]
+            requested_media = project_for_design.get("media_strategy", {}) or {}
+            media_source = _media_source_for_director(requested_media)
+            capability_registry = {
+                "supports_image_generation": bool(
+                    requested_media.get("confirmed")
+                    and media_source == "ai"
+                ),
+                "supports_stock_media": media_source == "pixabay",
+            }
+            media_director_result = run_media_director(
+                industry=scout_data.get("industry", "") or normalized_context.get("product_type", ""),
+                style=normalized_context.get("style", "") or design_direction.get("name", ""),
+                media_source=media_source,
+                design_tokens=design_direction.get("palette", {}),
+                build_mode=mode,
+                page_context=page_context,
+                capability_registry=capability_registry,
+            )
+            shared_ctx = {
+                **shared_ctx,
+                "media_director": media_director_result,
+                "media_manifest": media_director_result.get("section_media", []),
+                "media_strategy": media_director_result.get("media_strategy", requested_media),
+            }
+            await self.db.projects.update_one(
+                {"id": self.project_id},
+                {"$set": {
+                    "media_director_result": media_director_result,
+                    "media_strategy": media_director_result.get("media_strategy", requested_media),
+                    "updated_at": _now(),
+                }},
+            )
+            await self.emit({"type": "media_manifest", "data": media_director_result})
+            await self._record_event(
+                "media_director",
+                "completed",
+                f"Media strategy: {media_director_result.get('media_strategy', {}).get('mode', 'auto')}.",
+                meta={"media_score": media_director_result.get("media_score")},
+            )
+        except Exception as media_err:
+            await self._record_event(
+                "media_director",
+                "skipped",
+                f"Media Director skipped: {media_err}",
+                meta={"error": str(media_err)},
+            )
+
         coder_input = json.dumps({
             "requirements": scout_data,
             "plan": arch_data,
@@ -1552,6 +1686,8 @@ class Orchestrator:
             "required_files": sd.get("required_files", []),
             "safety_notes": sd.get("safety_notes", []),
             "media_strategy": shared_ctx.get("media_strategy", {}),
+            "media_manifest": shared_ctx.get("media_manifest", []),
+            "media_director": media_director_result,
             "design_direction": design_direction,
             # Phase 1D: Creative Director blueprint — MANDATORY for all builds
             "creative_blueprint": blueprint_dict,
@@ -1822,6 +1958,35 @@ class Orchestrator:
 
         # Post-validation readiness checks
         final_files = await self.fs.list_full()
+        project_after_validation = await self._load_project()
+        visual_qa = _static_visual_qa_result(
+            final_files,
+            project_after_validation.get("last_validation", {}) or {},
+            mode=mode,
+            quality_tier=project_after_validation.get("quality_tier", "balanced"),
+        )
+        await self.db.projects.update_one(
+            {"id": self.project_id},
+            {"$set": {"visual_qa_result": visual_qa, "updated_at": _now()}},
+        )
+        await self.emit({"type": "visual_qa_result", "data": visual_qa})
+        await self._record_event(
+            "visual_qa",
+            "completed" if visual_qa.get("passed") else "issues_found",
+            f"Visual QA static analysis score {visual_qa.get('score', 0)}.",
+            meta=visual_qa,
+        )
+        visual_msg = (
+            f"**Visual QA - Static Analysis**\n\n"
+            f"Score: {visual_qa.get('score', 0)}\n"
+            f"Tooling: {visual_qa.get('tooling')}\n"
+            f"Screenshot runtime: {visual_qa.get('screenshot_runtime')}"
+        )
+        if visual_qa.get("issues"):
+            visual_msg += "\n\n**Issues:**\n" + "\n".join(f"- {i}" for i in visual_qa["issues"][:6])
+        if visual_qa.get("warnings"):
+            visual_msg += "\n\n**Warnings:**\n" + "\n".join(f"- {w}" for w in visual_qa["warnings"][:6])
+        await self._record_message("agent", "visual_qa", visual_msg, meta=visual_qa)
 
         # Readiness check: modes that output HTML need app files
         if mode in _REQUIRES_APP_FILES_MODES and not _has_app_files(final_files):

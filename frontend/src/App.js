@@ -17,6 +17,7 @@ import SystemHealthPage from "@/pages/SystemHealth";
 import AdminUsersPage from "@/pages/AdminUsers";
 import DashboardShell from "@/components/dashboard/DashboardShell";
 import DashboardHome from "@/pages/dashboard/DashboardHome";
+import IdeaBuilderPage from "@/pages/dashboard/IdeaBuilderPage";
 import NewBuildPage from "@/pages/dashboard/NewBuildPage";
 import ProjectsPage from "@/pages/dashboard/ProjectsPage";
 import RepoWorkbenchPage from "@/pages/dashboard/RepoWorkbenchPage";
@@ -55,6 +56,7 @@ function App() {
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/dashboard" element={<Protected><DashboardShell /></Protected>}>
               <Route index element={<DashboardHome />} />
+              <Route path="idea-builder" element={<IdeaBuilderPage />} />
               <Route path="new" element={<NewBuildPage />} />
               <Route path="projects" element={<ProjectsPage />} />
               <Route path="repo" element={<RepoWorkbenchPage />} />
