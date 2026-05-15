@@ -77,6 +77,14 @@ grep -q 'data-amarktai-media-asset' "${WORKSPACE_PATH}/index.html"
 grep -q ':root' "${WORKSPACE_PATH}/styles.css"
 grep -q '@media' "${WORKSPACE_PATH}/styles.css"
 grep -q 'motionRuntime' "${WORKSPACE_PATH}/script.js"
+if grep -Eiq 'Your Product|Lorem ipsum|Coming Soon|Under Construction|placeholder\\.|broken\\.jpg|Feature One' "${WORKSPACE_PATH}/index.html" "${WORKSPACE_PATH}/styles.css"; then
+  echo "Placeholder or broken placeholder content detected in static premium build." >&2
+  exit 1
+fi
+if grep -Eiq 'src=["'\''](broken|placeholder|/placeholder)' "${WORKSPACE_PATH}/index.html"; then
+  echo "Broken/placeholder media reference detected in static premium build." >&2
+  exit 1
+fi
 
 WORKSPACE_PATH="${WORKSPACE_PATH}" scripts/verify_no_legacy_template_contamination.sh
 echo "Static premium build artifacts verified."

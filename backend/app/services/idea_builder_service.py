@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -66,9 +67,35 @@ def make_message(role: str, content: str) -> dict[str, Any]:
     return {
         "id": str(uuid.uuid4()),
         "role": role,
-        "content": (content or "").strip(),
+        "content": sanitize_text(content),
         "created_at": utc_now(),
     }
+
+
+def sanitize_text(value: str | None, *, limit: int = 12000) -> str:
+    """Remove JSON-hostile control characters while preserving useful whitespace."""
+    text = str(value or "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = "".join(ch for ch in text if ch == "\n" or ch == "\t" or ord(ch) >= 32)
+    text = re.sub(r"\n{4,}", "\n\n\n", text)
+    return text.strip()[:limit]
+
+
+def _extract_prompt_from_model_text(model_text: str | None) -> str:
+    text = sanitize_text(model_text, limit=20000)
+    if not text:
+        return ""
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    candidate = fenced.group(1).strip() if fenced else text
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict):
+            for key in ("build_prompt", "final_prompt", "prompt"):
+                if parsed.get(key):
+                    return sanitize_text(str(parsed[key]))
+    except Exception:
+        pass
+    return text
 
 
 def model_user_message(messages: list[dict[str, Any]], mode: str) -> str:
@@ -101,10 +128,10 @@ def deterministic_reply(messages: list[dict[str, Any]], mode: str) -> str:
 
 
 def normalize_model_reply(model_text: str | None, messages: list[dict[str, Any]], mode: str) -> str:
-    text = (model_text or "").strip()
+    text = sanitize_text(model_text, limit=4000)
     if not text:
         return deterministic_reply(messages, mode)
-    return text[:4000]
+    return text
 
 
 def compose_final_prompt(
@@ -113,12 +140,12 @@ def compose_final_prompt(
     project_name: str | None = None,
     model_text: str | None = None,
 ) -> str:
-    text = (model_text or "").strip()
-    if text and len(text) >= 120:
-        return text[:12000]
+    text = _extract_prompt_from_model_text(model_text)
+    if text and len(text) >= 40:
+        return sanitize_text(text)
 
     user_messages = [m.get("content", "") for m in messages if m.get("role") == "user"]
-    combined = "\n".join(user_messages).strip()
+    combined = sanitize_text("\n".join(user_messages))
     keywords = _keywords(combined)
     name = (project_name or _infer_project_name(combined) or "Amarktai-built Product").strip()
     normalized_mode = normalize_mode(mode)
@@ -126,7 +153,7 @@ def compose_final_prompt(
     style = _infer_style(combined)
     features = keywords[:8] or ["clear value proposition", "polished user experience", "responsive preview"]
 
-    return (
+    return sanitize_text(
         f"Create a premium production-ready {normalized_mode.replace('_', ' ')} for \"{name}\".\n\n"
         f"Audience: {audience}.\n\n"
         f"Goal:\nTurn this idea into a launch-ready digital experience: {combined or 'a refined product concept'}.\n\n"

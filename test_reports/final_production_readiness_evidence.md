@@ -39,3 +39,8 @@ scripts/verify_agent_matrix.sh
 ```
 
 Docker CLI is not present in the local Windows Codex environment, so Docker build execution is delegated to the VPS/container verification script path. The repository implementation includes the Docker installation steps required for the runtime tools.
+
+## 2026-05-15 Core Runtime Completion Addendum
+
+- Production finalization now calls shared final gate blockers before repository creation or branch PR creation.
+- Docker CLI remains unavailable locally; VPS scripts are the required post-merge container proof path.

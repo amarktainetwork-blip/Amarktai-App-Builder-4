@@ -187,13 +187,13 @@ def normalize_build_context(
     if quality_tier not in {"premium", "balanced", "cheap"}:
         quality_tier = "balanced"
 
-    media_policy = _first_text(settings.get("media_policy"), settings.get("media_requirements"), default="css_svg").lower()
+    media_policy = _first_text(settings.get("media_policy"), settings.get("media_requirements"), default="ai").lower()
     if "stock" in media_policy or "pixabay" in media_policy:
         media_policy = "stock"
     elif "ai" in media_policy or "image" in media_policy:
         media_policy = "ai"
     elif media_policy not in {"ai", "stock", "css_svg"}:
-        media_policy = "css_svg"
+        media_policy = "ai"
 
     return {
         "audience": audience,

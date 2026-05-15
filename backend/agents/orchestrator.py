@@ -81,6 +81,7 @@ from app.services.build_storage_service import create_generated_workspace, updat
 from app.services.quality_gate_service import run_quality_gate
 from app.services.media_runtime_service import execute_media_plan
 from app.services.motion_runtime_service import patch_motion_files, prompt_requires_motion
+from app.services.build_contract_service import final_gate_blockers
 from settings_store import safe_get_secret
 
 # Per-agent timeout in seconds
@@ -496,7 +497,9 @@ def _media_source_for_director(media_strategy: dict[str, Any]) -> str:
         return "pixabay"
     if "ai" in joined or "genx" in joined or "qwen" in joined:
         return "ai"
-    if "css" in joined or "svg" in joined or "placeholder" in joined or "free_assets" in joined:
+    if "free_assets" in joined or "stock" in joined:
+        return "pixabay"
+    if "css" in joined or "svg" in joined or "placeholder" in joined:
         return "css_svg"
     return "auto"
 
@@ -1423,6 +1426,24 @@ class Orchestrator:
             prompt=prompt,
             mode=mode,
         )
+        final_blockers = final_gate_blockers(
+            workspace,
+            mode=mode,
+            quality_tier=quality_tier,
+            prompt=prompt,
+            media_required=media_required,
+            motion_required=motion_required,
+            runtime_required=quality_tier == "premium",
+        )
+        if final_blockers:
+            quality_report.setdefault("blockers", [])
+            for reason in final_blockers:
+                quality_report["blockers"].append({
+                    "check": "final_contract",
+                    "message": reason,
+                    "blocker": True,
+                })
+            quality_report["pass"] = False
         update_workspace_metadata(
             workspace,
             {
@@ -1735,12 +1756,13 @@ class Orchestrator:
             ]
             requested_media = project_for_design.get("media_strategy", {}) or {}
             media_source = _media_source_for_director(requested_media)
+            pixabay_configured = bool(await self._secret_value("PIXABAY_API_KEY"))
             capability_registry = {
                 "supports_image_generation": bool(
                     requested_media.get("confirmed")
                     and media_source == "ai"
                 ),
-                "supports_stock_media": media_source == "pixabay",
+                "supports_stock_media": media_source == "pixabay" and pixabay_configured,
             }
             media_director_result = run_media_director(
                 industry=scout_data.get("industry", "") or normalized_context.get("product_type", ""),

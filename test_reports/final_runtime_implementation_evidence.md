@@ -39,3 +39,22 @@ Generated: 2026-05-15
 - `scripts/verify_repo_workbench_live.sh`
 - `scripts/verify_idea_builder_live.sh`
 - `scripts/verify_agent_matrix.sh`
+
+## 2026-05-15 Core Runtime Completion Addendum
+
+Additional active-path fixes in `fix/final-core-runtime-completion`:
+- Added `backend/app/services/build_contract_service.py` as the application-facing contract service for static/react contracts and final gate blockers.
+- Stack engine static modes now require `script.js` and `preview-manifest.json`, matching the static contract enforced by the orchestrator.
+- Premium static/media builds no longer accept CSS/SVG-only media strategy as passing evidence.
+- Media runtime now tops up GenX/Qwen output with Pixabay fallback until at least 3 non-SVG local assets are persisted.
+- `media_manifest.json` now reports approved non-SVG `asset_count`; stored SVGs do not count as premium media evidence.
+- Runtime QA now checks browser-rendered dead anchors, missing anchor targets, broken image loads, and media element errors.
+- Finalize and branch-PR endpoints run the shared final gate before pushing to GitHub.
+- Idea Builder finalization sanitizes JSON-hostile control characters and can extract `build_prompt`/`final_prompt` from model-returned JSON/fenced JSON.
+
+Verification for this addendum:
+- `python -m py_compile ...` for changed backend files: passed.
+- `python -m pytest -q`: 808 passed, 2 skipped, 1 warning.
+- `frontend npm.cmd test -- --watchAll=false`: 38 passed.
+- `frontend npm.cmd run build`: compiled successfully.
+- Git Bash `bash -n` verification scripts: passed.

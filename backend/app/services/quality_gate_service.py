@@ -392,7 +392,10 @@ def check_media_manifest(ws: Path) -> dict[str, Any]:
             raw = item.get("path") or item.get("file") or item.get("url") if isinstance(item, dict) else str(item)
             if not raw or str(raw).startswith(("http://", "https://", "data:")):
                 continue
-            if (ws / str(raw).lstrip("/")).exists():
+            rel = str(raw).lstrip("/")
+            if Path(rel).suffix.lower() == ".svg":
+                continue
+            if (ws / rel).exists():
                 existing.append(raw)
         if len(existing) >= 3:
             return {"ok": True, "manifest": rel, "asset_count": len(existing)}

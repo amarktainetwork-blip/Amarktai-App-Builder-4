@@ -193,10 +193,10 @@ class TestMediaDirector:
     """Media Director must be fully operational and honest about AI availability."""
 
     def test_strategy_honest_when_ai_unavailable(self):
-        """When AI is unavailable, strategy must report honestly and use CSS/SVG."""
+        """When AI is unavailable, strategy must report honestly and block unless stock is available."""
         from agents.media_director import select_media_strategy
         strategy = select_media_strategy("ai", capability_registry={"supports_image_generation": False})
-        assert strategy["mode"] == "css_svg"
+        assert strategy["mode"] == "media_required_unavailable"
         assert strategy.get("ai_unavailable") is True
         assert "NOT available" in strategy["honest_report"]
 

@@ -103,6 +103,14 @@ def _write_asset(
     }
 
 
+def _approved_asset_count(assets: list[dict[str, Any]]) -> int:
+    return len([
+        asset for asset in assets
+        if asset.get("media_type") in {"image", "video", "audio", "logo"}
+        and Path(str(asset.get("path", ""))).suffix.lower() != ".svg"
+    ])
+
+
 async def execute_media_plan(
     workspace_path: str | Path,
     *,
@@ -149,15 +157,18 @@ async def execute_media_plan(
                 media_type="image",
                 remote_url=result.get("remote_url", ""),
             ))
-            break
+            if _approved_asset_count(assets) >= 3:
+                break
 
-    if not assets and allow_stock_fallback and pixabay_api_key:
+    if _approved_asset_count(assets) < 3 and allow_stock_fallback and pixabay_api_key:
         images = await search_images(prompt, pixabay_api_key, per_page=6, min_width=1280, min_height=720)
         videos = await search_videos(prompt, pixabay_api_key, per_page=3, min_width=1280, min_height=720)
-        for item in images[:3]:
+        for item in images:
+            if _approved_asset_count(assets) >= 3:
+                break
             try:
                 content, content_type = await _download(item.get("full_url") or item["url"])
-                assets.append(_write_asset(
+                written = _write_asset(
                     workspace,
                     content=content,
                     content_type=content_type,
@@ -166,7 +177,10 @@ async def execute_media_plan(
                     media_type="image",
                     remote_url=item.get("full_url") or item.get("url", ""),
                     meta={"attribution": item.get("attribution", ""), "tags": item.get("tags", "")},
-                ))
+                )
+                if Path(written.get("path", "")).suffix.lower() == ".svg":
+                    attempts.append({"provider": "pixabay", "ok": False, "reason": "SVG assets do not count as premium persisted media."})
+                assets.append(written)
             except Exception as exc:
                 attempts.append({"provider": "pixabay", "ok": False, "reason": str(exc)})
         for item in videos[:1]:
@@ -188,10 +202,11 @@ async def execute_media_plan(
     injected_files = inject_media_assets(workspace, assets) if assets else []
     manifest = {
         "project_id": project_id,
-        "status": "ready" if assets else "failed",
+        "status": "ready" if _approved_asset_count(assets) >= 3 else "failed",
         "assets": assets,
         "attempts": attempts,
-        "asset_count": len(assets),
+        "asset_count": _approved_asset_count(assets),
+        "stored_asset_count": len(assets),
         "injected_files": injected_files,
         "created_at": _now(),
     }

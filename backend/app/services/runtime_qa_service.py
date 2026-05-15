@@ -111,6 +111,8 @@ def run_runtime_qa(
         "accessibility": {"available": False, "score": 0, "violations": []},
         "performance": {"available": False, "score": 0},
         "motion": {"available": False, "selectors_found": 0, "ok": True},
+        "links": {"broken": [], "ok": True},
+        "media_assets": {"broken": [], "ok": True},
         "blockers": [],
         "warnings": [],
         "checked_at": _now(),
@@ -153,6 +155,38 @@ def run_runtime_qa(
                             "selectors_found": selectors_found,
                             "ok": selectors_found > 0 or not (workspace / "motion_manifest.json").exists(),
                         }
+                        link_media_report = page.evaluate(
+                            """() => {
+                                const brokenLinks = [];
+                                const ids = new Set([...document.querySelectorAll('[id]')].map((el) => el.id));
+                                for (const anchor of document.querySelectorAll('a[href]')) {
+                                  const href = anchor.getAttribute('href') || '';
+                                  if (!href || href === '#') brokenLinks.push({ href, reason: 'empty_or_dead_anchor' });
+                                  if (href.startsWith('#') && href.length > 1 && !ids.has(href.slice(1))) {
+                                    brokenLinks.push({ href, reason: 'target_missing' });
+                                  }
+                                }
+                                const brokenMedia = [];
+                                for (const img of document.querySelectorAll('img[src]')) {
+                                  if (!img.complete || img.naturalWidth === 0) {
+                                    brokenMedia.push({ src: img.getAttribute('src'), reason: 'image_not_loaded' });
+                                  }
+                                }
+                                for (const media of document.querySelectorAll('video[src], audio[src], source[src]')) {
+                                  const el = media.closest('video,audio') || media;
+                                  if (el.error) brokenMedia.push({ src: media.getAttribute('src'), reason: 'media_error' });
+                                }
+                                return { brokenLinks, brokenMedia };
+                            }"""
+                        )
+                        report["links"] = {
+                            "broken": link_media_report.get("brokenLinks", []),
+                            "ok": not link_media_report.get("brokenLinks"),
+                        }
+                        report["media_assets"] = {
+                            "broken": link_media_report.get("brokenMedia", []),
+                            "ok": not link_media_report.get("brokenMedia"),
+                        }
                     if name == "desktop" and axe_source:
                         page.add_script_tag(content=axe_source)
                         axe_result = page.evaluate("async () => await axe.run(document)")
@@ -193,6 +227,10 @@ def run_runtime_qa(
 
     if report["console_errors"]:
         report["blockers"].append(f"Runtime console errors detected: {len(report['console_errors'])}.")
+    if report.get("links", {}).get("broken"):
+        report["blockers"].append(f"Broken runtime links detected: {len(report['links']['broken'])}.")
+    if report.get("media_assets", {}).get("broken"):
+        report["blockers"].append(f"Broken runtime media assets detected: {len(report['media_assets']['broken'])}.")
     if report["accessibility"].get("score", 0) < min_accessibility_score:
         report["blockers"].append(
             f"Accessibility score {report['accessibility'].get('score', 0)} below {min_accessibility_score}."

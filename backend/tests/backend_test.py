@@ -630,11 +630,11 @@ async def test_full_stack_mode_deterministically_repairs_required_files():
 
 # ---------- media strategy ----------
 
-def test_media_strategy_default_placeholder():
-    """Default media strategy is placeholder mode."""
+def test_media_strategy_default_auto():
+    """Default media strategy is runtime auto mode, not placeholder media."""
     import server
     ms = server._build_media_strategy("web_app", "balanced", None)
-    assert ms["mode"] == "placeholder"
+    assert ms["mode"] == "auto"
     assert ms["confirmed"] is False
     assert "models_used" in ms
 
@@ -3690,13 +3690,13 @@ def test_media_strategy_ai_choice_cheap_downgrades():
     assert "upgrade" in ms["notes"].lower()
 
 
-def test_media_strategy_css_svg_choice():
-    """Explicit 'css_svg' choice produces css_svg mode with no external media."""
+def test_media_strategy_css_svg_choice_is_upgraded_for_premium_static():
+    """Premium static builds cannot choose CSS/SVG-only media as passing evidence."""
     import server
     ms = server._build_media_strategy("landing_page", "premium", "css_svg")
-    assert ms["mode"] == "css_svg"
+    assert ms["mode"] == "pixabay"
     assert ms["confirmed"] is True
-    assert "CSS" in ms["notes"] or "css" in ms["notes"].lower() or "SVG" in ms["notes"]
+    assert "not accepted" in ms["notes"].lower()
 
 
 def test_media_strategy_auto_landing_page():
@@ -3707,10 +3707,10 @@ def test_media_strategy_auto_landing_page():
 
 
 def test_media_strategy_auto_none():
-    """None media_requirements for web_app returns placeholder."""
+    """None media_requirements for web_app returns runtime auto."""
     import server
     ms = server._build_media_strategy("web_app", "balanced", None)
-    assert ms["mode"] == "placeholder"
+    assert ms["mode"] == "auto"
 
 
 # ---------- Phase 5: media validator respects css_svg mode -------------------

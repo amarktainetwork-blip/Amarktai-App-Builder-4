@@ -59,7 +59,7 @@ def test_idea_builder_mode_normalization():
 def test_media_director_source_mapping_is_truthful():
     assert _media_source_for_director({"mode": "ai_generated"}) == "ai"
     assert _media_source_for_director({"mode": "pixabay"}) == "pixabay"
-    assert _media_source_for_director({"mode": "free_assets"}) == "css_svg"
+    assert _media_source_for_director({"mode": "free_assets"}) == "pixabay"
     assert _media_source_for_director({"mode": "placeholder"}) == "css_svg"
 
 
