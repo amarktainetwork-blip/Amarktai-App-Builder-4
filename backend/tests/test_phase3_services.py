@@ -798,8 +798,14 @@ class TestQualityGateService:
             "README.md": "# App",
             "preview-manifest.json": "{}",
             "motion_manifest.json": json.dumps({"changed_files": ["script.js"]}),
-            "media_manifest.json": json.dumps({"assets": [{"path": "media/asset.jpg"}]}),
-            "media/asset.jpg": b"\xff\xd8\xff\xe0fakejpeg".decode("latin1"),
+            "media_manifest.json": json.dumps({"assets": [
+                {"path": "media/asset-1.svg"},
+                {"path": "media/asset-2.svg"},
+                {"path": "media/asset-3.svg"},
+            ]}),
+            "media/asset-1.svg": "<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+            "media/asset-2.svg": "<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+            "media/asset-3.svg": "<svg xmlns='http://www.w3.org/2000/svg'></svg>",
         }))
         assert self.svc.check_media_manifest(ws)["ok"] is True
         assert self.svc.check_motion_manifest(ws)["ok"] is True
@@ -810,8 +816,14 @@ class TestQualityGateService:
             "README.md": "# App",
             "preview-manifest.json": "{}",
             "motion_manifest.json": json.dumps({"changed_files": ["script.js"]}),
-            "media_manifest.json": json.dumps({"assets": [{"path": "media/asset.jpg"}]}),
-            "media/asset.jpg": b"\xff\xd8\xff\xe0fakejpeg".decode("latin1"),
+            "media_manifest.json": json.dumps({"assets": [
+                {"path": "media/asset-1.svg"},
+                {"path": "media/asset-2.svg"},
+                {"path": "media/asset-3.svg"},
+            ]}),
+            "media/asset-1.svg": "<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+            "media/asset-2.svg": "<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+            "media/asset-3.svg": "<svg xmlns='http://www.w3.org/2000/svg'></svg>",
             "script.js": "requestAnimationFrame(() => {})",
         })
         with patch.object(self.svc, "run_runtime_qa", return_value={"pass": True, "blockers": [], "report_path": "runtime-qa/runtime-qa-report.json"}):
@@ -965,7 +977,11 @@ class TestRuntimeMediaMotionServices:
         svg_asset = b'<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#111827"/></svg>'
         (tmp_path / "index.html").write_text("<html><body><main><h1>Amarktai</h1></main></body></html>")
         (tmp_path / "styles.css").write_text("body{}")
-        with patch.object(svc, "search_images", AsyncMock(return_value=[{"url": "https://cdn.test/asset.png", "full_url": "https://cdn.test/full.png", "tags": "ai"}])), \
+        with patch.object(svc, "search_images", AsyncMock(return_value=[
+                {"url": "https://cdn.test/asset-1.svg", "full_url": "https://cdn.test/full-1.svg", "tags": "ai"},
+                {"url": "https://cdn.test/asset-2.svg", "full_url": "https://cdn.test/full-2.svg", "tags": "software"},
+                {"url": "https://cdn.test/asset-3.svg", "full_url": "https://cdn.test/full-3.svg", "tags": "factory"},
+             ])), \
              patch.object(svc, "search_videos", AsyncMock(return_value=[])), \
              patch.object(svc, "_download", AsyncMock(return_value=(svg_asset, "image/svg+xml"))):
             manifest = await svc.execute_media_plan(
@@ -974,10 +990,11 @@ class TestRuntimeMediaMotionServices:
                 prompt="premium Amarktai Builder website",
                 pixabay_api_key="pixabay-test",
             )
-        assert manifest["asset_count"] == 1
+        assert manifest["asset_count"] == 3
         assert manifest["assets"][0]["source"] == "pixabay"
         assert "index.html" in manifest["injected_files"]
         assert (tmp_path / "media_manifest.json").exists()
+        assert len(list((tmp_path / "media").glob("*.svg"))) == 3
         assert "data-amarktai-media-asset" in (tmp_path / "index.html").read_text()
 
 

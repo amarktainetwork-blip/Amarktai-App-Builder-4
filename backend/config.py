@@ -14,6 +14,9 @@ AGENTS_NAME = "Amarktai Coding Agents"
 ROUTER_NAME = "GenX Router"
 
 DEV_FERNET_KEY = "YW1hcmt0YWktZGV2LWZlcm5ldC1rZXktMzItYnl0ZSE="
+DEV_JWT_SECRET = "development-jwt-secret-change-before-production"
+DEV_ADMIN_EMAIL = "admin@amarktai.local"
+DEV_ADMIN_PASSWORD = "amarktai-admin-local"
 REQUIRED_ENV = [
     "APP_ENV",
     "JWT_SECRET",
@@ -42,7 +45,7 @@ SECRET_KEYS = {
 
 
 def app_env() -> str:
-    return (os.environ.get("APP_ENV") or "development").lower().strip()
+    return (os.environ.get("APP_ENV") or "production").lower().strip()
 
 
 def is_production() -> bool:
@@ -126,17 +129,22 @@ def validate_static_config() -> list[ConfigCheck]:
         ))
 
     jwt_secret = os.environ.get("JWT_SECRET") or ""
-    jwt_ok = len(jwt_secret) >= 32
+    jwt_ok = len(jwt_secret) >= 32 and (not is_production() or jwt_secret != DEV_JWT_SECRET)
     checks.append(ConfigCheck(
         "JWT_SECRET strength",
         "PASS" if jwt_ok else ("FAIL" if is_production() else "WARN"),
-        "At least 32 characters." if jwt_ok else "Set JWT_SECRET to a random value of at least 32 characters.",
+        "At least 32 characters and not the development default." if jwt_ok else "Set JWT_SECRET to a random value of at least 32 characters; production cannot use the development default.",
         "blocker" if is_production() and not jwt_ok else "warning",
     ))
 
     admin_email = os.environ.get("ADMIN_EMAIL") or ""
     admin_password = os.environ.get("ADMIN_PASSWORD") or ""
-    admin_ok = bool(admin_email) and len(admin_password) >= 12
+    admin_ok = (
+        bool(admin_email)
+        and len(admin_password) >= 12
+        and (not is_production() or admin_email != DEV_ADMIN_EMAIL)
+        and (not is_production() or admin_password != DEV_ADMIN_PASSWORD)
+    )
     checks.append(ConfigCheck(
         "admin credentials",
         "PASS" if admin_ok else ("FAIL" if is_production() else "WARN"),

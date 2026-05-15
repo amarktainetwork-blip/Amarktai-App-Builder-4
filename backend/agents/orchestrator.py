@@ -25,6 +25,7 @@ from typing import Any, Awaitable, Callable
 from .genx_provider import GenXProvider
 from .build_contract import (
     ensure_required_files,
+    enforce_static_contract_files,
     extract_files_from_model_output,
     get_required_files,
     infer_build_mode,
@@ -1403,8 +1404,16 @@ class Orchestrator:
                 f"Media runtime persisted {media_manifest.get('asset_count', 0)} asset(s).",
                 meta=media_manifest,
             )
-            if media_manifest.get("asset_count", 0) <= 0:
-                raise MediaRuntimeBlocker("Media runtime produced zero persisted assets for a media-required build.")
+            asset_count = int(media_manifest.get("asset_count", 0) or 0)
+            if asset_count < 3:
+                detail = (
+                    "Media runtime produced zero persisted assets; premium/media builds require at least 3."
+                    if asset_count == 0
+                    else f"Media runtime produced {asset_count} persisted asset(s); premium/media builds require at least 3."
+                )
+                raise MediaRuntimeBlocker(
+                    detail
+                )
         quality_report = run_quality_gate(
             workspace,
             strict=quality_tier == "premium",
@@ -1805,6 +1814,19 @@ class Orchestrator:
                 "Removed legacy automotive template contamination before writing generated files.",
                 meta={"removed_files": removed_contamination},
             )
+        generated_files, static_contract_changes = enforce_static_contract_files(
+            {**project_meta, "mode": mode},
+            user_prompt,
+            arch_data,
+            generated_files,
+        )
+        if static_contract_changes:
+            await self._record_event(
+                "coder",
+                "repaired",
+                "Static build contract repaired incomplete or forbidden generated files before Reviewer.",
+                meta={"changed_files": static_contract_changes},
+            )
 
         # Verify coder produced actual app files
         if not generated_files:
@@ -2008,6 +2030,34 @@ class Orchestrator:
             await self._record_message("system", None, err_detail,
                                        meta={"reviewer_nonfatal": project_meta.get("quality_tier", "balanced") != "premium"})
             await self._ensure_contract_files(user_prompt, arch_data)
+
+        if (
+            project_meta.get("quality_tier", "balanced") == "premium"
+            and "requested regeneration" in reviewer_blocker.lower()
+        ):
+            regen_files = await self.fs.list_full()
+            regenerated, regen_changed = enforce_static_contract_files(
+                {**project_meta, "mode": mode},
+                user_prompt,
+                arch_data,
+                regen_files,
+            )
+            if regen_changed:
+                by_path = {f["path"]: f for f in regenerated}
+                for path in regen_changed:
+                    if path in by_path:
+                        item = by_path[path]
+                        await self.fs.write(path, item.get("content", ""), item.get("language", "text"))
+                        await self.emit({"type": "file_written", "data": {"path": path}})
+                await self._record_event(
+                    "reviewer",
+                    "regenerated",
+                    "Reviewer requested regeneration; deterministic static contract regeneration was applied.",
+                    meta={"changed_files": regen_changed},
+                )
+                reviewer_blocker = ""
+                reviewer_passed = True
+                await self._ensure_contract_files(user_prompt, arch_data)
 
         if project_meta.get("quality_tier", "balanced") == "premium" and (reviewer_blocker or not reviewer_passed):
             err = reviewer_blocker or "Reviewer did not complete successfully for this premium build."

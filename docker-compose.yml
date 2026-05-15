@@ -25,12 +25,12 @@ services:
       GENX_MODEL_REASONING: ${GENX_MODEL_REASONING:-claude-sonnet-4-6}
       GENX_MODEL_RESEARCH:  ${GENX_MODEL_RESEARCH:-gpt-5.4-mini}
       GENX_MODEL_EDITS:     ${GENX_MODEL_EDITS:-claude-haiku-4-5}
-      JWT_SECRET: ${JWT_SECRET:-development-jwt-secret-change-before-production}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET for production deploy}
       JWT_ALGO: ${JWT_ALGO:-HS256}
       JWT_TTL_HOURS: ${JWT_TTL_HOURS:-168}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@amarktai.local}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-amarktai-admin-local}
-      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Set ADMIN_EMAIL for production deploy}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD for production deploy}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?Set SETTINGS_ENCRYPTION_KEY for production deploy}
       GITHUB_PAT: ${GITHUB_PAT:-}
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
       MEDIA_STORAGE_PATH: ${MEDIA_STORAGE_PATH:-/app/storage/media}

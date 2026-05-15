@@ -394,9 +394,9 @@ def check_media_manifest(ws: Path) -> dict[str, Any]:
                 continue
             if (ws / str(raw).lstrip("/")).exists():
                 existing.append(raw)
-        if existing:
+        if len(existing) >= 3:
             return {"ok": True, "manifest": rel, "asset_count": len(existing)}
-        return {"ok": False, "blocker": True, "message": f"Media manifest {rel} contains no existing local asset files."}
+        return {"ok": False, "blocker": True, "message": f"Media manifest {rel} contains {len(existing)} existing local asset file(s); premium media builds require at least 3."}
     return {"ok": False, "blocker": True, "message": "Premium/media build requires persisted media_manifest.json with real asset files."}
 
 

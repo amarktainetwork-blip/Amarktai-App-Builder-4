@@ -39,12 +39,17 @@ if [ -n "${WORKSPACE_PATH:-}" ]; then
   echo "== Verifying generated workspace artifacts =="
   test -f "${WORKSPACE_PATH}/media_manifest.json"
   test -d "${WORKSPACE_PATH}/media"
-  find "${WORKSPACE_PATH}/media" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.mp4' -o -name '*.svg' \) | grep -q .
+  ASSET_COUNT=$(find "${WORKSPACE_PATH}/media" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.mp4' -o -name '*.svg' \) | wc -l | tr -d ' ')
+  [ "${ASSET_COUNT}" -ge 3 ] || { echo "Expected at least 3 persisted media assets, found ${ASSET_COUNT}" >&2; exit 1; }
   test -f "${WORKSPACE_PATH}/runtime-qa/runtime-qa-report.json"
   test -f "${WORKSPACE_PATH}/runtime-qa/accessibility-report.json"
   test -f "${WORKSPACE_PATH}/runtime-qa/screenshots/desktop.png"
   test -f "${WORKSPACE_PATH}/runtime-qa/screenshots/tablet.png"
   test -f "${WORKSPACE_PATH}/runtime-qa/screenshots/mobile.png"
   test -f "${WORKSPACE_PATH}/motion_manifest.json"
+  if [ -e "${WORKSPACE_PATH}/package.json" ] || [ -e "${WORKSPACE_PATH}/src/App.jsx" ] || [ -e "${WORKSPACE_PATH}/src/main.jsx" ]; then
+    echo "Static premium verification found React scaffold files in generated static workspace." >&2
+    exit 1
+  fi
   WORKSPACE_PATH="${WORKSPACE_PATH}" scripts/verify_no_legacy_template_contamination.sh
 fi
