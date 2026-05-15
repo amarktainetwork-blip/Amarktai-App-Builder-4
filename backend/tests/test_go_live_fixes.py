@@ -199,7 +199,7 @@ Requirements:
     )
     by_path = {item["path"]: item for item in repaired}
 
-    assert {"index.html", "styles.css", "script.js", "README.md", "preview-manifest.json", "amarktai.project.json"} <= set(by_path)
+    assert {"index.html", "styles.css", "script.js", "README.md", "preview-manifest.json", "motion_manifest.json", "amarktai.project.json"} <= set(by_path)
     assert "package.json" not in by_path
     assert "src/App.jsx" not in by_path
     assert {"package.json", "src/App.jsx", "index.html", "styles.css", "script.js"}.issubset(set(changed))
@@ -218,6 +218,82 @@ Requirements:
     )
     assert validation["ok"] is True
     assert validation["canPreview"] is True
+    assert validation["canFinalize"] is True
+
+
+def test_premium_static_fallback_bundle_is_complete_and_manifest_truthful():
+    from agents.build_contract import premium_static_fallback_files, validate_project_files
+
+    prompt = 'Create a premium AI sales-agent landing page for "Amarktai Builder" with media, runtime QA, and GitHub workflow proof.'
+    files = premium_static_fallback_files(prompt)
+    by_path = {item["path"]: item for item in files}
+
+    assert set(by_path) == {
+        "index.html",
+        "styles.css",
+        "script.js",
+        "README.md",
+        "preview-manifest.json",
+        "motion_manifest.json",
+        "amarktai.project.json",
+    }
+    assert "package.json" not in by_path
+    assert "src/App.jsx" not in by_path
+    html = by_path["index.html"]["content"]
+    assert html.count("<section") >= 8
+    for required_id in (
+        "hero",
+        "media-showcase",
+        "sales-agent",
+        "repo-workbench",
+        "runtime-qa",
+        "media-evidence",
+        "production-readiness",
+        "lead-capture",
+    ):
+        assert f'id="{required_id}"' in html
+    assert html.rstrip().endswith("</html>")
+    project_manifest = __import__("json").loads(by_path["amarktai.project.json"]["content"])
+    assert set(project_manifest["files"]) == set(by_path)
+    validation = validate_project_files({"mode": "landing_page", "quality_tier": "premium"}, files, prompt=prompt)
+    assert validation["errors"] == []
+    assert validation["warnings"] == []
+    assert validation["canFinalize"] is True
+
+
+def test_severe_static_corruption_replaces_entire_bundle_atomically():
+    from agents.build_contract import enforce_static_contract_files, validate_project_files
+
+    prompt = "Create a premium cinematic one-page website for Amarktai Builder."
+    corrupted = [
+        {"path": "index.html", "content": "<html><body><main><section id='hero'>cut", "language": "html"},
+        {"path": "styles.css", "content": ".unused{}", "language": "css"},
+        {"path": "script.js", "content": "document.querySelector('#missing').remove()", "language": "javascript"},
+        {"path": "preview-manifest.json", "content": '{"files":["src/App.jsx"],"entry":"src/App.jsx"}', "language": "json"},
+        {"path": "package.json", "content": "{}", "language": "json"},
+        {"path": "src/App.jsx", "content": "export default function App(){return null}", "language": "javascript"},
+    ]
+    repaired, changed = enforce_static_contract_files(
+        {"mode": "landing_page", "quality_tier": "premium"},
+        prompt,
+        {},
+        corrupted,
+    )
+    paths = {item["path"] for item in repaired}
+    assert paths == {
+        "index.html",
+        "styles.css",
+        "script.js",
+        "README.md",
+        "preview-manifest.json",
+        "motion_manifest.json",
+        "amarktai.project.json",
+    }
+    assert "package.json" in changed
+    assert "src/App.jsx" in changed
+    validation = validate_project_files({"mode": "landing_page", "quality_tier": "premium"}, repaired, prompt=prompt)
+    assert validation["ok"] is True
+    assert validation["warnings"] == []
 
 
 def test_central_build_contract_blocks_static_react_scaffold(tmp_path):

@@ -377,6 +377,8 @@ PREMIUM PRODUCTION RULES (MANDATORY — violations are build failures):
 - Premium builds MUST NOT ship truncated HTML, incomplete CSS, stub JS, TODO comments, missing sections, or unfinished files.
 - Every CSS class referenced in HTML MUST exist in CSS.
 - Every JS interaction referenced in HTML MUST be implemented.
+- Every manifest you output MUST list only files that exist in the response and match the selected build mode.
+- Static landing pages MUST NOT include package.json, src/App.jsx, src/main.jsx, src/App.css, React scaffold files, or Vite files unless the user explicitly requested an app/PWA/dashboard.
 - Premium landing pages MUST include at least 900 meaningful words, 8 complete sections, 3 CTA areas, a lead-capture form, responsive states, and an animation system.
 - Use emotionally persuasive, human-quality copywriting: problem → transformation → capability → proof → CTA.
 - Avoid robotic wording, repeated generic claims, and repetitive icon/title/text card grids.
@@ -417,6 +419,7 @@ You receive the generated files (and the build mode). Audit them for:
   verify ALL pages link styles.css and share the same nav. Patch any missing links.
 - placeholder page check: if any page contains "coming soon", "under construction", "detail not found",
   or "page not found" text, flag it as a critical issue.
+- severe corruption check: if index.html is truncated, has fewer than 8 premium sections, styles.css does not match HTML selectors, script.js targets missing selectors, or manifests list files that do not exist, set verdict to "needs_regeneration" instead of trying a large patch.
 
 If you find issues, return a compact audit and patch plan. Only return
 patched_files for surgical changes that are genuinely small. Never return full
@@ -602,6 +605,8 @@ PREMIUM PRODUCTION RULES (MANDATORY — violations are build failures):
 - Premium builds MUST NOT ship truncated HTML, incomplete CSS, stub JS, TODO comments, missing sections, or unfinished files.
 - Every CSS class referenced in HTML MUST exist in CSS.
 - Every JS interaction referenced in HTML MUST be implemented.
+- Every manifest you output MUST list only files that exist in the response and match the selected build mode.
+- Static landing pages MUST NOT include package.json, src/App.jsx, src/main.jsx, src/App.css, React scaffold files, or Vite files unless the user explicitly requested an app/PWA/dashboard.
 - Premium landing pages MUST include at least 900 meaningful words, 8 complete sections, 3 CTA areas, a lead-capture form, responsive states, and an animation system.
 - Use emotionally persuasive, human-quality copywriting: problem → transformation → capability → proof → CTA.
 - Avoid robotic wording, repeated generic claims, and repetitive icon/title/text card grids.
@@ -683,7 +688,7 @@ Respond with a single JSON object (no fences, no preamble):
   "recommended_stack": "<brief stack description>",
   "can_preview": <true|false>,
   "preview_note": "<brief note on preview capabilities>",
-  "missing_apis": ["<API or service that will be simulated or unavailable>", ...],
+  "missing_apis": ["<API or service that is unavailable or must be configured before runtime use>", ...],
   "build_phases": [
     "<phase 1: what Scout will do>",
     "<phase 2: what Architect will do>",
@@ -698,7 +703,7 @@ Respond with a single JSON object (no fences, no preamble):
 Rules:
 - complexity: Simple = 1-3 files, Moderate = 4-10, Complex = 10-20, Enterprise = 20+.
 - estimated_pages: count only user-facing HTML pages/routes (not CSS/JS/config).
-- missing_apis: list any external APIs referenced in the prompt that agents cannot implement (e.g. payment processors, live data feeds, authentication providers).
+- missing_apis: list only external APIs that are truly unavailable or not configured. Do not describe APIs as simulated in premium builds when capability truth says the provider is live; route work to the connected tool/provider instead.
 - build_phases: 4 items, one per agent, describing what each agent will contribute.
 - key_risks: 1-3 risks that could reduce quality (e.g. "many pages may generate thin content").
 - plan_summary must be written for the user — friendly and confident.
@@ -743,7 +748,7 @@ Respond with a single JSON object:
 Rules:
 - passed is true only when design_score >= 70 AND no critical issues.
 - Be specific: name the file and the CSS rule or HTML element causing the issue.
-- Do not penalise the absence of AI-generated images — CSS gradients and SVG are valid.
+- Do not count CSS gradients or SVG decoration as AI media proof. They may support layout polish, but media-required premium builds need persisted image/video/audio assets and a manifest.
 - Output ONLY the JSON object.
 """
 
@@ -809,6 +814,8 @@ VIDEO BACKGROUNDS:
 
 Rules:
 - ALWAYS add: @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+- Only target selectors that already exist in the supplied files, or patch the matching HTML/CSS/JS together so selectors and manifests stay consistent.
+- Persist or update motion_manifest.json with changed files, selectors, reduced-motion support, and validation notes.
 - Never add effects that break the layout or cause horizontal scroll
 - Keep bundle size reasonable — prefer CDN over bundled
 - Every 3D scene must have a fallback for unsupported browsers

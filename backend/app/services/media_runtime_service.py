@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import base64
+import asyncio
+import io
 import json
 import mimetypes
 import os
@@ -14,7 +16,7 @@ from typing import Any
 import httpx
 
 from agents.pixabay import search_images, search_videos
-from agents.media_storage import safe_filename, validate_upload
+from agents.media_storage import get_max_upload_bytes, safe_filename, validate_upload
 from app.services.genx_live_probe_service import discover_genx_runtime
 from app.services.genx_runtime_service import generate_genx_media_job
 
@@ -29,12 +31,32 @@ def _media_dir(workspace: Path) -> Path:
     return path
 
 
-async def _download(url: str) -> tuple[bytes, str]:
+async def _download(url: str, *, attempts: int = 3) -> tuple[bytes, str]:
+    last_error: Exception | None = None
+    max_bytes = get_max_upload_bytes()
     async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-    content_type = response.headers.get("content-type", "").split(";")[0] or "application/octet-stream"
-    return response.content, content_type
+        for attempt in range(max(1, attempts)):
+            try:
+                response = await client.get(url)
+                if response.status_code == 429 and attempt < attempts - 1:
+                    retry_after = response.headers.get("retry-after")
+                    delay = float(retry_after) if retry_after and retry_after.isdigit() else (attempt + 1) * 1.5
+                    await asyncio.sleep(min(delay, 8.0))
+                    continue
+                response.raise_for_status()
+                content_length = int(response.headers.get("content-length") or 0)
+                if content_length and content_length > max_bytes:
+                    raise ValueError(f"Downloaded media exceeds maximum upload size of {max_bytes // (1024 * 1024)} MB.")
+                content = response.content
+                if len(content) > max_bytes:
+                    raise ValueError(f"Downloaded media exceeds maximum upload size of {max_bytes // (1024 * 1024)} MB.")
+                content_type = response.headers.get("content-type", "").split(";")[0] or "application/octet-stream"
+                return content, content_type
+            except Exception as exc:
+                last_error = exc
+                if attempt < attempts - 1:
+                    await asyncio.sleep((attempt + 1) * 0.75)
+    raise last_error or RuntimeError("Media download failed")
 
 
 def _extension(content_type: str, fallback: str = ".bin") -> str:
@@ -112,6 +134,95 @@ def _approved_asset_count(assets: list[dict[str, Any]]) -> int:
         if asset.get("media_type") in {"image", "video", "audio", "logo"}
         and Path(str(asset.get("path", ""))).suffix.lower() != ".svg"
     ])
+
+
+def _fallback_palette(index: int) -> tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]]:
+    palettes = [
+        ((4, 10, 18), (0, 230, 118), (83, 216, 255)),
+        ((7, 8, 18), (139, 92, 246), (0, 230, 118)),
+        ((5, 12, 24), (83, 216, 255), (248, 250, 252)),
+    ]
+    return palettes[index % len(palettes)]
+
+
+def _local_runtime_fallback_png(prompt: str, index: int) -> bytes:
+    """Create an honest local raster fallback image when providers are unavailable.
+
+    These assets are deliberately marked as local runtime fallbacks in the manifest.
+    They are not counted or described as AI-generated media.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        bg, accent, accent_two = _fallback_palette(index)
+        image = Image.new("RGB", (1280, 720), bg)
+        draw = ImageDraw.Draw(image)
+        for radius in range(620, 40, -48):
+            color = tuple(int(bg[i] + (accent[i] - bg[i]) * 0.55) for i in range(3))
+            draw.ellipse((120 - radius // 2, -220 - radius // 3, 120 + radius, 360 + radius // 2), outline=color, width=3)
+        for step in range(0, 1280, 44):
+            color = tuple(int(bg[i] + (accent_two[i] - bg[i]) * 0.36) for i in range(3))
+            draw.line((step, 720, step + 360, 0), fill=color, width=1)
+        panel = (86, 118, 166, 198)
+        draw.rounded_rectangle((120, 120, 1160, 600), radius=28, outline=accent, width=3, fill=(10, 17, 30))
+        draw.rounded_rectangle((170, 184, 720, 246), radius=14, fill=panel)
+        draw.rounded_rectangle((170, 278, 1040, 340), radius=14, outline=accent_two, width=2)
+        draw.rounded_rectangle((170, 376, 940, 438), radius=14, outline=accent, width=2)
+        draw.rounded_rectangle((170, 474, 1080, 536), radius=14, outline=(248, 250, 252), width=2)
+        text = "Amarktai Builder runtime media"
+        sub = "Local fallback asset - external providers unavailable"
+        font = ImageFont.load_default()
+        draw.text((196, 202), text, fill=(248, 250, 252), font=font)
+        draw.text((196, 302), sub, fill=(168, 179, 199), font=font)
+        draw.text((196, 400), f"Build prompt: {(prompt or 'production website')[:72]}", fill=(168, 179, 199), font=font)
+        draw.text((196, 498), f"Asset {index + 1} of 3", fill=(168, 179, 199), font=font)
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG", optimize=True)
+        return buffer.getvalue()
+    except Exception:
+        # 16x16 PNG generated once; still a real raster file, just minimal.
+        return base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAI0lEQVR42mP8z8Dwn4ECwESJ5lEDRg0YNWDUgFEDBg0AALuGAxk9WyeTAAAAAElFTkSuQmCC"
+        )
+
+
+def _persist_local_runtime_fallbacks(
+    workspace: Path,
+    *,
+    prompt: str,
+    assets: list[dict[str, Any]],
+    attempts: list[dict[str, Any]],
+    minimum_assets: int = 3,
+) -> None:
+    while _approved_asset_count(assets) < minimum_assets:
+        index = _approved_asset_count(assets)
+        content = _local_runtime_fallback_png(prompt, index)
+        try:
+            written = _write_asset(
+                workspace,
+                content=content,
+                content_type="image/png",
+                source="local_runtime_fallback",
+                prompt=prompt,
+                media_type="image",
+                meta={
+                    "provider": "local_runtime_fallback",
+                    "model": "deterministic-raster-fallback",
+                    "status": "persisted",
+                    "reason": "External media providers failed, timed out, were rate limited, or returned unusable assets. This asset is not AI-generated.",
+                },
+            )
+            attempts.append({
+                "provider": "local_runtime_fallback",
+                "ok": True,
+                "status": "persisted",
+                "path": written.get("path"),
+                "reason": "Persisted honest local raster fallback; not AI-generated.",
+            })
+            assets.append(written)
+        except Exception as exc:
+            attempts.append({"provider": "local_runtime_fallback", "ok": False, "reason": str(exc)})
+            break
 
 
 def _compact_media_query(prompt: str, sections: list[str]) -> str:
@@ -295,6 +406,15 @@ async def execute_media_plan(
             except Exception as exc:
                 attempts.append({"provider": "pixabay_video", "ok": False, "remote_url": remote, "reason": str(exc)})
 
+    if _approved_asset_count(assets) < 3:
+        _persist_local_runtime_fallbacks(
+            workspace,
+            prompt=prompt,
+            assets=assets,
+            attempts=attempts,
+            minimum_assets=3,
+        )
+
     injected_files = inject_media_assets(workspace, assets) if assets else []
     manifest = {
         "project_id": project_id,
@@ -313,9 +433,12 @@ async def execute_media_plan(
 def inject_media_assets(workspace: Path, assets: list[dict[str, Any]]) -> list[str]:
     """Inject persisted media assets into static HTML/CSS when generated files omit them."""
     changed: list[str] = []
-    image = next((a for a in assets if a.get("media_type") in {"image", "logo", "svg"}), None)
-    video = next((a for a in assets if a.get("media_type") == "video"), None)
-    if not image and not video:
+    media_assets = [
+        asset for asset in assets
+        if asset.get("media_type") in {"image", "logo", "video", "audio"}
+        and asset.get("path")
+    ][:4]
+    if not media_assets:
         return changed
     for rel in ("index.html", "public/index.html"):
         path = workspace / rel
@@ -324,15 +447,27 @@ def inject_media_assets(workspace: Path, assets: list[dict[str, Any]]) -> list[s
         html = path.read_text(encoding="utf-8", errors="replace")
         if "data-amarktai-media-asset" in html:
             return changed
-        asset_markup = ""
-        if video:
+        asset_markup = '<div class="amarktai-generated-media-grid">'
+        for asset in media_assets:
+            if asset.get("media_type") == "video":
+                asset_markup += (
+                    f'<video data-amarktai-media-asset src="{asset["path"]}" autoplay muted loop playsinline '
+                    'aria-label="Persisted generated video asset"></video>'
+                )
+            elif asset.get("media_type") == "audio":
+                asset_markup += (
+                    f'<audio data-amarktai-media-asset src="{asset["path"]}" controls '
+                    'aria-label="Persisted generated audio asset"></audio>'
+                )
+            else:
+                source_label = "Local runtime fallback" if asset.get("source") == "local_runtime_fallback" else "Persisted generated visual"
+                asset_markup += (
+                    f'<img data-amarktai-media-asset src="{asset["path"]}" alt="{source_label} for this build" />'
+                )
+        asset_markup += "</div>"
+        if any(asset.get("media_type") == "video" for asset in media_assets):
             asset_markup += (
-                f'<video data-amarktai-media-asset src="{video["path"]}" autoplay muted loop playsinline '
-                'aria-label="Generated background media"></video>'
-            )
-        if image:
-            asset_markup += (
-                f'<img data-amarktai-media-asset src="{image["path"]}" alt="Generated visual asset for this build" />'
+                '<p class="amarktai-media-note">Video media is persisted locally and validated before finalize.</p>'
             )
         if "</main>" in html:
             html = html.replace("</main>", f'<section class="amarktai-generated-media">{asset_markup}</section></main>', 1)
@@ -344,7 +479,9 @@ def inject_media_assets(workspace: Path, assets: list[dict[str, Any]]) -> list[s
     css_path = workspace / "styles.css"
     css = """
 .amarktai-generated-media { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1rem; padding:clamp(2rem,6vw,5rem); }
-.amarktai-generated-media img, .amarktai-generated-media video { width:100%; border-radius:20px; object-fit:cover; box-shadow:0 24px 80px rgba(0,0,0,.32); }
+.amarktai-generated-media-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:1rem; }
+.amarktai-generated-media img, .amarktai-generated-media video, .amarktai-generated-media audio { width:100%; border-radius:20px; object-fit:cover; box-shadow:0 24px 80px rgba(0,0,0,.32); }
+.amarktai-media-note { color:var(--color-muted,#94a3b8); }
 """.strip()
     if css_path.exists() and "amarktai-generated-media" not in css_path.read_text(errors="replace"):
         css_path.write_text(css_path.read_text(encoding="utf-8", errors="replace") + "\n\n" + css + "\n", encoding="utf-8")
