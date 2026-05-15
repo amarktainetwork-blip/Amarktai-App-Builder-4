@@ -63,6 +63,7 @@ export default function WorkspacePage() {
   const [mediaRuntime, setMediaRuntime] = useState(null);
   const [motionManifest, setMotionManifest] = useState(null);
   const [qualityReport, setQualityReport] = useState(null);
+  const [contentQualityReport, setContentQualityReport] = useState(null);
 
   const wsRef = useRef(null);
   // Auto-reconnect state: "connecting" = initial attempt, "connected" = live, "reconnecting" = retrying after drop
@@ -95,6 +96,9 @@ export default function WorkspacePage() {
       if (p?.media_runtime || p?.media_manifest) setMediaRuntime(p.media_runtime || p.media_manifest);
       if (p?.motion_manifest) setMotionManifest(p.motion_manifest);
       if (p?.quality_report) setQualityReport(p.quality_report);
+      if (p?.content_quality_report || p?.quality_report?.content_quality_report) {
+        setContentQualityReport(p.content_quality_report || p.quality_report.content_quality_report);
+      }
     }).catch(() => toast.error("Failed to load project"));
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -208,7 +212,10 @@ export default function WorkspacePage() {
       if (evt.data) {
         setQualityReport(evt.data);
         if (evt.data.runtime_qa) setRuntimeQa(evt.data.runtime_qa);
+        if (evt.data.content_quality_report) setContentQualityReport(evt.data.content_quality_report);
       }
+    } else if (evt.type === "content_quality_report") {
+      if (evt.data) setContentQualityReport(evt.data);
     } else if (evt.type === "request_coverage_passed") {
       if (evt.data) setCoverageResult(evt.data);
       toast.success("Coverage check passed.");
@@ -590,6 +597,7 @@ export default function WorkspacePage() {
             mediaRuntime={mediaRuntime}
             motionManifest={motionManifest}
             qualityReport={qualityReport}
+            contentQualityReport={contentQualityReport}
           />
           {/* Phase 4: Repo workbench (shown for imported repos) */}
           {isRepoProject && (
@@ -849,6 +857,7 @@ export default function WorkspacePage() {
               mediaRuntime={mediaRuntime}
               motionManifest={motionManifest}
               qualityReport={qualityReport}
+              contentQualityReport={contentQualityReport}
             />
             {isRepoProject && (
               <RepoWorkbenchPanel
@@ -877,13 +886,14 @@ export default function WorkspacePage() {
   );
 }
 
-function RuntimeEvidencePanel({ runtimeQa, mediaRuntime, motionManifest, qualityReport }) {
-  if (!runtimeQa && !mediaRuntime && !motionManifest && !qualityReport) return null;
+function RuntimeEvidencePanel({ runtimeQa, mediaRuntime, motionManifest, qualityReport, contentQualityReport }) {
+  if (!runtimeQa && !mediaRuntime && !motionManifest && !qualityReport && !contentQualityReport) return null;
   const runtimePass = runtimeQa?.pass;
   const mediaCount = mediaRuntime?.asset_count ?? mediaRuntime?.assets?.length;
   const motionFiles = motionManifest?.changed_files || [];
   const blockers = [
     ...(qualityReport?.blockers || []).map((b) => b.message || String(b)),
+    ...(contentQualityReport?.blockers || []).map((b) => b.message || String(b)),
     ...(runtimeQa?.blockers || []),
   ].filter(Boolean);
   return (
@@ -896,6 +906,11 @@ function RuntimeEvidencePanel({ runtimeQa, mediaRuntime, motionManifest, quality
           </span>
         )}
         {qualityReport && <span className="text-amk-fg3">Quality {qualityReport.score}/100</span>}
+        {contentQualityReport && (
+          <span style={{ color: contentQualityReport.pass ? "#00E676" : "#FF5722" }}>
+            Content {contentQualityReport.pass ? "PASS" : "BLOCKED"}
+          </span>
+        )}
       </div>
       <div className="mt-1 grid gap-1 text-amk-fg2">
         {runtimeQa && (
@@ -910,6 +925,9 @@ function RuntimeEvidencePanel({ runtimeQa, mediaRuntime, motionManifest, quality
         )}
         {motionManifest && (
           <div>Motion: {motionManifest.strategy || "patched"} · files {motionFiles.join(", ") || "none"}</div>
+        )}
+        {contentQualityReport && (
+          <div>Content: score {contentQualityReport.score ?? 0} - sections {contentQualityReport.section_count ?? 0} - CTAs {contentQualityReport.cta_count ?? 0}</div>
         )}
         {blockers.length > 0 && (
           <div className="text-agent-scout">

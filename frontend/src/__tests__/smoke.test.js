@@ -111,6 +111,8 @@ test("workspace shows runtime media motion QA evidence", () => {
   expect(content).toMatch(/motion_manifest/);
   expect(content).toMatch(/media_runtime/);
   expect(content).toMatch(/runtime_qa/);
+  expect(content).toMatch(/content_quality_report/);
+  expect(content).toMatch(/Content \{contentQualityReport\.pass/);
 });
 
 test("live verification scripts cover runtime, repo, premium, idea, and agent matrix", () => {

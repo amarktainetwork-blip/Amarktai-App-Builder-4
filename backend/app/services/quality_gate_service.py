@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.services.content_quality_service import check_content_quality
 from app.services.runtime_qa_service import run_runtime_qa
 
 logger = logging.getLogger("amarktai.quality_gate")
@@ -462,6 +463,7 @@ def run_quality_gate(
         "dead_ctas":    check_dead_ctas(ws),
         "broken_assets": check_broken_assets(ws),
         "template_contamination": check_template_contamination(ws, prompt=prompt, mode=mode),
+        "content_quality": check_content_quality(ws, prompt=prompt, strict=strict),
         "preview_manifest": check_preview_manifest(ws),
     }
     if strict or require_media:
@@ -527,6 +529,7 @@ def run_quality_gate(
         "checks": checks,
         "strict": strict,
         "runtime_qa": runtime_report,
+        "content_quality_report": checks.get("content_quality", {}).get("report"),
         "repair_suggestions": suggestions,
         "workspace_path": str(ws),
         "checked_at": _now(),

@@ -7,6 +7,7 @@ and final gate blockers.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -124,5 +125,16 @@ def final_gate_blockers(
         for rel in contract.required_runtime_artifacts:
             if not (ws / rel).exists():
                 blockers.append(f"Missing runtime QA artifact: {rel}")
+    if quality_tier == "premium":
+        content_report_path = ws / "content_quality_report.json"
+        if not content_report_path.exists():
+            blockers.append("Missing content_quality_report.json.")
+        else:
+            try:
+                report = json.loads(content_report_path.read_text(encoding="utf-8"))
+                if not report.get("pass"):
+                    blockers.append("Content quality report did not pass.")
+            except Exception:
+                blockers.append("content_quality_report.json is invalid.")
     return blockers
 

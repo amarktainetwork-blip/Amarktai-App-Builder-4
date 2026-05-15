@@ -80,6 +80,7 @@ from app.services.build_context_service import (
 from app.services.build_storage_service import create_generated_workspace, update_workspace_metadata
 from app.services.quality_gate_service import run_quality_gate
 from app.services.media_runtime_service import execute_media_plan
+from app.services.content_quality_service import run_content_quality_check_for_files
 from app.services.motion_runtime_service import patch_motion_files, prompt_requires_motion
 from app.services.build_contract_service import final_gate_blockers
 from settings_store import safe_get_secret
@@ -1466,6 +1467,7 @@ class Orchestrator:
                 "generated_files": written,
                 "preview_manifest": preview_manifest,
                 "quality_report": quality_report,
+                "content_quality_report": quality_report.get("content_quality_report"),
                 "runtime_qa": quality_report.get("runtime_qa"),
                 "runtime_qa_result": quality_report.get("runtime_qa"),
                 "media_runtime": media_manifest,
@@ -2006,7 +2008,30 @@ class Orchestrator:
         #    repair also fails, record the event but continue to deterministic validation.
         #    The project is only failed if the required files are actually missing.
         await self._check_cancel()
+        await self._record_event("content_director", "started", "Content Director auditing product copy, CTAs, and prompt alignment.")
         current_files = await self.fs.list_full()
+        content_report = run_content_quality_check_for_files(
+            current_files,
+            prompt=user_prompt,
+            context=normalized_context,
+            strict=project_meta.get("quality_tier", "balanced") == "premium",
+        )
+        await self.fs.write("content_quality_report.json", json.dumps(content_report, indent=2), "json")
+        await self.emit({"type": "content_quality_report", "data": content_report})
+        await self.db.projects.update_one(
+            {"id": self.project_id},
+            {"$set": {
+                "content_quality_report": content_report,
+                "content_quality_pass": bool(content_report.get("pass")),
+                "updated_at": _now(),
+            }},
+        )
+        await self._record_event(
+            "content_director",
+            "completed" if content_report.get("pass") else "blocked",
+            f"Content Director score {content_report.get('score', 0)}.",
+            meta=content_report,
+        )
         review_input = json.dumps({
             "mode": mode,
             "required_files": sd.get("required_files", []),
