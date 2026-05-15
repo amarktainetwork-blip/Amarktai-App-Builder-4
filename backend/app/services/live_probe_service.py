@@ -31,6 +31,8 @@ from typing import Any
 
 import httpx
 
+from app.services.genx_live_probe_service import discover_genx_runtime
+
 logger = logging.getLogger("amarktai.live_probe")
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
@@ -72,37 +74,37 @@ def _sanitise_error(err: str) -> str:
 # ── Individual probes ─────────────────────────────────────────────────────────
 
 async def probe_genx(api_key: str) -> dict[str, Any]:
-    """Probe GenX by calling /models endpoint."""
+    """Probe GenX by discovering text plus media runtime categories."""
     if not api_key:
         return {"provider": "genx", "status": KEY_MISSING, "probed_at": _now()}
 
-    base_url = os.environ.get("GENX_BASE_URL", "https://query.genx.sh/v1").rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as cx:
-            r = await cx.get(
-                f"{base_url}/models",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "User-Agent": "Amarktai-App-Builder/1.0",
-                },
-            )
-        if r.status_code == 200:
-            data = r.json()
-            models = data.get("data", data) if isinstance(data, dict) else data
-            model_count = len(models) if isinstance(models, list) else 0
+        runtime = await discover_genx_runtime(
+            api_key,
+            base_url=os.environ.get("GENX_BASE_URL", "https://query.genx.sh/v1"),
+            force_refresh=True,
+        )
+        if runtime.get("live_status") == "live_ok":
             return {
                 "provider": "genx",
                 "status": KEY_PRESENT_LIVE_OK,
-                "model_count": model_count,
+                "model_count": runtime.get("category_counts", {}).get("text", 0),
+                "category_counts": runtime.get("category_counts", {}),
+                "runtime_capabilities": runtime.get("capabilities", {}),
+                "models": runtime.get("models", []),
+                "runtime": runtime,
                 "key_prefix": _mask(api_key),
-                "probed_at": _now(),
+                "probed_at": runtime.get("probed_at") or _now(),
             }
         return {
             "provider": "genx",
-            "status": KEY_PRESENT_LIVE_FAIL,
-            "http_status": r.status_code,
-            "error": _sanitise_error(r.text[:200]),
-            "probed_at": _now(),
+            "status": PROVIDER_TIMEOUT if runtime.get("live_status") == "provider_timeout" else KEY_PRESENT_LIVE_FAIL,
+            "category_counts": runtime.get("category_counts", {}),
+            "runtime_capabilities": runtime.get("capabilities", {}),
+            "models": runtime.get("models", []),
+            "runtime": runtime,
+            "error": _sanitise_error(runtime.get("reason") or "GenX runtime discovery failed"),
+            "probed_at": runtime.get("probed_at") or _now(),
         }
     except httpx.TimeoutException:
         return {"provider": "genx", "status": PROVIDER_TIMEOUT, "probed_at": _now()}

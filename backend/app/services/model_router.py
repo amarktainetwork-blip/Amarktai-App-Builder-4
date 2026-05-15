@@ -54,7 +54,7 @@ TASK_ROUTING: dict[str, dict[str, Any]] = {
     "image_generation": {
         "required_caps": ["image"],
         "preferred_caps": [],
-        "preferred_models": ["dall-e-3", "flux-1.1-pro"],
+        "preferred_models": ["qwen-image-plus"],
         "cost_tier": "medium",
         "description": "Image generation",
     },
@@ -160,6 +160,10 @@ def route_task(
     # None of the preferred models are available — pick any with required capability
     if available_models:
         selected = available_models[0]
+        if task_type == "image_generation":
+            selected = next((m for m in available_models if any(token in m.lower() for token in ("image", "flux", "dall", "stable", "midjourney", "ideogram"))), selected)
+        elif task_type == "audio_voice":
+            selected = next((m for m in available_models if any(token in m.lower() for token in ("audio", "voice", "tts", "asr", "omni"))), selected)
         missing_reason = f"None of the preferred models {preferred} were available; using {selected}"
         return {
             "selected_model": selected,

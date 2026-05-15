@@ -44,12 +44,25 @@ if [ -z "${AMARKTAI_TOKEN:-}" ]; then
   exit 0
 fi
 
+AUTH=(-H "Authorization: Bearer ${AMARKTAI_TOKEN}" -H "Content-Type: application/json")
+GENX_RUNTIME_JSON=$(curl -fsS "${AUTH[@]}" "${BASE_URL}/api/genx/runtime/status?force_refresh=true")
+printf '%s' "${GENX_RUNTIME_JSON}" | python3 -m json.tool
+GENX_RUNTIME_JSON="${GENX_RUNTIME_JSON}" python3 - <<'PY'
+import json, os
+data = json.loads(os.environ["GENX_RUNTIME_JSON"])
+if data.get("live_status") != "live_ok":
+    raise SystemExit(f"GenX runtime discovery is not live_ok: {data.get('live_status')} {data.get('reason')}")
+counts = data.get("category_counts") or {}
+missing = [name for name in ("text", "image", "video", "voice", "audio", "avatar") if int(counts.get(name) or 0) <= 0]
+if missing:
+    raise SystemExit(f"GenX runtime discovery missing category model counts: {missing}")
+PY
+
 if [ -z "${WORKSPACE_PATH:-}" ] || [ -z "${PROJECT_ID:-}" ]; then
   echo "Set PROJECT_ID and WORKSPACE_PATH to run authenticated runtime QA."
   exit 0
 fi
 
-AUTH=(-H "Authorization: Bearer ${AMARKTAI_TOKEN}" -H "Content-Type: application/json")
 BODY="{\"workspace_path\":\"${WORKSPACE_PATH}\",\"strict\":true,\"require_runtime\":true,\"require_media\":true,\"require_motion\":true}"
 curl -fsS "${AUTH[@]}" -d "${BODY}" "${BASE_URL}/api/builds/${PROJECT_ID}/quality-gate" | python3 -m json.tool
 

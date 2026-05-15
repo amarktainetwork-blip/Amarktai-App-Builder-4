@@ -482,11 +482,26 @@ class TestLiveProbeService:
         """When GenX times out, status should be provider_timeout."""
         import httpx
         async def run():
-            with patch("httpx.AsyncClient") as mock_client:
-                mock_client.return_value.__aenter__.return_value.get.side_effect = httpx.TimeoutException("timeout")
+            with patch.object(self.svc, "discover_genx_runtime", AsyncMock(side_effect=httpx.TimeoutException("timeout"))):
                 return await self.svc.probe_genx("fake-key")
         result = asyncio.run(run())
         assert result["status"] == self.svc.PROVIDER_TIMEOUT
+
+    def test_probe_genx_uses_runtime_media_categories(self):
+        async def run():
+            runtime = {
+                "live_status": "live_ok",
+                "category_counts": {"text": 12, "image": 3, "video": 2, "voice": 1, "audio": 1, "avatar": 1},
+                "capabilities": {"text": True, "streaming": True, "image": True, "video": True, "voice": True, "audio": True, "avatar": True},
+                "models": [{"id": "genx-image-pro", "category": "image", "provider": "genx"}],
+                "probed_at": "2026-05-15T00:00:00+00:00",
+            }
+            with patch.object(self.svc, "discover_genx_runtime", AsyncMock(return_value=runtime)):
+                return await self.svc.probe_genx("fake-key")
+        result = asyncio.run(run())
+        assert result["status"] == self.svc.KEY_PRESENT_LIVE_OK
+        assert result["runtime_capabilities"]["image"] is True
+        assert result["category_counts"]["video"] == 2
 
     def test_cache_is_used_within_ttl(self):
         """Second call within TTL should return cached result."""
@@ -557,11 +572,9 @@ class TestGenxModelSync:
                 assert result["model_count"] == len(self.svc.STATIC_GENX_MODELS)
 
     def test_sync_handles_timeout(self):
-        import httpx
         async def run():
             with patch.object(self.svc, "_registry_path", return_value=Path(tempfile.mkdtemp()) / "reg.json"):
-                with patch("httpx.AsyncClient") as mock_cx:
-                    mock_cx.return_value.__aenter__.return_value.get.side_effect = httpx.TimeoutException("timeout")
+                with patch.object(self.svc, "discover_genx_runtime", AsyncMock(side_effect=RuntimeError("timed out after 15s"))):
                     return await self.svc.sync_genx_models("fake-key")
         result = asyncio.run(run())
         assert result["source"] == "fallback"
@@ -569,31 +582,34 @@ class TestGenxModelSync:
 
     def test_sync_handles_bad_json(self):
         async def run():
-            mock_resp = MagicMock()
-            mock_resp.status_code = 200
-            mock_resp.json.return_value = "not_a_list"
+            runtime = {"live_status": "live_fail", "reason": "unexpected format"}
             with patch.object(self.svc, "_registry_path", return_value=Path(tempfile.mkdtemp()) / "reg.json"):
-                with patch("httpx.AsyncClient") as mock_cx:
-                    mock_cx.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_resp)
+                with patch.object(self.svc, "discover_genx_runtime", AsyncMock(return_value=runtime)):
                     return await self.svc.sync_genx_models("fake-key")
         result = asyncio.run(run())
         assert result["source"] == "fallback"
 
     def test_sync_success(self):
         async def run():
-            mock_resp = MagicMock()
-            mock_resp.status_code = 200
-            mock_resp.json.return_value = {
-                "data": [{"id": "model-a"}, {"id": "model-b"}, {"id": "gpt-4.1"}, {"id": "claude-sonnet-4-6"}]
+            runtime = {
+                "live_status": "live_ok",
+                "models": [
+                    {"id": "model-a", "category": "text"},
+                    {"id": "model-b", "category": "text"},
+                    {"id": "gpt-4.1", "category": "text"},
+                    {"id": "genx-image-pro", "category": "image"},
+                ],
+                "category_counts": {"text": 3, "image": 1},
+                "capabilities": {"text": True, "image": True},
             }
             with patch.object(self.svc, "_registry_path", return_value=Path(tempfile.mkdtemp()) / "reg.json"):
-                with patch("httpx.AsyncClient") as mock_cx:
-                    mock_cx.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_resp)
+                with patch.object(self.svc, "discover_genx_runtime", AsyncMock(return_value=runtime)):
                     return await self.svc.sync_genx_models("fake-key")
         result = asyncio.run(run())
         assert result["ok"] is True
         assert result["source"] == "live"
         assert result["model_count"] == 4
+        assert result["category_counts"]["image"] == 1
 
     def test_capability_counts(self):
         models = [
@@ -619,6 +635,76 @@ class TestGenxModelSync:
                 coding_models = self.svc.get_models_by_capability("coding")
                 assert "model-a" in coding_models
                 assert "model-b" not in coding_models
+
+
+class TestGenxRuntimeTruth:
+
+    def test_extract_models_accepts_multiple_payload_shapes(self):
+        from app.services.genx_live_probe_service import extract_models
+        assert extract_models({"data": [{"id": "text-a"}]}, category="text")[0]["id"] == "text-a"
+        assert extract_models({"models": [{"name": "image-a"}]}, category="image")[0]["category"] == "image"
+
+    def test_capability_truth_uses_runtime_genx_media_categories(self):
+        from app.services.capability_truth_service import CapabilityTruthService
+
+        async def resolver(key: str):
+            return {"value": "test", "source": "settings", "configured": True} if key == "GENX_API_KEY" else {"value": None, "source": "missing", "configured": False}
+
+        cached = {
+            "genx": {
+                "status": "key_present_live_ok",
+                "probed_at": "2026-05-15T00:00:00+00:00",
+                "runtime": {
+                    "capabilities": {"text": True, "streaming": True, "image": True, "video": True, "audio": True, "voice": True, "avatar": True},
+                    "category_counts": {"text": 10, "image": 2, "video": 1, "audio": 1, "voice": 1, "avatar": 1},
+                    "models": [
+                        {"id": "genx-image-live", "category": "image", "provider": "genx"},
+                        {"id": "genx-video-live", "category": "video", "provider": "genx"},
+                    ],
+                },
+            }
+        }
+        truth = asyncio.run(CapabilityTruthService(resolver, cached_probes=cached).build())
+        assert truth["capabilities"]["image_generation"]["available"] is True
+        assert truth["capabilities"]["video_generation"]["provider"] == "genx"
+        assert truth["capabilities"]["voice_generation"]["available"] is True
+        assert any(m.get("id") == "genx-image-live" and m.get("source") == "genx_runtime_discovery" for m in truth["models"])
+
+    @pytest.mark.asyncio
+    async def test_genx_async_generate_accepts_immediate_base64_payload(self):
+        from app.services import genx_runtime_service as svc
+
+        class FakeResponse:
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {"b64_json": "aGVsbG8="}
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def post(self, *args, **kwargs):
+                return FakeResponse()
+
+        with patch.object(svc.httpx, "AsyncClient", FakeClient):
+            result = await svc.generate_genx_media_job(
+                api_key="genx-key",
+                base_url="https://query.genx.sh/v1",
+                model="genx-image-live",
+                prompt="premium image",
+                category="image",
+            )
+        assert result["ok"] is True
+        assert result["bytes"] == b"hello"
+        assert result["status"] == "succeeded"
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -655,6 +741,11 @@ class TestModelRouter:
         models = ["claude-haiku-4-5", "claude-sonnet-4-6", "gemini-2.5-flash"]
         result = self.svc.route_task("documentation", models)
         assert result["estimated_cost_tier"] == "low"
+
+    def test_route_image_generation_prefers_live_image_model_over_text_fallback(self):
+        models = ["claude-sonnet-4-6", "genx-image-live"]
+        result = self.svc.route_task("image_generation", models)
+        assert result["selected_model"] == "genx-image-live"
 
     def test_router_status_covers_all_task_types(self):
         result = self.svc.get_router_status(["claude-sonnet-4-6"])
@@ -1001,6 +1092,41 @@ class TestRuntimeMediaMotionServices:
         assert (tmp_path / "media_manifest.json").exists()
         assert len(list((tmp_path / "media").glob("*.png"))) == 3
         assert "data-amarktai-media-asset" in (tmp_path / "index.html").read_text()
+
+    @pytest.mark.asyncio
+    async def test_genx_async_media_job_persists_job_metadata_and_manifest(self, tmp_path):
+        from app.services import media_runtime_service as svc
+        png_asset = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+            b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
+            b"\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U"
+            b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        (tmp_path / "index.html").write_text("<html><body><main><h1>Amarktai</h1></main></body></html>")
+        (tmp_path / "styles.css").write_text("body{}")
+        with patch.object(svc, "generate_genx_media_job", AsyncMock(return_value={
+            "ok": True,
+            "provider": "genx",
+            "model": "genx-image-live",
+            "job_id": "job_123",
+            "status": "succeeded",
+            "result_url": "https://genx.test/result.png",
+            "bytes": png_asset,
+            "content_type": "image/png",
+        })):
+            manifest = await svc.execute_media_plan(
+                tmp_path,
+                project_id="p-genx",
+                prompt="premium Amarktai Builder website",
+                genx_api_key="genx-key",
+                genx_image_model="genx-image-live",
+                allow_stock_fallback=False,
+            )
+        assert manifest["stored_asset_count"] == 1
+        assert manifest["assets"][0]["source"] == "genx"
+        assert manifest["assets"][0]["job_id"] == "job_123"
+        assert (tmp_path / "media_manifest.json").exists()
+        assert "media/" in (tmp_path / "index.html").read_text()
 
 
 # ════════════════════════════════════════════════════════════════════════════

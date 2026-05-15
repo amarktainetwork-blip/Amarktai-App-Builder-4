@@ -89,6 +89,7 @@ from app.services.command_runner_service import (
 )
 from app.services import live_probe_service as _probe_svc
 from app.services import genx_model_sync as _genx_sync
+from app.services.genx_live_probe_service import discover_genx_runtime
 from app.services.model_router import route_task, get_router_status, TASK_ROUTING
 from app.services.quality_gate_service import run_quality_gate
 from app.services.runtime_qa_service import run_runtime_qa
@@ -1128,7 +1129,21 @@ async def capability_models(capability: Optional[str] = None) -> dict:
     if capability:
         truth = await _capability_truth()
         capability_attr = capability if capability.startswith("supports_") else f"supports_{capability}"
-        models = [m for m in truth.get("models", []) if m.get(capability_attr)]
+        category_aliases = {
+            "image_generation": {"image"},
+            "supports_image_generation": {"image"},
+            "video_generation": {"video"},
+            "supports_video_generation": {"video"},
+            "audio": {"audio", "voice"},
+            "supports_audio": {"audio", "voice"},
+            "voice_generation": {"voice", "audio"},
+            "supports_voice_generation": {"voice", "audio"},
+        }
+        categories = category_aliases.get(capability, category_aliases.get(capability_attr, set()))
+        models = [
+            m for m in truth.get("models", [])
+            if m.get(capability_attr) or (categories and m.get("category") in categories)
+        ]
         if not models:
             return {
                 "capability": capability,
@@ -4500,6 +4515,34 @@ async def providers_probe_single(provider: str, claims: dict = Depends(require_u
 # ════════════════════════════════════════════════════════════════════════════
 # PHASE 7 — GENX FULL MODEL DISCOVERY
 # ════════════════════════════════════════════════════════════════════════════
+
+@secured.get("/genx/runtime/status")
+async def genx_runtime_status(
+    force_refresh: bool = Query(False),
+    claims: dict = Depends(require_user),
+) -> dict:
+    """Return secured live GenX runtime catalog status for text and media categories."""
+    api_key = await _runtime_secret("GENX_API_KEY")
+    base_url = (await _runtime_secret("GENX_BASE_URL")) or os.environ.get("GENX_BASE_URL", "https://query.genx.sh/v1")
+    result = await discover_genx_runtime(api_key or "", base_url=base_url, force_refresh=force_refresh)
+    if result.get("live_status") == "live_ok":
+        cached = _probe_svc._CACHE.get("all_providers", {})
+        if not isinstance(cached, dict):
+            cached = {}
+        _probe_svc._CACHE["all_providers"] = {
+            **cached,
+            "genx": {
+                "provider": "genx",
+                "status": "key_present_live_ok",
+                "category_counts": result.get("category_counts", {}),
+                "runtime_capabilities": result.get("capabilities", {}),
+                "models": result.get("models", []),
+                "runtime": result,
+                "probed_at": result.get("probed_at"),
+            },
+        }
+    return result
+
 
 @api.get("/models/genx")
 async def models_genx() -> dict:
