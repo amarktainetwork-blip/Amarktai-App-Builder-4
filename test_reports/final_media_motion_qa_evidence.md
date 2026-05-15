@@ -32,3 +32,9 @@ Generated: 2026-05-15
 - Targeted runtime/media/static tests: 4 passed.
 - `cd frontend && npm.cmd test -- --watchAll=false`: 38 passed.
 - `cd frontend && npm.cmd run build`: compiled successfully.
+
+## 2026-05-15 Core Runtime Completion Addendum
+
+- Premium media evidence now requires 3 persisted non-SVG assets. CSS gradients and placeholder SVG files no longer satisfy `asset_count`.
+- Runtime QA now records browser-evaluated broken links and broken media assets in addition to screenshots, console errors, accessibility, performance, and motion selector evidence.
+- `scripts/verify_static_premium_builder_live.sh` now fails on placeholder copy and broken placeholder media references.

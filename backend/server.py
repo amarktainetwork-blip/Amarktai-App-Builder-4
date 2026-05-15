@@ -92,6 +92,7 @@ from app.services import genx_model_sync as _genx_sync
 from app.services.model_router import route_task, get_router_status, TASK_ROUTING
 from app.services.quality_gate_service import run_quality_gate
 from app.services.runtime_qa_service import run_runtime_qa
+from app.services.build_contract_service import final_gate_blockers
 from app.services.media_runtime_service import execute_media_plan
 from app.services.idea_builder_service import (
     IDEA_BUILDER_SYSTEM_PROMPT,
@@ -445,10 +446,10 @@ class Project(BaseModel):
     manifest_status: str | None = None
     # Shared context fields (Phase 2 spec)
     media_strategy: dict = Field(default_factory=lambda: {
-        "mode": "placeholder",
+        "mode": "auto",
         "confirmed": False,
         "models_used": [],
-        "notes": "Safe placeholder images or SVG gradients used by default. Upgrade to balanced/premium and confirm to enable GenX media generation.",
+        "notes": "Runtime media will use configured GenX/Qwen media providers or Pixabay fallback for premium builds.",
     })
     validation_state: dict = Field(default_factory=lambda: {
         "status": "pending",
@@ -1349,6 +1350,7 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
       "auto"     → best available option (original auto-selection logic)
     """
     req = (media_requirements or "auto").lower().strip()
+    premium_static = quality_tier == "premium" and mode in ("media_page", "landing_page", "website")
 
     # ── Explicit "pixabay" choice ──────────────────────────────────────────────
     if req == "pixabay":
@@ -1373,7 +1375,7 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
                 "models_used": [],
                 "notes": (
                     "AI image generation will be used if a GenX or Qwen media model is available. "
-                    "Falls back to CSS/SVG visuals if no media model is configured."
+                    "Falls back to persisted Pixabay assets if no media model is configured."
                 ),
             }
         return {
@@ -1388,6 +1390,17 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
 
     # ── Explicit "css_svg" choice ─────────────────────────────────────────────
     if req == "css_svg":
+        if premium_static:
+            return {
+                "mode": "pixabay",
+                "confirmed": True,
+                "models_used": [],
+                "source": "pixabay",
+                "notes": (
+                    "Premium static builds require persisted media assets. "
+                    "CSS/SVG-only media is not accepted as a premium media strategy."
+                ),
+            }
         return {
             "mode": "css_svg",
             "confirmed": True,
@@ -1424,17 +1437,25 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
             ),
         }
     if mode in ("media_page", "landing_page", "website"):
+        if premium_static:
+            return {
+                "mode": "pixabay",
+                "confirmed": True,
+                "models_used": [],
+                "source": "pixabay",
+                "notes": "Premium website media requires persisted local assets through AI media or Pixabay fallback.",
+            }
         return {
             "mode": "free_assets",
             "confirmed": False,
             "models_used": [],
-            "notes": "Safe remote images (e.g. Unsplash) or SVG/CSS gradients used as placeholders.",
+            "notes": "Stock media can be fetched when configured; CSS/SVG visuals do not count as premium media evidence.",
         }
     return {
-        "mode": "placeholder",
+        "mode": "auto",
         "confirmed": False,
         "models_used": [],
-        "notes": "SVG/gradient placeholders used. No external media dependencies.",
+        "notes": "Runtime media uses configured providers when the selected mode requires media.",
     }
 
 
@@ -2483,6 +2504,24 @@ async def finalize(project_id: str, body: FinalizeOptions = FinalizeOptions(), c
         raise HTTPException(409, "Validation must pass before finalize/push. Fix validation errors first.")
     if proj and proj.get("status") not in ("ready", "finalized"):
         raise HTTPException(409, "Project must be ready before finalize/push.")
+    workspace_path = (proj or {}).get("workspace_path")
+    if workspace_path:
+        tier = (proj or {}).get("quality_tier", "balanced")
+        mode = (proj or {}).get("mode", "web_app")
+        prompt = (proj or {}).get("prompt", "")
+        needs_media = tier == "premium" or bool(re.search(r"\b(media|image|photo|video|cinematic|visual|gallery|background)\b", prompt, re.I))
+        needs_motion = tier == "premium" or bool(re.search(r"\b(motion|animation|animated|3d|cinematic)\b", prompt, re.I))
+        blockers = final_gate_blockers(
+            workspace_path,
+            mode=mode,
+            quality_tier=tier,
+            prompt=prompt,
+            media_required=needs_media,
+            motion_required=needs_motion,
+            runtime_required=tier == "premium",
+        )
+        if blockers:
+            raise HTTPException(409, detail={"final_gate_failed": True, "blockers": blockers})
 
     # Phase 6: Coverage enforcement for repo-update intents
     _COVERAGE_INTENTS = {"full_app_completion", "repo_migration", "full_rebuild_inside_repo"}
@@ -2557,6 +2596,23 @@ async def finalize_as_branch_pr(project_id: str, claims: dict = Depends(require_
         raise HTTPException(404, "Project not found.")
     if proj.get("status") not in ("ready", "finalized"):
         raise HTTPException(409, "Project must be ready before pushing.")
+    workspace_path = proj.get("workspace_path")
+    if workspace_path:
+        tier = proj.get("quality_tier", "balanced")
+        prompt = proj.get("prompt", "")
+        needs_media = tier == "premium" or bool(re.search(r"\b(media|image|photo|video|cinematic|visual|gallery|background)\b", prompt, re.I))
+        needs_motion = tier == "premium" or bool(re.search(r"\b(motion|animation|animated|3d|cinematic)\b", prompt, re.I))
+        blockers = final_gate_blockers(
+            workspace_path,
+            mode=proj.get("mode", "web_app"),
+            quality_tier=tier,
+            prompt=prompt,
+            media_required=needs_media,
+            motion_required=needs_motion,
+            runtime_required=tier == "premium",
+        )
+        if blockers:
+            raise HTTPException(409, detail={"final_gate_failed": True, "blockers": blockers})
     files = await ProjectFS(db, project_id).list_full()
     payload_files = [{"path": f["path"], "content": f["content"]} for f in files if f["path"] != ".env" and not f["path"].endswith("/.env")]
     repo_name = re.sub(r"[^a-z0-9-]+", "-", proj["name"].lower()).strip("-")[:60] or "amarktai-app"

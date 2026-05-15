@@ -220,6 +220,50 @@ Requirements:
     assert validation["canPreview"] is True
 
 
+def test_central_build_contract_blocks_static_react_scaffold(tmp_path):
+    from app.services.build_contract_service import final_gate_blockers, get_build_contract
+
+    contract = get_build_contract(
+        "static_landing_page",
+        prompt="Create a premium cinematic one-page website for Amarktai Builder.",
+        quality_tier="premium",
+    )
+    assert contract.project_type == "static-site"
+    assert "package.json" in contract.forbidden_files
+    assert "src/App.jsx" in contract.forbidden_files
+
+    (tmp_path / "index.html").write_text("<html></html>")
+    (tmp_path / "styles.css").write_text("body{}")
+    (tmp_path / "script.js").write_text("")
+    (tmp_path / "package.json").write_text("{}")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "App.jsx").write_text("export default function App(){}")
+    blockers = final_gate_blockers(
+        tmp_path,
+        mode="static_landing_page",
+        quality_tier="premium",
+        media_required=True,
+        motion_required=True,
+        runtime_required=True,
+    )
+    assert any("package.json" in item for item in blockers)
+    assert any("src/App.jsx" in item for item in blockers)
+    assert any("media_manifest" in item for item in blockers)
+    assert any("runtime QA" in item for item in blockers)
+
+
+def test_idea_builder_final_prompt_sanitizes_control_characters_and_json():
+    from app.services.idea_builder_service import compose_final_prompt
+
+    messages = [{"role": "user", "content": "Build a cinematic site for founders.\x00\x01\nNeeds media."}]
+    model_text = '```json\n{"build_prompt":"Create premium site\\u0000 for Amarktai Builder.\\nInclude media."}\n```'
+    prompt = compose_final_prompt(messages, "landing_page", "Amarktai Builder", model_text)
+    assert "\x00" not in prompt
+    assert "\x01" not in prompt
+    assert "Create premium site" in prompt
+    assert "Include media" in prompt
+
+
 def test_frontend_dockerfile_does_not_require_missing_yarn_lock():
     repo_root = Path(__file__).resolve().parents[2]
     dockerfile = (repo_root / "frontend" / "Dockerfile").read_text(encoding="utf-8")

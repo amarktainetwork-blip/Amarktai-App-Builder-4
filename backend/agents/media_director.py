@@ -245,15 +245,16 @@ def select_media_strategy(
                 "fallback": "pixabay",
             }
         else:
+            stock_ok = cap.get("supports_stock_media", False)
             return {
-                "mode": "css_svg",
-                "source": "svg_fallback",
+                "mode": "stock" if stock_ok else "media_required_unavailable",
+                "source": "pixabay" if stock_ok else "none",
                 "honest_report": (
                     "AI image generation is NOT available in this environment. "
-                    "Using CSS gradients and SVG graphics as premium fallback. "
-                    "No fake AI images will be used."
+                    + ("Using persisted Pixabay stock assets as the premium fallback. " if stock_ok else "No persisted media provider is available. ")
+                    + "No fake AI images will be used."
                 ),
-                "fallback": "css_svg",
+                "fallback": "pixabay" if stock_ok else None,
                 "ai_unavailable": True,
             }
 
@@ -292,13 +293,13 @@ def select_media_strategy(
             }
         else:
             return {
-                "mode": "css_svg",
-                "source": "css_svg",
+                "mode": "stock" if cap.get("supports_stock_media", False) else "media_required_unavailable",
+                "source": "pixabay" if cap.get("supports_stock_media", False) else "none",
                 "honest_report": (
                     "Auto mode: AI image generation unavailable. "
-                    "Using CSS/SVG premium visuals."
+                    + ("Pixabay stock assets selected." if cap.get("supports_stock_media", False) else "No persisted media provider is available.")
                 ),
-                "fallback": None,
+                "fallback": "pixabay" if cap.get("supports_stock_media", False) else None,
                 "ai_unavailable": True,
             }
 

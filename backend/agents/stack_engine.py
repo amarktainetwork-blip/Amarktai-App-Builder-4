@@ -31,9 +31,9 @@ ALL_MODES = (RESEARCH_MODES | STATIC_MODES | APP_MODES |
 # Required files by mode
 REQUIRED_FILES: dict[str, list[str]] = {
     "research": [],
-    "landing_page": ["index.html", "styles.css", "README.md", "amarktai.project.json"],
-    "website": ["index.html", "styles.css", "README.md", "amarktai.project.json"],
-    "media_page": ["index.html", "styles.css", "README.md", "amarktai.project.json"],
+    "landing_page": ["index.html", "styles.css", "script.js", "README.md", "amarktai.project.json", "preview-manifest.json"],
+    "website": ["index.html", "styles.css", "script.js", "README.md", "amarktai.project.json", "preview-manifest.json"],
+    "media_page": ["index.html", "styles.css", "script.js", "README.md", "amarktai.project.json", "preview-manifest.json"],
     "web_app": ["index.html", "styles.css", "app.js", "README.md", "amarktai.project.json"],
     "pwa": ["index.html", "styles.css", "app.js", "manifest.json", "service-worker.js",
             "README.md", "amarktai.project.json"],

@@ -18,3 +18,9 @@ Tests:
 - `backend/tests/test_phase3_services.py::TestRuntimeMediaMotionServices::test_pixabay_mock_response_persists_manifest_and_injects_assets`
 - `backend/tests/backend_test.py::test_premium_reviewer_invalid_json_blocks_ready_state`
 - Existing fallback-readiness tests verify fallback output cannot become ready.
+
+## 2026-05-15 Core Runtime Completion Addendum
+
+- Shared final gate blockers are available through `backend/app/services/build_contract_service.py` and are used by generated-workspace persistence plus finalize/push endpoints.
+- Static premium builds are blocked by forbidden React scaffold files, missing media/motion/runtime artifacts, placeholder copy, broken links/assets, and missing runtime proof.
+- Idea Builder finalization control-character handling is covered by regression test.

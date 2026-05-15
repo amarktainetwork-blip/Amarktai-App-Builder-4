@@ -75,3 +75,11 @@ Generated: 2026-05-15
 - `scripts/verify_idea_builder_live.sh`
 - `scripts/verify_agent_matrix.sh`
 - `scripts/verify_no_legacy_template_contamination.sh`
+
+## 2026-05-15 Core Runtime Completion Addendum
+
+- Added the central app-level build contract service and wired final gate checks into workspace persistence and GitHub finalize paths.
+- Fixed the remaining fake premium media strategy by routing premium static media through persisted providers/Pixabay fallback instead of CSS/SVG placeholders.
+- Fixed Idea Builder finalization serialization by sanitizing JSON-hostile control characters and extracting prompts from model JSON/fenced JSON safely.
+- Added browser runtime QA checks for dead anchors, missing anchor targets, broken images, and media element errors.
+- Added/updated tests so the suite now covers 808 passing backend tests plus frontend tests/build.
