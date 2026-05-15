@@ -24,6 +24,8 @@ def _probe_status(provider: str, configured: bool, source: str, cached_probes: d
         return "key_missing", f"{provider.upper()} key not configured", None
     probe = (cached_probes or {}).get(provider)
     if isinstance(probe, dict):
+        if probe.get("live_status") == "live_ok":
+            return "live_ok", None, probe.get("probed_at")
         raw = probe.get("status")
         if raw == "key_present_live_ok":
             return "live_ok", None, probe.get("probed_at")
@@ -36,6 +38,19 @@ def _probe_status(provider: str, configured: bool, source: str, cached_probes: d
 
 def _availability(provider: dict[str, Any]) -> bool:
     return bool(provider.get("configured")) and provider.get("live_status") == "live_ok"
+
+
+def _genx_runtime(provider: dict[str, Any]) -> dict[str, Any]:
+    runtime = provider.get("runtime") or {}
+    if not isinstance(runtime, dict):
+        return {}
+    return runtime
+
+
+def _genx_capability(provider: dict[str, Any], capability: str) -> bool:
+    runtime = _genx_runtime(provider)
+    caps = runtime.get("capabilities") or provider.get("runtime_capabilities") or {}
+    return _availability(provider) and bool(caps.get(capability))
 
 
 class CapabilityTruthService:
@@ -124,6 +139,8 @@ class CapabilityTruthService:
         live_status, reason, last_checked_at = _probe_status(name, configured, source, self.cached_probes)
         if live_status == "key_missing":
             reason = f"{env_key} not configured"
+        probe = self.cached_probes.get(name, {}) if isinstance(self.cached_probes, dict) else {}
+        runtime = probe.get("runtime") if isinstance(probe, dict) else None
         return {
             "configured": configured,
             "source": source,
@@ -132,6 +149,9 @@ class CapabilityTruthService:
             "last_checked_at": last_checked_at,
             "env_key": env_key,
             "error": resolved.get("error"),
+            "runtime": runtime or {},
+            "runtime_capabilities": (runtime or {}).get("capabilities", {}) if isinstance(runtime, dict) else probe.get("runtime_capabilities", {}) if isinstance(probe, dict) else {},
+            "category_counts": (runtime or {}).get("category_counts", {}) if isinstance(runtime, dict) else probe.get("category_counts", {}) if isinstance(probe, dict) else {},
         }
 
     def _capabilities(self, providers: dict[str, dict[str, Any]], qwen_models: dict[str, str]) -> dict[str, Any]:
@@ -140,6 +160,11 @@ class CapabilityTruthService:
         brave_ok = _availability(providers["brave"])
         pixabay_ok = _availability(providers["pixabay"])
         qwen_ok = _availability(providers["qwen"])
+        genx_image_ok = _genx_capability(providers["genx"], "image")
+        genx_video_ok = _genx_capability(providers["genx"], "video")
+        genx_audio_ok = _genx_capability(providers["genx"], "audio")
+        genx_voice_ok = _genx_capability(providers["genx"], "voice")
+        genx_avatar_ok = _genx_capability(providers["genx"], "avatar")
 
         def cap(available: bool, provider: str | None, reason: str, fallback: str = "") -> dict[str, Any]:
             return {
@@ -160,14 +185,27 @@ class CapabilityTruthService:
             "tool_use": cap(genx_ok, "genx", providers["genx"]["reason"] or "GENX_API_KEY not configured"),
             "streaming": cap(genx_ok, "genx", providers["genx"]["reason"] or "GENX_API_KEY not configured"),
             "image_generation": cap(
-                genx_ok or (qwen_ok and bool(qwen_models["image_model"])),
-                "genx" if genx_ok else "qwen",
+                genx_image_ok or (qwen_ok and bool(qwen_models["image_model"])),
+                "genx" if genx_image_ok else "qwen",
                 providers["genx"]["reason"] or providers["qwen"]["reason"] or "Image provider not configured",
-                "CSS/SVG visuals remain available.",
+                "Pixabay stock media fallback is available only when Pixabay live validation passes.",
             ),
-            "video_generation": cap(qwen_ok and bool(qwen_models["video_model"]), "qwen", "QWEN_API_KEY and QWEN_MODEL_VIDEO are required."),
-            "audio": cap(qwen_ok and bool(qwen_models["audio_model"]), "qwen", "QWEN_API_KEY and QWEN_MODEL_AUDIO are required."),
-            "voice_generation": cap(qwen_ok and bool(qwen_models["audio_model"]), "qwen", "QWEN_API_KEY and QWEN_MODEL_AUDIO are required."),
+            "video_generation": cap(
+                genx_video_ok or (qwen_ok and bool(qwen_models["video_model"])),
+                "genx" if genx_video_ok else "qwen",
+                providers["genx"]["reason"] or "GenX video category was not live-discovered; QWEN_API_KEY and QWEN_MODEL_VIDEO are required.",
+            ),
+            "audio": cap(
+                genx_audio_ok or (qwen_ok and bool(qwen_models["audio_model"])),
+                "genx" if genx_audio_ok else "qwen",
+                providers["genx"]["reason"] or "GenX audio category was not live-discovered; QWEN_API_KEY and QWEN_MODEL_AUDIO are required.",
+            ),
+            "voice_generation": cap(
+                genx_voice_ok or (qwen_ok and bool(qwen_models["audio_model"])),
+                "genx" if genx_voice_ok else "qwen",
+                providers["genx"]["reason"] or "GenX voice category was not live-discovered; QWEN_API_KEY and QWEN_MODEL_AUDIO are required.",
+            ),
+            "avatar_generation": cap(genx_avatar_ok, "genx", providers["genx"]["reason"] or "GenX avatar category was not live-discovered."),
             "github_integration": cap(github_ok, "github", providers["github"]["reason"] or "GITHUB_PAT not configured", "File export remains available."),
             "web_research": cap(brave_ok, "brave", providers["brave"]["reason"] or "BRAVE_SEARCH_API_KEY not configured", "Scout continues without live web research."),
             "stock_media": cap(pixabay_ok, "pixabay", providers["pixabay"]["reason"] or "PIXABAY_API_KEY not configured", "Use AI images if available or CSS/SVG visuals."),
@@ -194,6 +232,7 @@ class CapabilityTruthService:
 
     def _models(self, providers: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         models = []
+        seen: set[tuple[str, str]] = set()
         for item in get_registry():
             provider = item.get("provider")
             provider_state = providers.get(provider, {})
@@ -217,4 +256,26 @@ class CapabilityTruthService:
                 "unavailable_reason": None if provider_available else reason,
             }
             models.append(annotated)
+            seen.add((str(provider), str(item.get("model") or item.get("id"))))
+        genx_state = providers.get("genx", {})
+        for item in _genx_runtime(genx_state).get("models", []):
+            model_id = item.get("id")
+            category = item.get("category", "text")
+            if not model_id or ("genx", str(model_id)) in seen:
+                continue
+            available = _availability(genx_state)
+            models.append({
+                "id": model_id,
+                "model": model_id,
+                "provider": "genx",
+                "category": category,
+                "capabilities": [category],
+                "known": True,
+                "source": "genx_runtime_discovery",
+                "configured_model": genx_state.get("configured", False),
+                "available": available,
+                "provider_source": genx_state.get("source"),
+                "provider_live_status": genx_state.get("live_status"),
+                "unavailable_reason": None if available else genx_state.get("reason") or "GENX_API_KEY not configured",
+            })
         return models

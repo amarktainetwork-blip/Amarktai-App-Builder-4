@@ -15,6 +15,8 @@ import httpx
 
 from agents.pixabay import search_images, search_videos
 from agents.media_storage import safe_filename, validate_upload
+from app.services.genx_live_probe_service import discover_genx_runtime
+from app.services.genx_runtime_service import generate_genx_media_job
 
 
 def _now() -> str:
@@ -181,9 +183,27 @@ async def execute_media_plan(
     ]
     for provider, key, base, model in providers:
         if not key or not model:
-            attempts.append({"provider": provider, "ok": False, "reason": "missing key or model"})
-            continue
-        result = await _openai_image_endpoint(provider=provider, api_key=key, base_url=base, model=model, prompt=image_prompt)
+            if provider == "genx" and key:
+                try:
+                    runtime = await discover_genx_runtime(key, base_url=base)
+                    image_models = runtime.get("media", {}).get("image", {}).get("models", [])
+                    model = (image_models[0] or {}).get("id", "") if image_models else ""
+                except Exception as exc:
+                    attempts.append({"provider": "genx_runtime_discovery", "ok": False, "reason": str(exc)})
+            if not key or not model:
+                attempts.append({"provider": provider, "ok": False, "reason": "missing key or model"})
+                continue
+        if provider == "genx":
+            result = await generate_genx_media_job(
+                api_key=key,
+                base_url=base,
+                model=model,
+                prompt=image_prompt,
+                category="image",
+                extra={"size": "1792x1024"},
+            )
+        else:
+            result = await _openai_image_endpoint(provider=provider, api_key=key, base_url=base, model=model, prompt=image_prompt)
         attempts.append({k: v for k, v in (result or {}).items() if k not in {"bytes"}} or {"provider": provider, "ok": False})
         if result and result.get("ok"):
             assets.append(_write_asset(
@@ -193,7 +213,14 @@ async def execute_media_plan(
                 source=provider,
                 prompt=image_prompt,
                 media_type="image",
-                remote_url=result.get("remote_url", ""),
+                remote_url=result.get("remote_url", "") or result.get("result_url", ""),
+                meta={
+                    "provider": provider,
+                    "model": model,
+                    "job_id": result.get("job_id", ""),
+                    "status": result.get("status", "succeeded"),
+                    "result_url": result.get("result_url", ""),
+                } if provider == "genx" else None,
             ))
             if _approved_asset_count(assets) >= 3:
                 break

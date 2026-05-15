@@ -113,23 +113,7 @@ _CATALOG: list[ModelCapability] = [
         speed_tier="fast",
         reliability_score=0.94,
     ),
-    # ── GenX / image generation (DALL·E / Flux style) ────────────────────────
-    ModelCapability(
-        provider="genx",
-        model="dall-e-3",
-        supports_image_generation=True,
-        cost_tier="high",
-        speed_tier="slow",
-        reliability_score=0.88,
-    ),
-    ModelCapability(
-        provider="genx",
-        model="flux-schnell",
-        supports_image_generation=True,
-        cost_tier="medium",
-        speed_tier="medium",
-        reliability_score=0.85,
-    ),
+    # GenX media models are discovered at runtime from category endpoints.
     # ── Qwen (optional, direct provider) ─────────────────────────────────────
     ModelCapability(
         provider="qwen",

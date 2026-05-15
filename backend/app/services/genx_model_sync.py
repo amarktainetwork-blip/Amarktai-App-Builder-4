@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import httpx
+from app.services.genx_live_probe_service import discover_genx_runtime
 
 logger = logging.getLogger("amarktai.genx_model_sync")
 
@@ -111,34 +111,23 @@ async def sync_genx_models(api_key: str) -> dict[str, Any]:
     if not api_key:
         return _use_fallback("GENX_API_KEY not configured")
 
-    base_url = os.environ.get("GENX_BASE_URL", "https://query.genx.sh/v1").rstrip("/")
-
     try:
-        async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as cx:
-            r = await cx.get(
-                f"{base_url}/models",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "User-Agent": "Amarktai-App-Builder/1.0",
-                },
-            )
-        if r.status_code != 200:
-            return _use_fallback(
-                f"GenX /models returned {r.status_code}: {r.text[:200]}"
-            )
+        runtime = await discover_genx_runtime(
+            api_key,
+            base_url=os.environ.get("GENX_BASE_URL", "https://query.genx.sh/v1"),
+            force_refresh=True,
+        )
+        if runtime.get("live_status") != "live_ok":
+            return _use_fallback(runtime.get("reason") or "GenX runtime discovery failed")
 
-        data = r.json()
-        raw_models = data.get("data", data) if isinstance(data, dict) else data
-        if not isinstance(raw_models, list):
-            return _use_fallback("GenX /models returned unexpected format")
-
-        models = _build_model_list(raw_models)
+        models = _build_model_list(runtime.get("models", []))
         result = _build_registry(models, source="live")
+        result["category_counts"] = runtime.get("category_counts", {})
+        result["runtime_capabilities"] = runtime.get("capabilities", {})
+        result["base_url"] = runtime.get("base_url")
         _save_registry(result)
         return result
 
-    except httpx.TimeoutException:
-        return _use_fallback(f"GenX /models timed out after {PROBE_TIMEOUT}s")
     except Exception as exc:
         return _use_fallback(str(exc)[:200])
 
@@ -156,10 +145,13 @@ def _build_model_list(raw: list) -> list[dict]:
         if not model_id:
             continue
         caps = _classify_model(model_id)
+        if isinstance(item, dict) and item.get("category") and item["category"] not in caps:
+            caps.append(str(item["category"]))
         models.append({
             "id": model_id,
             "provider": "genx",
             "capabilities": caps,
+            "category": item.get("category") if isinstance(item, dict) else None,
             "raw": item if isinstance(item, dict) else {"id": model_id},
         })
     return models
@@ -202,7 +194,18 @@ def _save_registry(data: dict) -> None:
     path = _registry_path()
     try:
         # Remove raw detail to keep file small
-        slim = {**data, "models": [{"id": m["id"], "capabilities": m["capabilities"]} for m in data.get("models", [])]}
+        slim = {
+            **data,
+            "models": [
+                {
+                    "id": m["id"],
+                    "provider": "genx",
+                    "category": m.get("category"),
+                    "capabilities": m["capabilities"],
+                }
+                for m in data.get("models", [])
+            ],
+        }
         path.write_text(json.dumps(slim, indent=2))
     except Exception as exc:
         logger.warning("Could not save GenX registry: %s", exc)
