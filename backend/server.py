@@ -4246,6 +4246,38 @@ async def builds_static_preview_file(
     return FileResponse(target)
 
 
+@api.get("/projects/{project_id}/media/{file_path:path}")
+async def project_generated_media_file(project_id: str, file_path: str) -> FileResponse:
+    """Serve generated project media assets from build storage for live previews."""
+    root = get_builds_storage_root().resolve()
+    candidates = [
+        root / "generated" / project_id / "media",
+        root / "archived" / project_id / "media",
+    ]
+
+    safe_rel = Path(str(file_path).lstrip("/"))
+    if safe_rel.is_absolute() or ".." in safe_rel.parts:
+        raise HTTPException(400, "Unsafe media path.")
+
+    for media_root in candidates:
+        media_root = media_root.resolve()
+        try:
+            media_root.relative_to(root)
+        except ValueError:
+            continue
+
+        target = (media_root / safe_rel).resolve()
+        try:
+            target.relative_to(media_root)
+        except ValueError:
+            continue
+
+        if target.exists() and target.is_file():
+            return FileResponse(target)
+
+    raise HTTPException(404, "Project media file not found.")
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # PHASE 4 — BUILD / TEST / INSTALL COMMAND RUNNER ENDPOINTS
 # ════════════════════════════════════════════════════════════════════════════

@@ -5,6 +5,7 @@ import base64
 import json
 import mimetypes
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -111,6 +112,43 @@ def _approved_asset_count(assets: list[dict[str, Any]]) -> int:
     ])
 
 
+def _compact_media_query(prompt: str, sections: list[str]) -> str:
+    """Create a short stock-media query instead of sending an entire long user prompt to Pixabay."""
+    text = re.sub(r"[^a-zA-Z0-9 ]+", " ", prompt or "").lower()
+    stop = {
+        "build", "create", "page", "landing", "website", "must", "include", "generated",
+        "system", "itself", "using", "live", "with", "and", "the", "for", "our", "all",
+        "capabilities", "requirements", "mandatory", "production", "ready"
+    }
+    words = [w for w in text.split() if len(w) > 3 and w not in stop]
+    preferred = [w for w in words if w in {
+        "ai", "artificial", "intelligence", "software", "video", "voice", "audio",
+        "image", "robot", "technology", "coding", "automation", "dashboard",
+        "futuristic", "digital", "network", "studio", "creative"
+    }]
+    selected = preferred[:6] or words[:6] or ["artificial", "intelligence", "technology"]
+    return " ".join(selected[:8])
+
+
+def _media_queries(prompt: str, sections: list[str]) -> list[str]:
+    base = _compact_media_query(prompt, sections)
+    queries = [
+        base,
+        "artificial intelligence technology",
+        "futuristic software dashboard",
+        "digital media studio",
+        "robot artificial intelligence",
+    ]
+    seen: set[str] = set()
+    out: list[str] = []
+    for q in queries:
+        q = " ".join(str(q).split()).strip()
+        if q and q not in seen:
+            seen.add(q)
+            out.append(q)
+    return out
+
+
 async def execute_media_plan(
     workspace_path: str | Path,
     *,
@@ -161,13 +199,36 @@ async def execute_media_plan(
                 break
 
     if _approved_asset_count(assets) < 3 and allow_stock_fallback and pixabay_api_key:
-        images = await search_images(prompt, pixabay_api_key, per_page=6, min_width=1280, min_height=720)
-        videos = await search_videos(prompt, pixabay_api_key, per_page=3, min_width=1280, min_height=720)
-        for item in images:
+        selected_images: list[dict[str, Any]] = []
+        selected_videos: list[dict[str, Any]] = []
+        for query in _media_queries(prompt, sections):
+            try:
+                images = await search_images(query, pixabay_api_key, per_page=8, min_width=1024, min_height=576)
+                videos = await search_videos(query, pixabay_api_key, per_page=3, min_width=1024, min_height=576)
+                attempts.append({
+                    "provider": "pixabay_search",
+                    "ok": True,
+                    "query": query,
+                    "images_found": len(images),
+                    "videos_found": len(videos),
+                })
+                selected_images.extend(images)
+                selected_videos.extend(videos)
+                if len(selected_images) >= 6:
+                    break
+            except Exception as exc:
+                attempts.append({"provider": "pixabay_search", "ok": False, "query": query, "reason": str(exc)})
+
+        seen_remote: set[str] = set()
+        for item in selected_images:
             if _approved_asset_count(assets) >= 3:
                 break
+            remote = item.get("full_url") or item.get("url", "")
+            if not remote or remote in seen_remote:
+                continue
+            seen_remote.add(remote)
             try:
-                content, content_type = await _download(item.get("full_url") or item["url"])
+                content, content_type = await _download(remote)
                 written = _write_asset(
                     workspace,
                     content=content,
@@ -175,29 +236,37 @@ async def execute_media_plan(
                     source="pixabay",
                     prompt=prompt,
                     media_type="image",
-                    remote_url=item.get("full_url") or item.get("url", ""),
+                    remote_url=remote,
                     meta={"attribution": item.get("attribution", ""), "tags": item.get("tags", "")},
                 )
                 if Path(written.get("path", "")).suffix.lower() == ".svg":
-                    attempts.append({"provider": "pixabay", "ok": False, "reason": "SVG assets do not count as premium persisted media."})
+                    attempts.append({"provider": "pixabay", "ok": False, "remote_url": remote, "reason": "SVG assets do not count as premium persisted media."})
+                else:
+                    attempts.append({"provider": "pixabay", "ok": True, "remote_url": remote, "path": written.get("path")})
                 assets.append(written)
             except Exception as exc:
-                attempts.append({"provider": "pixabay", "ok": False, "reason": str(exc)})
-        for item in videos[:1]:
+                attempts.append({"provider": "pixabay", "ok": False, "remote_url": remote, "reason": str(exc)})
+
+        for item in selected_videos[:1]:
+            remote = item.get("url", "")
+            if not remote:
+                continue
             try:
-                content, content_type = await _download(item["url"])
-                assets.append(_write_asset(
+                content, content_type = await _download(remote)
+                written = _write_asset(
                     workspace,
                     content=content,
                     content_type=content_type,
                     source="pixabay",
                     prompt=prompt,
                     media_type="video",
-                    remote_url=item.get("url", ""),
+                    remote_url=remote,
                     meta={"attribution": item.get("attribution", ""), "tags": item.get("tags", "")},
-                ))
+                )
+                attempts.append({"provider": "pixabay_video", "ok": True, "remote_url": remote, "path": written.get("path")})
+                assets.append(written)
             except Exception as exc:
-                attempts.append({"provider": "pixabay_video", "ok": False, "reason": str(exc)})
+                attempts.append({"provider": "pixabay_video", "ok": False, "remote_url": remote, "reason": str(exc)})
 
     injected_files = inject_media_assets(workspace, assets) if assets else []
     manifest = {

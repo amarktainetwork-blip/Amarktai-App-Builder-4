@@ -2,7 +2,9 @@ FROM python:3.11-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    CHROME_PATH=/root/.cache/ms-playwright/chromium-*/chrome-linux/chrome \
+    PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
 
 WORKDIR /app
 
