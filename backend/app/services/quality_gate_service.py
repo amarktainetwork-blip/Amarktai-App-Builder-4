@@ -470,7 +470,16 @@ def run_quality_gate(
         checks["motion_manifest"] = check_motion_manifest(ws)
     runtime_report: dict[str, Any] | None = None
     if strict or require_runtime:
-        runtime_report = run_runtime_qa(ws)
+        import asyncio
+        import concurrent.futures
+
+        try:
+            asyncio.get_running_loop()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                runtime_report = executor.submit(run_runtime_qa, ws).result()
+        except RuntimeError:
+            runtime_report = run_runtime_qa(ws)
+
         checks["runtime_qa"] = {
             "ok": bool(runtime_report.get("pass")),
             "blocker": True,

@@ -368,6 +368,20 @@ Rules:
     OR an aria-label attribute on the field itself.
   * Example: <label for="email">Email</label><input type="email" id="email" name="email">
   * Contact/CTA/newsletter forms must always follow these rules.
+
+PREMIUM PRODUCTION RULES (MANDATORY — violations are build failures):
+- NEVER describe features as "simulated", "placeholder", "mock", "fake", "demo", or "coming soon" in premium builds.
+- NEVER claim AI-generated media exists unless real persisted media assets are available in shared_context.media_manifest.
+- If only stock assets are available, describe them truthfully as curated visual assets.
+- Premium builds MUST feel like elite production software, not starter templates.
+- Premium builds MUST NOT ship truncated HTML, incomplete CSS, stub JS, TODO comments, missing sections, or unfinished files.
+- Every CSS class referenced in HTML MUST exist in CSS.
+- Every JS interaction referenced in HTML MUST be implemented.
+- Premium landing pages MUST include at least 900 meaningful words, 8 complete sections, 3 CTA areas, a lead-capture form, responsive states, and an animation system.
+- Use emotionally persuasive, human-quality copywriting: problem → transformation → capability → proof → CTA.
+- Avoid robotic wording, repeated generic claims, and repetitive icon/title/text card grids.
+- Output complete files only. If you cannot finish a complete file, produce a smaller complete design instead of a large truncated one.
+
 - Output ONLY the file blocks and the summary block — no JSON, no other text.
 """ + PREMIUM_SECTION_LIBRARY + VISUAL_COMPOSITION_RULES
 
@@ -381,6 +395,14 @@ You receive the generated files (and the build mode). Audit them for:
 - missing or incomplete README.md
 - missing amarktai.project.json
 - broken HTML tags or JS syntax errors
+- incomplete/truncated HTML documents
+- CSS classes referenced in HTML but missing from CSS
+- JS interactions referenced in HTML but not implemented
+- placeholder/simulated/fake/demo wording in premium builds
+- weak/thin/generic marketing copy
+- repetitive layout/card structures
+- missing premium motion systems
+- missing meaningful content depth
 - accessibility issues:
   * every <input>, <textarea>, <select> must have both id="" and name="" attributes
   * every form field must have an associated <label for="..."> matching its id, or an aria-label attribute
@@ -571,6 +593,20 @@ Rules:
 - Always return the FULL new content of any file you touch — never a diff.
 - Write file content verbatim — do NOT JSON-escape, do NOT add backticks or fences.
 - Never hardcode secrets.
+
+PREMIUM PRODUCTION RULES (MANDATORY — violations are build failures):
+- NEVER describe features as "simulated", "placeholder", "mock", "fake", "demo", or "coming soon" in premium builds.
+- NEVER claim AI-generated media exists unless real persisted media assets are available in shared_context.media_manifest.
+- If only stock assets are available, describe them truthfully as curated visual assets.
+- Premium builds MUST feel like elite production software, not starter templates.
+- Premium builds MUST NOT ship truncated HTML, incomplete CSS, stub JS, TODO comments, missing sections, or unfinished files.
+- Every CSS class referenced in HTML MUST exist in CSS.
+- Every JS interaction referenced in HTML MUST be implemented.
+- Premium landing pages MUST include at least 900 meaningful words, 8 complete sections, 3 CTA areas, a lead-capture form, responsive states, and an animation system.
+- Use emotionally persuasive, human-quality copywriting: problem → transformation → capability → proof → CTA.
+- Avoid robotic wording, repeated generic claims, and repetitive icon/title/text card grids.
+- Output complete files only. If you cannot finish a complete file, produce a smaller complete design instead of a large truncated one.
+
 - Output ONLY the file blocks and the summary block — no JSON, no other text.
 """
 
