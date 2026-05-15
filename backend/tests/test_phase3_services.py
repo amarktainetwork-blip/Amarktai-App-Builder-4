@@ -802,6 +802,46 @@ class TestQualityGateService:
         warning_checks = [w["check"] for w in result["warnings"]]
         assert "placeholders" in warning_checks
 
+    def test_content_quality_blocks_wrong_product_in_strict_mode(self):
+        ws = self._make_workspace({
+            "index.html": "<html><body><main><section><h1>Generic SaaS</h1><a href='#missing'>Get started</a></section></main></body></html>",
+            "styles.css": ":root{--x:#000}@media(max-width:800px){body{display:block}}",
+            "README.md": "# Site",
+            ".env.example": "",
+        })
+        result = self.svc.run_quality_gate(
+            ws,
+            strict=True,
+            prompt="Create a premium website for \"Amarktai App Builder\" with GitHub workflow, runtime QA, media, voice and avatar sections.",
+        )
+        blocker_checks = [b["check"] for b in result["blockers"]]
+        assert "content_quality" in blocker_checks
+        assert result["content_quality_report"]["pass"] is False
+        assert Path(ws, "content_quality_report.json").exists()
+
+    def test_content_quality_passes_specific_product_copy(self):
+        from app.services.content_quality_service import run_content_quality_check
+
+        ws = self._make_workspace({
+            "index.html": """
+            <html><body><main>
+            <section id='hero'><h1>Amarktai App Builder</h1><p>Amarktai App Builder helps founders launch AI software with agents, GitHub workflow, live preview, media assets, voice and avatar capability, runtime QA, accessibility, performance checks, and deployment orchestration.</p><a href='#workflow'>Start building</a></section>
+            <section id='workflow'><h2>GitHub workflow</h2><p>Import repos, repair code, run tests, create PRs, and deploy with quality gates.</p></section>
+            <section><h2>Media system</h2><p>Real images and video assets are persisted and audited.</p></section>
+            <section><h2>Runtime QA</h2><p>Browser screenshots, accessibility and performance checks verify every premium build.</p></section>
+            <section><h2>Deployment</h2><p>Production readiness evidence keeps launch decisions truthful. The page explains how Amarktai App Builder plans software, generates polished interfaces, validates media files, audits content quality, checks runtime behavior in a browser, and gives teams a clear path from idea to deployed application without hiding blockers. Founders, agencies, product teams, startups, and businesses see the hierarchy of value immediately: build, repair, continue, preview, validate, and ship through a controlled AI software factory.</p></section>
+            <section><h2>Enterprise control</h2><p>Every CTA points to a real workflow, every capability claim is tied to generated evidence, and every final action depends on media, motion, content, accessibility, performance, GitHub, and deployment proof. Amarktai App Builder is presented as the product requested by the prompt, not as a generic starter template.</p></section>
+            </main></body></html>
+            """,
+        })
+        report = run_content_quality_check(
+            ws,
+            strict=True,
+            prompt="Create a premium website for \"Amarktai App Builder\" with GitHub workflow, runtime QA, media, voice and avatar sections.",
+        )
+        assert report["pass"] is True
+        assert report["score"] >= 90
+
     def test_detects_hardcoded_secret(self):
         ws = self._make_workspace({
             "src/config.js": "const API_KEY = 'sk-abc123xyz456def789ghi012jkl345mno';",
