@@ -152,9 +152,9 @@ async def execute_media_plan(
             break
 
     if not assets and allow_stock_fallback and pixabay_api_key:
-        images = await search_images(prompt, pixabay_api_key, per_page=3, min_width=1280, min_height=720)
+        images = await search_images(prompt, pixabay_api_key, per_page=6, min_width=1280, min_height=720)
         videos = await search_videos(prompt, pixabay_api_key, per_page=3, min_width=1280, min_height=720)
-        for item in images[:2]:
+        for item in images[:3]:
             try:
                 content, content_type = await _download(item.get("full_url") or item["url"])
                 assets.append(_write_asset(

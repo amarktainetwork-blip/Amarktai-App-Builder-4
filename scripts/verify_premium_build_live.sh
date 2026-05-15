@@ -10,6 +10,11 @@ export PROMPT NAME
 AUTH=(-H "Authorization: Bearer ${AMARKTAI_TOKEN}" -H "Content-Type: application/json")
 
 echo "== Premium build live verification =="
+if command -v docker >/dev/null 2>&1; then
+  echo "== Docker frontend container check =="
+  docker compose ps frontend
+fi
+
 CREATE_BODY=$(python3 - <<PY
 import json, os
 print(json.dumps({
@@ -29,3 +34,17 @@ PROJECT_ID=$(printf '%s' "${PROJECT}" | python3 -c 'import json,sys; print(json.
 echo "Project: ${PROJECT_ID}"
 echo "Watch dashboard/websocket until build completes, then run:"
 echo "  PROJECT_ID=${PROJECT_ID} WORKSPACE_PATH=<workspace_path> AMARKTAI_TOKEN=... scripts/verify_production_runtime.sh"
+
+if [ -n "${WORKSPACE_PATH:-}" ]; then
+  echo "== Verifying generated workspace artifacts =="
+  test -f "${WORKSPACE_PATH}/media_manifest.json"
+  test -d "${WORKSPACE_PATH}/media"
+  find "${WORKSPACE_PATH}/media" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.mp4' -o -name '*.svg' \) | grep -q .
+  test -f "${WORKSPACE_PATH}/runtime-qa/runtime-qa-report.json"
+  test -f "${WORKSPACE_PATH}/runtime-qa/accessibility-report.json"
+  test -f "${WORKSPACE_PATH}/runtime-qa/screenshots/desktop.png"
+  test -f "${WORKSPACE_PATH}/runtime-qa/screenshots/tablet.png"
+  test -f "${WORKSPACE_PATH}/runtime-qa/screenshots/mobile.png"
+  test -f "${WORKSPACE_PATH}/motion_manifest.json"
+  WORKSPACE_PATH="${WORKSPACE_PATH}" scripts/verify_no_legacy_template_contamination.sh
+fi

@@ -15,6 +15,7 @@ import asyncio
 import json
 import os
 import tempfile
+import types
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -840,6 +841,40 @@ class TestQualityGateService:
         result = self.svc.check_template_contamination(Path(ws), prompt=prompt, mode="website")
         assert result["ok"] is (not should_block)
 
+    def test_build_contract_removes_legacy_automotive_templates_from_non_automotive(self):
+        from agents.build_contract import ensure_required_files, get_required_files
+        project = {"mode": "website"}
+        prompt = "Create a premium Amarktai Builder software factory website with repo workflows"
+        files = [
+            {"path": "index.html", "content": "<html><head><link rel='stylesheet' href='styles.css'></head><body>Amarktai</body></html>", "language": "html"},
+            {"path": "styles.css", "content": "body{}", "language": "css"},
+            {"path": "inventory.html", "content": "<html>legacy inventory</html>", "language": "html"},
+            {"path": "vehicle-detail.html", "content": "<html>legacy detail</html>", "language": "html"},
+            {"path": "finance.html", "content": "<html>legacy finance</html>", "language": "html"},
+        ]
+        ensured, changed = ensure_required_files(project, prompt, None, files)
+        paths = {f["path"] for f in ensured}
+        assert "inventory.html" not in paths
+        assert "vehicle-detail.html" not in paths
+        assert "finance.html" not in paths
+        assert {"inventory.html", "vehicle-detail.html", "finance.html"}.issubset(set(changed))
+        required = get_required_files("multi-page-site", "multi-page-website", "Create a SaaS dashboard with inventory analytics and finance reporting")
+        assert "inventory.html" not in required
+        assert "vehicle-detail.html" not in required
+        assert "finance.html" not in required
+
+    def test_build_contract_allows_automotive_templates_for_dealership(self):
+        from agents.build_contract import ensure_required_files, get_required_files
+        prompt = "Create a six-page automotive dealership website with car inventory, finance, and test drive pages"
+        required = get_required_files("multi-page-site", "multi-page-website", prompt)
+        assert "inventory.html" in required
+        assert "vehicle-detail.html" in required
+        assert "finance.html" in required
+        ensured, _changed = ensure_required_files({"mode": "website"}, prompt, None, [
+            {"path": "inventory.html", "content": "<html>Inventory</html>", "language": "html"}
+        ])
+        assert "inventory.html" in {f["path"] for f in ensured}
+
 
 class TestRuntimeMediaMotionServices:
 
@@ -850,6 +885,56 @@ class TestRuntimeMediaMotionServices:
             result = svc.run_runtime_qa(tmp_path)
         assert result["pass"] is False
         assert any("Playwright" in b for b in result["blockers"])
+
+    def test_runtime_qa_writes_reports_screenshots_and_motion_evidence(self, tmp_path):
+        from app.services import runtime_qa_service as svc
+
+        (tmp_path / "index.html").write_text("<html><body><main data-amarktai-motion-scene><h1>Hi</h1></main></body></html>")
+        (tmp_path / "motion_manifest.json").write_text(json.dumps({"changed_files": ["index.html"]}))
+
+        class FakeLocator:
+            def count(self):
+                return 1
+
+        class FakePage:
+            def on(self, *_args, **_kwargs): pass
+            def goto(self, *_args, **_kwargs): pass
+            def screenshot(self, path, full_page=True):
+                Path(path).write_bytes(b"png")
+            def locator(self, *_args, **_kwargs):
+                return FakeLocator()
+            def add_script_tag(self, **_kwargs): pass
+            def evaluate(self, *_args, **_kwargs):
+                return {"violations": []}
+            def close(self): pass
+
+        class FakeBrowser:
+            def new_page(self, **_kwargs):
+                return FakePage()
+            def close(self): pass
+
+        class FakeChromium:
+            def launch(self, **_kwargs):
+                return FakeBrowser()
+
+        class FakePlaywright:
+            chromium = FakeChromium()
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+
+        fake_module = types.SimpleNamespace(sync_playwright=lambda: FakePlaywright())
+        with patch.dict("sys.modules", {"playwright.sync_api": fake_module}), \
+             patch.object(svc, "_axe_source", return_value="window.axe={run:async()=>({violations:[]})}"), \
+             patch.object(svc, "_run_lighthouse", return_value={"ok": True, "available": True, "scores": {"performance": 95}, "report_path": str(tmp_path / "runtime-qa" / "lighthouse-report.json")}):
+            result = svc.run_runtime_qa(tmp_path)
+        assert result["pass"] is True
+        assert (tmp_path / "runtime-qa" / "runtime-qa-report.json").exists()
+        assert (tmp_path / "runtime-qa" / "accessibility-report.json").exists()
+        assert (tmp_path / "runtime-qa" / "performance-report.json").exists()
+        assert (tmp_path / "runtime-qa" / "screenshots" / "desktop.png").exists()
+        assert result["motion"]["selectors_found"] == 1
 
     def test_motion_patch_writes_manifest_and_files(self):
         from app.services.motion_runtime_service import patch_motion_files

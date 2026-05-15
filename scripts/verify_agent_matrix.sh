@@ -14,6 +14,8 @@ import sys
 
 path = sys.argv[1]
 data = json.load(open(path, encoding="utf-8"))
+if data.get("summary", {}).get("hard_blockers"):
+    raise SystemExit(f"Agent matrix still lists hard blockers: {data['summary']['hard_blockers']}")
 agents = data.get("agents") or data.get("matrix") or data
 if isinstance(agents, dict):
     items = [{"agent": k, **(v if isinstance(v, dict) else {"status": v})} for k, v in agents.items()]

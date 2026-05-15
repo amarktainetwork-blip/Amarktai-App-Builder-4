@@ -5,8 +5,8 @@ WORKDIR /app
 ENV CI=true \
     GENERATE_SOURCEMAP=false
 
-COPY package.json yarn.lock ./
-RUN yarn config set network-timeout 600000 && yarn install --frozen-lockfile
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 
 COPY . .
 
@@ -14,7 +14,7 @@ COPY . .
 ARG REACT_APP_BACKEND_URL
 ENV REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL
 
-RUN yarn build
+RUN npm run build
 
 # --- runtime --------------------------------------------------------------
 FROM nginx:1.27-alpine AS runtime
