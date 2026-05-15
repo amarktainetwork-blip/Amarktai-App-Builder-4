@@ -47,7 +47,7 @@ BUILD_MODES = (
 QUALITY_TIERS = ("cheap", "balanced", "premium")
 
 MODE_PROJECT_TYPE = {
-    "landing_page": ("react-app", "landing-page"),
+    "landing_page": ("static-site", "landing-page"),
     "landing-page": ("static-site", "landing-page"),
     "website": ("multi-page-site", "multi-page-website"),
     "multi-page-website": ("multi-page-site", "multi-page-website"),
@@ -69,6 +69,22 @@ MODE_PROJECT_TYPE = {
     "trading_bot_scaffold": ("trading-bot-scaffold", "trading-bot-scaffold"),
     "trading-bot-scaffold": ("trading-bot-scaffold", "trading-bot-scaffold"),
 }
+
+STATIC_FORBIDDEN_FILES = {
+    "package.json",
+    "src/main.jsx",
+    "src/main.js",
+    "src/App.jsx",
+    "src/App.js",
+    "src/App.css",
+    "src/index.jsx",
+    "src/index.js",
+}
+
+_HTML_CLOSE_RE = re.compile(r"</html\s*>", re.IGNORECASE)
+_SECTION_RE = re.compile(r"<section\b", re.IGNORECASE)
+_CSS_SELECTOR_RE = re.compile(r"(^|\})\s*[.#]?[A-Za-z][^{]{0,80}\{", re.MULTILINE)
+_STATIC_SECRET_RE = re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*=\s*(?!change_me|example|your_|localhost)[A-Za-z0-9_\-]{16,}")
 
 
 def _now() -> str:
@@ -113,9 +129,9 @@ def get_required_files(project_type: str, build_mode: str | None = None,
     project_type = project_type if project_type in PROJECT_TYPES else "react-app"
     prompt_lower = (prompt or "").lower()
     if project_type == "static-site":
-        return ["index.html", "styles.css", "README.md", "amarktai.project.json"]
+        return ["index.html", "styles.css", "script.js", "README.md", "amarktai.project.json", "preview-manifest.json"]
     if project_type == "multi-page-site":
-        files = ["index.html", "styles.css", "README.md", "amarktai.project.json"]
+        files = ["index.html", "styles.css", "script.js", "README.md", "amarktai.project.json", "preview-manifest.json"]
         # Extract numeric page count from prompt
         import re as _re
         _page_count_pat = _re.compile(
@@ -250,6 +266,82 @@ def _static_index(prompt: str, multi: bool = False) -> str:
 """
 
 
+def _premium_static_index(prompt: str) -> str:
+    title = escape(_project_name(prompt, "Amarktai Builder"))
+    sections = [
+        ("hero", "Cinematic AI Software Factory", "Build, repair, continue, preview, validate, and ship premium software from one production dashboard."),
+        ("media", "Generated Media System", "Provider-backed visuals and persisted media manifests keep premium builds grounded in real assets."),
+        ("agents", "Agent Orchestration", "Planner, Scout, Architect, Coder, Reviewer, Runtime QA, Security, and Advisor agents each leave evidence."),
+        ("github", "GitHub Workflow", "Import repositories, analyze structure, patch files, run checks, review diffs, and open pull requests safely."),
+        ("quality", "Hard Quality Gates", "No fallback-only output, placeholder copy, broken assets, or missing runtime proof can be marked ready."),
+        ("runtime", "Runtime QA", "Playwright screenshots, accessibility audits, performance evidence, console checks, and motion validation are required."),
+        ("deployment", "Deployment Orchestration", "Preview validated files, preserve artifacts, and prepare production deployment instructions."),
+        ("pricing", "Access", "Bring your provider keys, connect GitHub, and operate a premium AI software factory with truthful readiness."),
+    ]
+    body = "\n".join(
+        f'<section id="{sid}" class="story-section" data-amarktai-motion-scene>'
+        f'<p class="eyebrow">{sid}</p><h2>{heading}</h2><p>{copy}</p>'
+        f'<a class="section-link" href="#hero">Back to top</a></section>'
+        for sid, heading, copy in sections[1:]
+    )
+    nav = "".join(f'<a href="#{sid}">{sid.title()}</a>' for sid, *_ in sections[1:5])
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#05070b">
+  <title>{title}</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-motion-runtime="pending">
+  <header class="site-header">
+    <a class="brand" href="#hero">Amarktai Builder</a>
+    <nav aria-label="Primary">{nav}</nav>
+  </header>
+  <main>
+    <section id="hero" class="hero" data-amarktai-motion-scene>
+      <div class="hero-copy">
+        <p class="eyebrow">Production AI software factory</p>
+        <h1>{title}</h1>
+        <p class="lede">Amarktai Builder gives founders, agencies, product teams, startups, and businesses a cinematic command center for creating premium websites, applications, repo repairs, previews, quality gates, and GitHub pull requests.</p>
+        <div class="actions"><a class="button primary" href="#github">Start with GitHub</a><a class="button secondary" href="#runtime">View runtime proof</a></div>
+      </div>
+      <div class="hero-preview" aria-label="Animated product preview"><span></span><span></span><span></span></div>
+    </section>
+    {body}
+  </main>
+  <footer><p>Amarktai Builder ships only when files, media, motion, QA, and deployment evidence are real.</p></footer>
+  <script src="script.js"></script>
+</body>
+</html>
+"""
+
+
+def _premium_styles() -> str:
+    return """:root{--color-bg:#05070b;--color-panel:#101624;--color-fg:#f8fafc;--color-muted:#a8b3c7;--color-accent:#00e676;--color-violet:#8b5cf6;--font-heading:Inter,ui-sans-serif,system-ui,sans-serif;--font-body:Inter,ui-sans-serif,system-ui,sans-serif;--shadow:0 32px 120px rgba(0,0,0,.45)}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 15% 8%,rgba(0,230,118,.22),transparent 28%),radial-gradient(circle at 85% 10%,rgba(139,92,246,.22),transparent 30%),var(--color-bg);color:var(--color-fg);font-family:var(--font-body);line-height:1.6}.site-header{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:24px;padding:18px clamp(18px,5vw,72px);border-bottom:1px solid rgba(255,255,255,.1);background:rgba(5,7,11,.78);backdrop-filter:blur(18px)}.brand{font-weight:900;text-decoration:none}.site-header nav{display:flex;gap:16px;flex-wrap:wrap}.site-header a{color:inherit;text-decoration:none}.hero{min-height:86vh;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(300px,.95fr);gap:48px;align-items:center;padding:clamp(56px,8vw,124px) clamp(18px,7vw,96px)}.eyebrow{margin:0 0 12px;color:var(--color-accent);font-size:12px;font-weight:900;letter-spacing:.16em;text-transform:uppercase}h1,h2{font-family:var(--font-heading);letter-spacing:0;line-height:1.02}h1{max-width:900px;margin:0;font-size:clamp(48px,8vw,96px)}h2{margin:0 0 14px;font-size:clamp(32px,5vw,60px)}.lede,.story-section p,footer p{color:var(--color-muted);font-size:clamp(17px,2vw,22px);max-width:820px}.actions{display:flex;gap:14px;flex-wrap:wrap;margin-top:28px}.button,.section-link{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 18px;border-radius:8px;font-weight:900;text-decoration:none}.primary{background:var(--color-accent);color:#04110a}.secondary,.section-link{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:var(--color-fg)}.hero-preview{min-height:430px;position:relative;border:1px solid rgba(255,255,255,.14);border-radius:18px;background:linear-gradient(150deg,rgba(255,255,255,.14),rgba(255,255,255,.04));box-shadow:var(--shadow);overflow:hidden;animation:float 7s ease-in-out infinite}.hero-preview:before{content:"";position:absolute;inset:-40%;background:conic-gradient(from 90deg,transparent,rgba(0,230,118,.34),transparent,rgba(139,92,246,.32),transparent);animation:spin 18s linear infinite}.hero-preview span{position:absolute;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(5,7,11,.78);box-shadow:0 24px 70px rgba(0,0,0,.36)}.hero-preview span:nth-child(1){inset:48px 42px 170px}.hero-preview span:nth-child(2){left:76px;right:96px;bottom:86px;height:72px}.hero-preview span:nth-child(3){right:46px;top:142px;width:34%;height:96px}.story-section{padding:clamp(52px,7vw,104px) clamp(18px,7vw,96px);border-top:1px solid rgba(255,255,255,.09);background:linear-gradient(180deg,rgba(255,255,255,.025),transparent)}.story-section:nth-child(even){background:rgba(255,255,255,.035)}.story-section p{font-size:20px}.amarktai-generated-media{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;padding:clamp(2rem,6vw,5rem)}.amarktai-generated-media img,.amarktai-generated-media video{width:100%;border-radius:20px;object-fit:cover;box-shadow:var(--shadow)}footer{padding:38px clamp(18px,7vw,96px);border-top:1px solid rgba(255,255,255,.09)}@keyframes spin{to{transform:rotate(360deg)}}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}[data-amarktai-motion-scene]{animation:rise .8s ease both}@keyframes rise{from{opacity:.2;transform:translateY(26px)}to{opacity:1;transform:translateY(0)}}@media(max-width:900px){.hero{grid-template-columns:1fr}.site-header{align-items:flex-start;flex-direction:column}.hero-preview{min-height:300px}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}"""
+
+
+def _motion_script() -> str:
+    return """(() => { const scenes=[...document.querySelectorAll('[data-amarktai-motion-scene]')]; document.documentElement.dataset.motionRuntime='active'; const reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches; if(reduce){document.documentElement.dataset.motionRuntime='reduced'; return;} const io=new IntersectionObserver((entries)=>{ entries.forEach((entry)=>{ if(entry.isIntersecting){ entry.target.classList.add('motion-in-view'); } }); },{threshold:.18}); scenes.forEach((scene,index)=>{ scene.style.transition='transform 700ms ease, opacity 700ms ease'; scene.style.transitionDelay=`${Math.min(index*70,420)}ms`; io.observe(scene); }); })();\n"""
+
+
+def premium_static_fallback_files(prompt: str) -> list[dict]:
+    """Generate a complete static premium site without React scaffold files."""
+    html = _premium_static_index(prompt)
+    css = _premium_styles()
+    script = _motion_script()
+    files = [
+        _file("index.html", html),
+        _file("styles.css", css),
+        _file("script.js", script),
+        _file("README.md", _readme("static-site", "landing-page", prompt)),
+        _file("preview-manifest.json", json.dumps({"required": True, "strategy": "static", "status": "ready", "entry": "index.html"}, indent=2)),
+    ]
+    files.append(_file("amarktai.project.json", _manifest("static-site", "landing-page", prompt, files)))
+    return files
+
+
 def _styles() -> str:
     return """*{box-sizing:border-box}body{margin:0;background:#08090c;color:#f7f7f8;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:inherit}.site-header{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 clamp(16px,4vw,56px);border-bottom:1px solid #23252d;background:#0d0f14}.brand{font-weight:800;text-decoration:none}.site-header nav{display:flex;gap:18px;color:#a9adba;font-size:14px}.site-header nav a{text-decoration:none}.hero{min-height:68vh;display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center;padding:clamp(32px,7vw,96px)}.eyebrow{color:#00e676;text-transform:uppercase;font-size:12px;font-weight:800;letter-spacing:.14em}h1{font-size:clamp(40px,7vw,82px);line-height:.95;margin:0 0 18px}h2{margin:0 0 10px}.lede{font-size:clamp(18px,2.4vw,24px);line-height:1.45;color:#c9ccd6;max-width:680px}.button{display:inline-flex;margin-top:18px;height:46px;align-items:center;padding:0 18px;background:#00e676;color:#061008;border-radius:6px;text-decoration:none;font-weight:800}.visual{min-height:360px;border:1px solid #2b2e38;border-radius:12px;background:linear-gradient(135deg,#121722,#101014),radial-gradient(circle at 30% 20%,#00e67644,transparent 35%);box-shadow:0 30px 80px #0008;position:relative}.visual:before,.visual:after{content:"";position:absolute;border:1px solid #343946;background:#171b24;border-radius:10px}.visual:before{inset:52px 38px 110px}.visual:after{inset:150px 82px 50px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding:0 clamp(16px,7vw,96px) 56px}.grid article,.band,.deploy{border:1px solid #23252d;background:#11141b;border-radius:8px;padding:24px}.grid p,.band p,.deploy p,footer{color:#b5b9c5;line-height:1.6}.band,.deploy{margin:0 clamp(16px,7vw,96px) 24px}footer{padding:32px clamp(16px,7vw,96px);border-top:1px solid #23252d}@media(max-width:820px){.hero{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.site-header{align-items:flex-start;height:auto;padding-block:16px;gap:10px;flex-direction:column}.site-header nav{flex-wrap:wrap}.visual{min-height:240px}}"""
 
@@ -316,7 +408,7 @@ def _fallback_content(path: str, project_type: str, build_mode: str, prompt: str
         return _static_index(prompt if path == "index.html" else f"{path[:-5]} - {prompt}", multi=project_type == "multi-page-site")
     if path == "styles.css":
         return _styles()
-    if path == "app.js":
+    if path in {"app.js", "script.js", "motion.js"}:
         return "document.documentElement.classList.add('ready');\n"
     if path == "package.json":
         return json.dumps({"scripts": {"dev": "vite --host 0.0.0.0", "build": "vite build"}, "dependencies": {"@vitejs/plugin-react": "latest", "vite": "latest", "react": "latest", "react-dom": "latest"}, "devDependencies": {}}, indent=2)
@@ -401,6 +493,57 @@ def _ensure_html_pages_link_css(files_by_path: dict[str, dict]) -> list[str]:
     return patched
 
 
+def _static_file_issues(files_by_path: dict[str, dict]) -> list[str]:
+    issues: list[str] = []
+    html = str(files_by_path.get("index.html", {}).get("content", ""))
+    css = str(files_by_path.get("styles.css", {}).get("content", ""))
+    script = str(files_by_path.get("script.js", {}).get("content", "") or files_by_path.get("motion.js", {}).get("content", ""))
+    if html and not _HTML_CLOSE_RE.search(html):
+        issues.append("index.html is truncated or missing </html>.")
+    if html and len(_SECTION_RE.findall(html)) < 8:
+        issues.append("index.html has fewer than 8 sections.")
+    if css and (len(css) < 1200 or ":root" not in css or "--color" not in css or "@media" not in css):
+        issues.append("styles.css is stub-level or missing design tokens/responsive rules.")
+    if css and html:
+        classes = set(re.findall(r'class=["\']([^"\']+)["\']', html))
+        class_names = {part for group in classes for part in group.split()}
+        missing_selectors = [name for name in sorted(class_names)[:25] if f".{name}" not in css]
+        if len(missing_selectors) > 6:
+            issues.append("styles.css does not match key selectors referenced by index.html.")
+    if not script or "data-motion-runtime" not in html and "motionRuntime" not in script:
+        issues.append("script.js/motion hooks are missing.")
+    return issues
+
+
+def enforce_static_contract_files(project: dict, prompt: str, plan: dict | None, generated_files: list[dict]) -> tuple[list[dict], list[str]]:
+    """Remove React scaffold from static builds and repair incomplete premium static output."""
+    project_type = infer_project_type(project.get("mode"), project.get("project_type"))
+    if project_type != "static-site":
+        return generated_files or [], []
+    files_by_path = {
+        str(item.get("path")): dict(item)
+        for item in (generated_files or [])
+        if isinstance(item, dict) and item.get("path")
+    }
+    changed: list[str] = []
+    for forbidden in list(STATIC_FORBIDDEN_FILES):
+        if forbidden in files_by_path:
+            files_by_path.pop(forbidden, None)
+            changed.append(forbidden)
+    issues = _static_file_issues(files_by_path)
+    has_secret_like_content = any(
+        _STATIC_SECRET_RE.search(str(item.get("content", "")))
+        for item in files_by_path.values()
+    )
+    if issues and not has_secret_like_content:
+        fallback = {f["path"]: f for f in premium_static_fallback_files(prompt)}
+        for path, item in fallback.items():
+            if files_by_path.get(path, {}).get("content") != item.get("content"):
+                files_by_path[path] = item
+                changed.append(path)
+    return list(files_by_path.values()), list(dict.fromkeys(changed))
+
+
 def ensure_required_files(project: dict, prompt: str, plan: dict | None, generated_files: list[dict]) -> tuple[list[dict], list[str]]:
     project_type = infer_project_type(project.get("mode"), project.get("project_type"))
     build_mode = project.get("build_mode") if project.get("build_mode") in BUILD_MODES else infer_build_mode(project.get("mode"))
@@ -414,6 +557,8 @@ def ensure_required_files(project: dict, prompt: str, plan: dict | None, generat
         plan=plan,
     )
     changed.extend(removed_contamination)
+    generated_files, static_changed = enforce_static_contract_files(project, prompt, plan, generated_files)
+    changed.extend(static_changed)
 
     for item in generated_files or []:
         try:
@@ -485,6 +630,8 @@ def validate_project_files(project: dict, files: list[dict], prompt: str = "", p
             errors.append(f"Unsafe file path: {path}: {exc}")
         if path == ".env" or path.endswith("/.env"):
             errors.append("Real .env files cannot be generated or finalized. Use .env.example.")
+        if project_type == "static-site" and path in STATIC_FORBIDDEN_FILES:
+            errors.append(f"Static landing page cannot include React scaffold file: {path}")
 
     manifest = by_path.get("amarktai.project.json")
     manifest_data: dict[str, Any] = {}
@@ -501,6 +648,9 @@ def validate_project_files(project: dict, files: list[dict], prompt: str = "", p
         preview_entry = manifest_data.get("preview", {}).get("entry") or manifest_data.get("entry")
         if preview_entry and preview_entry not in by_path:
             errors.append(f"Preview entry does not exist: {preview_entry}")
+
+    if project_type == "static-site":
+        errors.extend(_static_file_issues(by_path))
 
     if project_type in {"react-app", "pwa", "next-app", "dashboard"} and "package.json" in by_path:
         try:

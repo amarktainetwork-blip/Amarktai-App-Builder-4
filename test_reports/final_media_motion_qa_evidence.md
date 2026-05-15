@@ -1,6 +1,6 @@
 # Final Media, Motion, and Runtime QA Evidence
 
-Generated: 2026-05-14
+Generated: 2026-05-15
 
 ## Media
 - Runtime service: `backend/app/services/media_runtime_service.py`
@@ -8,7 +8,8 @@ Generated: 2026-05-14
 - Persistence: workspace `media/` files plus `media_manifest.json`.
 - Injection: persisted image/video assets are inserted into static `index.html`/CSS with `data-amarktai-media-asset`.
 - Mongo/dashboard: orchestrator persists `media_runtime` and emits `media_runtime` events.
-- Blocking: strict premium gates require a media manifest with existing local assets.
+- Blocking: strict premium gates require a media manifest with at least 3 existing local assets for premium/media builds.
+- Regression: mocked Pixabay 200 responses now persist 3 local SVG/image assets and inject the generated page.
 
 ## Motion
 - Runtime service: `backend/app/services/motion_runtime_service.py`
@@ -24,9 +25,10 @@ Generated: 2026-05-14
 - Performance: Lighthouse CLI when available, plus browser performance evidence in report.
 - Evidence: desktop/tablet/mobile screenshots, console errors, broken link/media checks, accessibility report, performance report, `runtime-qa-report.json`.
 - Dashboard: `frontend/src/pages/Workspace.jsx` `RuntimeEvidencePanel` displays runtime QA, media, and motion evidence.
+- Static live verification: `scripts/verify_static_premium_builder_live.sh` fails if runtime QA reports, screenshots, media assets, media manifest, motion manifest, or static/no-React contract evidence is missing.
 
 ## Tests
-- `python -m pytest backend/tests/test_phase3_services.py::TestQualityGateService backend/tests/test_phase3_services.py::TestRuntimeMediaMotionServices backend/tests/backend_test.py::test_premium_reviewer_invalid_json_blocks_ready_state -q`: 22 passed.
-- `python -m pytest -q`: 801 passed, 2 skipped.
-- `cd frontend && npm.cmd test -- --watchAll=false`: 36 passed.
+- `python -m pytest -q`: 806 passed, 2 skipped, 1 warning.
+- Targeted runtime/media/static tests: 4 passed.
+- `cd frontend && npm.cmd test -- --watchAll=false`: 38 passed.
 - `cd frontend && npm.cmd run build`: compiled successfully.

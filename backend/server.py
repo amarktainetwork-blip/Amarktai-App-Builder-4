@@ -156,13 +156,16 @@ REPO_ROOT = ROOT_DIR.parent
 load_dotenv(REPO_ROOT / ".env")
 load_dotenv(ROOT_DIR / ".env")
 
-os.environ.setdefault("APP_ENV", "development")
+os.environ.setdefault("APP_ENV", "production")
 os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
 os.environ.setdefault("DB_NAME", "amarktai_builder")
-os.environ.setdefault("CORS_ORIGINS", "http://localhost:8080,http://localhost:3000")
-os.environ.setdefault("JWT_SECRET", "development-jwt-secret-change-before-production")
-os.environ.setdefault("ADMIN_EMAIL", "admin@amarktai.local")
-os.environ.setdefault("ADMIN_PASSWORD", "amarktai-admin-local")
+if is_production():
+    os.environ.setdefault("CORS_ORIGINS", "https://builder.amarktai.com")
+else:
+    os.environ.setdefault("CORS_ORIGINS", "http://localhost:8080,http://localhost:3000")
+    os.environ.setdefault("JWT_SECRET", "development-jwt-secret-change-before-production")
+    os.environ.setdefault("ADMIN_EMAIL", "admin@amarktai.local")
+    os.environ.setdefault("ADMIN_PASSWORD", "amarktai-admin-local")
 os.environ.setdefault("GENX_BASE_URL", "https://query.genx.sh/v1")
 os.environ.setdefault("GENX_MODEL_REASONING", "claude-sonnet-4-6")
 os.environ.setdefault("GENX_MODEL_RESEARCH", "gpt-5.4-mini")
