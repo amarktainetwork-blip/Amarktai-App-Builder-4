@@ -268,23 +268,6 @@ def _static_index(prompt: str, multi: bool = False) -> str:
 
 def _premium_static_index(prompt: str) -> str:
     title = escape(_project_name(prompt, "Amarktai Builder"))
-    sections = [
-        ("hero", "Cinematic AI Software Factory", "Build, repair, continue, preview, validate, and ship premium software from one production dashboard."),
-        ("media", "Generated Media System", "Provider-backed visuals and persisted media manifests keep premium builds grounded in real assets."),
-        ("agents", "Agent Orchestration", "Planner, Scout, Architect, Coder, Reviewer, Runtime QA, Security, and Advisor agents each leave evidence."),
-        ("github", "GitHub Workflow", "Import repositories, analyze structure, patch files, run checks, review diffs, and open pull requests safely."),
-        ("quality", "Hard Quality Gates", "No fallback-only output, placeholder copy, broken assets, or missing runtime proof can be marked ready."),
-        ("runtime", "Runtime QA", "Playwright screenshots, accessibility audits, performance evidence, console checks, and motion validation are required."),
-        ("deployment", "Deployment Orchestration", "Preview validated files, preserve artifacts, and prepare production deployment instructions."),
-        ("pricing", "Access", "Bring your provider keys, connect GitHub, and operate a premium AI software factory with truthful readiness."),
-    ]
-    body = "\n".join(
-        f'<section id="{sid}" class="story-section" data-amarktai-motion-scene>'
-        f'<p class="eyebrow">{sid}</p><h2>{heading}</h2><p>{copy}</p>'
-        f'<a class="section-link" href="#hero">Back to top</a></section>'
-        for sid, heading, copy in sections[1:]
-    )
-    nav = "".join(f'<a href="#{sid}">{sid.title()}</a>' for sid, *_ in sections[1:5])
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -297,21 +280,121 @@ def _premium_static_index(prompt: str) -> str:
 <body data-motion-runtime="pending">
   <header class="site-header">
     <a class="brand" href="#hero">Amarktai Builder</a>
-    <nav aria-label="Primary">{nav}</nav>
+    <nav aria-label="Primary">
+      <a href="#media-showcase">Media</a>
+      <a href="#sales-agent">Sales Agent</a>
+      <a href="#repo-workbench">Repo Workbench</a>
+      <a href="#runtime-qa">Runtime QA</a>
+      <a href="#lead-capture">Access</a>
+    </nav>
   </header>
   <main>
     <section id="hero" class="hero" data-amarktai-motion-scene>
       <div class="hero-copy">
         <p class="eyebrow">Production AI software factory</p>
         <h1>{title}</h1>
-        <p class="lede">Amarktai Builder gives founders, agencies, product teams, startups, and businesses a cinematic command center for creating premium websites, applications, repo repairs, previews, quality gates, and GitHub pull requests.</p>
-        <div class="actions"><a class="button primary" href="#github">Start with GitHub</a><a class="button secondary" href="#runtime">View runtime proof</a></div>
+        <p class="lede">Amarktai Builder helps founders, agencies, product teams, startups, and businesses create, repair, continue, preview, validate, deploy, and improve premium software from one truthful AI dashboard.</p>
+        <div class="actions">
+          <a class="button primary" href="#lead-capture">Request production access</a>
+          <a class="button secondary" href="#repo-workbench">Inspect repo workflow</a>
+        </div>
       </div>
-      <div class="hero-preview" aria-label="Animated product preview"><span></span><span></span><span></span></div>
+      <div class="hero-preview" aria-label="Animated product preview">
+        <span class="preview-card preview-card-one"></span>
+        <span class="preview-card preview-card-two"></span>
+        <span class="preview-card preview-card-three"></span>
+      </div>
     </section>
-    {body}
+
+    <section id="media-showcase" class="story-section split" data-amarktai-motion-scene>
+      <div>
+        <p class="eyebrow">AI image, video, and voice showcase</p>
+        <h2>Provider-backed media becomes local build evidence.</h2>
+        <p>Amarktai plans image, video, voice, and avatar slots from the brief, calls connected providers when available, persists accepted assets, writes a media manifest, and only treats downloaded files as launch evidence.</p>
+      </div>
+      <div class="evidence-panel">
+        <b>Media manifest</b>
+        <span>provider, model, job id, MIME, size, and local path</span>
+      </div>
+    </section>
+
+    <section id="sales-agent" class="story-section" data-amarktai-motion-scene>
+      <p class="eyebrow">AI sales-agent conversation demo</p>
+      <h2>A guided conversation turns interest into a precise build brief.</h2>
+      <div class="conversation" aria-label="AI sales-agent conversation">
+        <p><strong>Founder:</strong> I need a premium web app that imports repos, repairs bugs, and creates pull requests.</p>
+        <p><strong>Amarktai:</strong> I will route that as a repo workflow with planner, architect, repo engineer, reviewer, command runner, runtime QA, and GitHub PR evidence.</p>
+        <p><strong>Founder:</strong> Make it cinematic and public-ready.</p>
+        <p><strong>Amarktai:</strong> Premium mode requires local media assets, motion evidence, browser QA artifacts, content quality, and final gates before release.</p>
+      </div>
+    </section>
+
+    <section id="repo-workbench" class="story-section cards" data-amarktai-motion-scene>
+      <p class="eyebrow">Repo Workbench</p>
+      <h2>Repository work moves through a safe branch and pull request workflow.</h2>
+      <article><h3>Analyze</h3><p>Detect frontend roots, backend services, package managers, scripts, and risk areas before editing.</p></article>
+      <article><h3>Patch</h3><p>Apply targeted file changes, save snapshots, show diffs, and block empty pull requests.</p></article>
+      <article><h3>Verify</h3><p>Run allowed commands, capture logs, repair failures, and persist the pull request URL when GitHub accepts it.</p></article>
+    </section>
+
+    <section id="feature-hierarchy" class="story-section feature-grid" data-amarktai-motion-scene>
+      <p class="eyebrow">Feature hierarchy</p>
+      <h2>The page explains what matters first, then proves how the platform works.</h2>
+      <p>The highest-priority story is simple: Amarktai Builder turns a brief or repository into a validated production artifact. The supporting proof is organized around connected providers, agent execution, generated files, preview output, media evidence, runtime QA, deployment notes, and GitHub pull requests so buyers understand the operational value instead of reading decorative claims.</p>
+    </section>
+
+    <section id="runtime-qa" class="story-section split" data-amarktai-motion-scene>
+      <div>
+        <p class="eyebrow">Runtime QA evidence</p>
+        <h2>Browser checks make readiness visible.</h2>
+        <p>Playwright renders desktop, tablet, and mobile views; accessibility and performance reports are written beside screenshots; broken anchors, missing assets, console errors, and absent motion selectors block premium readiness.</p>
+      </div>
+      <ul class="check-list">
+        <li>Desktop, tablet, and mobile screenshots</li>
+        <li>Accessibility and performance reports</li>
+        <li>Broken link and media validation</li>
+        <li>Motion selector verification</li>
+      </ul>
+    </section>
+
+    <section id="media-evidence" class="story-section" data-amarktai-motion-scene>
+      <p class="eyebrow">Media manifest evidence</p>
+      <h2>Every media claim must point to a persisted artifact.</h2>
+      <p>Generated pages reference local media paths from media_manifest.json. Remote-only URLs, CSS gradients, and SVG decoration do not count as premium AI media proof. If GenX, Qwen, and Pixabay are unavailable, the runtime may preserve honest local fallback images, but the manifest labels those assets accurately and keeps the premium gate transparent.</p>
+    </section>
+
+    <section id="production-readiness" class="story-section cards" data-amarktai-motion-scene>
+      <p class="eyebrow">Deployment and production readiness</p>
+      <h2>Release decisions use the same gate in API, database, dashboard, and finalize flow.</h2>
+      <article><h3>Provider truth</h3><p>GenX, Qwen, GitHub, Brave, Pixabay, and runtime tools are shown as live, missing, or untested without optimistic labels.</p></article>
+      <article><h3>Finalize gate</h3><p>Quality, media, motion, runtime QA, content, security, and file contract checks must pass before push.</p></article>
+      <article><h3>Deploy notes</h3><p>README and manifests describe the exact files produced and the safe path to publish them.</p></article>
+    </section>
+
+    <section id="lead-capture" class="story-section lead-capture" data-amarktai-motion-scene>
+      <div>
+        <p class="eyebrow">CTA lead capture form</p>
+        <h2>Bring a repo, a product idea, or a broken build.</h2>
+        <p>Tell Amarktai what you need to launch, then inspect the generated files, media, QA reports, and pull request evidence before finalizing.</p>
+      </div>
+      <form class="access-form" action="#production-readiness">
+        <label for="work-email">Work email</label>
+        <input id="work-email" name="email" type="email" autocomplete="email" required>
+        <label for="project-goal">Launch goal</label>
+        <textarea id="project-goal" name="goal" rows="4" required></textarea>
+        <button class="button primary" type="submit">Prepare build brief</button>
+      </form>
+    </section>
+
+    <section id="footer-section" class="story-section final-section" data-amarktai-motion-scene>
+      <p class="eyebrow">Footer</p>
+      <h2>Amarktai Builder ships with evidence, not optimism.</h2>
+      <p>Use the dashboard to validate providers, review generated artifacts, run runtime QA, and create a GitHub pull request when every required gate passes. Every launch decision should be traceable to artifacts that a human can inspect: source files, manifests, screenshots, reports, logs, diffs, and saved deployment instructions.</p>
+    </section>
   </main>
-  <footer><p>Amarktai Builder ships only when files, media, motion, QA, and deployment evidence are real.</p></footer>
+  <footer class="site-footer">
+    <p>Amarktai Builder | Production AI software factory | Files, media, motion, QA, and deployment evidence must be real.</p>
+  </footer>
   <script src="script.js"></script>
 </body>
 </html>
@@ -319,11 +402,216 @@ def _premium_static_index(prompt: str) -> str:
 
 
 def _premium_styles() -> str:
-    return """:root{--color-bg:#05070b;--color-panel:#101624;--color-fg:#f8fafc;--color-muted:#a8b3c7;--color-accent:#00e676;--color-violet:#8b5cf6;--font-heading:Inter,ui-sans-serif,system-ui,sans-serif;--font-body:Inter,ui-sans-serif,system-ui,sans-serif;--shadow:0 32px 120px rgba(0,0,0,.45)}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 15% 8%,rgba(0,230,118,.22),transparent 28%),radial-gradient(circle at 85% 10%,rgba(139,92,246,.22),transparent 30%),var(--color-bg);color:var(--color-fg);font-family:var(--font-body);line-height:1.6}.site-header{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:24px;padding:18px clamp(18px,5vw,72px);border-bottom:1px solid rgba(255,255,255,.1);background:rgba(5,7,11,.78);backdrop-filter:blur(18px)}.brand{font-weight:900;text-decoration:none}.site-header nav{display:flex;gap:16px;flex-wrap:wrap}.site-header a{color:inherit;text-decoration:none}.hero{min-height:86vh;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(300px,.95fr);gap:48px;align-items:center;padding:clamp(56px,8vw,124px) clamp(18px,7vw,96px)}.eyebrow{margin:0 0 12px;color:var(--color-accent);font-size:12px;font-weight:900;letter-spacing:.16em;text-transform:uppercase}h1,h2{font-family:var(--font-heading);letter-spacing:0;line-height:1.02}h1{max-width:900px;margin:0;font-size:clamp(48px,8vw,96px)}h2{margin:0 0 14px;font-size:clamp(32px,5vw,60px)}.lede,.story-section p,footer p{color:var(--color-muted);font-size:clamp(17px,2vw,22px);max-width:820px}.actions{display:flex;gap:14px;flex-wrap:wrap;margin-top:28px}.button,.section-link{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 18px;border-radius:8px;font-weight:900;text-decoration:none}.primary{background:var(--color-accent);color:#04110a}.secondary,.section-link{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:var(--color-fg)}.hero-preview{min-height:430px;position:relative;border:1px solid rgba(255,255,255,.14);border-radius:18px;background:linear-gradient(150deg,rgba(255,255,255,.14),rgba(255,255,255,.04));box-shadow:var(--shadow);overflow:hidden;animation:float 7s ease-in-out infinite}.hero-preview:before{content:"";position:absolute;inset:-40%;background:conic-gradient(from 90deg,transparent,rgba(0,230,118,.34),transparent,rgba(139,92,246,.32),transparent);animation:spin 18s linear infinite}.hero-preview span{position:absolute;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(5,7,11,.78);box-shadow:0 24px 70px rgba(0,0,0,.36)}.hero-preview span:nth-child(1){inset:48px 42px 170px}.hero-preview span:nth-child(2){left:76px;right:96px;bottom:86px;height:72px}.hero-preview span:nth-child(3){right:46px;top:142px;width:34%;height:96px}.story-section{padding:clamp(52px,7vw,104px) clamp(18px,7vw,96px);border-top:1px solid rgba(255,255,255,.09);background:linear-gradient(180deg,rgba(255,255,255,.025),transparent)}.story-section:nth-child(even){background:rgba(255,255,255,.035)}.story-section p{font-size:20px}.amarktai-generated-media{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;padding:clamp(2rem,6vw,5rem)}.amarktai-generated-media img,.amarktai-generated-media video{width:100%;border-radius:20px;object-fit:cover;box-shadow:var(--shadow)}footer{padding:38px clamp(18px,7vw,96px);border-top:1px solid rgba(255,255,255,.09)}@keyframes spin{to{transform:rotate(360deg)}}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}[data-amarktai-motion-scene]{animation:rise .8s ease both}@keyframes rise{from{opacity:.2;transform:translateY(26px)}to{opacity:1;transform:translateY(0)}}@media(max-width:900px){.hero{grid-template-columns:1fr}.site-header{align-items:flex-start;flex-direction:column}.hero-preview{min-height:300px}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}"""
+    return """
+@import url("https://fonts.bunny.net/css?family=inter:400,600,700,800,900");
+
+:root {
+  --color-bg: #05070b;
+  --color-panel: #101624;
+  --color-panel-strong: #151d2f;
+  --color-fg: #f8fafc;
+  --color-muted: #a8b3c7;
+  --color-accent: #00e676;
+  --color-cyan: #53d8ff;
+  --color-violet: #8b5cf6;
+  --radius: 8px;
+  --shadow: 0 32px 120px rgba(0, 0, 0, .45);
+  --font-heading: Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-body: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 14% 7%, rgba(0, 230, 118, .22), transparent 29%),
+    radial-gradient(circle at 85% 10%, rgba(83, 216, 255, .16), transparent 26%),
+    radial-gradient(circle at 58% 2%, rgba(139, 92, 246, .22), transparent 32%),
+    var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-body);
+  line-height: 1.6;
+}
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px clamp(18px, 5vw, 72px);
+  border-bottom: 1px solid rgba(255, 255, 255, .1);
+  background: rgba(5, 7, 11, .82);
+  backdrop-filter: blur(18px);
+}
+.brand, .site-header a { color: inherit; text-decoration: none; }
+.brand { font-weight: 900; }
+.site-header nav { display: flex; gap: 16px; flex-wrap: wrap; color: var(--color-muted); font-size: 14px; }
+.hero {
+  min-height: 86vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(300px, .95fr);
+  gap: 48px;
+  align-items: center;
+  padding: clamp(56px, 8vw, 124px) clamp(18px, 7vw, 96px);
+}
+.hero-copy { max-width: 920px; }
+.eyebrow {
+  margin: 0 0 12px;
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+h1, h2, h3 { font-family: var(--font-heading); letter-spacing: 0; }
+h1 { max-width: 900px; margin: 0; font-size: clamp(48px, 8vw, 96px); line-height: .96; }
+h2 { margin: 0 0 14px; font-size: clamp(32px, 5vw, 58px); line-height: 1.04; }
+h3 { margin: 0 0 10px; font-size: 22px; }
+.lede, .story-section p, .site-footer p, .check-list {
+  color: var(--color-muted);
+  font-size: clamp(17px, 2vw, 22px);
+  max-width: 880px;
+}
+.actions { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 28px; }
+.button, .section-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: var(--radius);
+  font-weight: 900;
+  text-decoration: none;
+  border: 0;
+}
+.primary { background: var(--color-accent); color: #04110a; }
+.secondary, .section-link { border: 1px solid rgba(255, 255, 255, .18); background: rgba(255, 255, 255, .06); color: var(--color-fg); }
+.hero-preview {
+  min-height: 430px;
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 18px;
+  background: linear-gradient(150deg, rgba(255, 255, 255, .14), rgba(255, 255, 255, .04));
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: float 7s ease-in-out infinite;
+}
+.hero-preview::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background: conic-gradient(from 90deg, transparent, rgba(0, 230, 118, .34), transparent, rgba(83, 216, 255, .28), transparent, rgba(139, 92, 246, .32), transparent);
+  animation: spin 18s linear infinite;
+}
+.preview-card {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 14px;
+  background: rgba(5, 7, 11, .78);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .36);
+}
+.preview-card-one { inset: 48px 42px 170px; }
+.preview-card-two { left: 76px; right: 96px; bottom: 86px; height: 72px; }
+.preview-card-three { right: 46px; top: 142px; width: 34%; height: 96px; }
+.story-section {
+  padding: clamp(52px, 7vw, 104px) clamp(18px, 7vw, 96px);
+  border-top: 1px solid rgba(255, 255, 255, .09);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .025), transparent);
+}
+.story-section:nth-child(even) { background: rgba(255, 255, 255, .035); }
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, .72fr);
+  gap: 32px;
+  align-items: center;
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.cards > .eyebrow, .cards > h2 { grid-column: 1 / -1; }
+.cards article, .evidence-panel, .conversation, .access-form {
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .075), rgba(255, 255, 255, .035));
+  box-shadow: 0 20px 70px rgba(0, 0, 0, .22);
+  padding: 22px;
+}
+.conversation { display: grid; gap: 14px; max-width: 980px; }
+.conversation p { margin: 0; font-size: 17px; }
+.evidence-panel { min-height: 220px; display: grid; align-content: center; gap: 8px; }
+.evidence-panel b { color: var(--color-fg); font-size: 24px; }
+.check-list { margin: 0; padding-left: 22px; }
+.lead-capture {
+  display: grid;
+  grid-template-columns: minmax(0, .85fr) minmax(280px, .65fr);
+  gap: 32px;
+  align-items: start;
+}
+.access-form { display: grid; gap: 12px; }
+.access-form label { font-weight: 800; color: var(--color-fg); }
+.access-form input, .access-form textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: var(--radius);
+  background: rgba(3, 6, 12, .72);
+  color: var(--color-fg);
+  padding: 12px 14px;
+  font: inherit;
+}
+.final-section { text-align: left; }
+.site-footer { padding: 38px clamp(18px, 7vw, 96px); border-top: 1px solid rgba(255, 255, 255, .09); }
+.amarktai-generated-media { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; padding: clamp(2rem, 6vw, 5rem); }
+.amarktai-generated-media img, .amarktai-generated-media video { width: 100%; border-radius: 20px; object-fit: cover; box-shadow: var(--shadow); }
+[data-amarktai-motion-scene] { opacity: .92; transform: translateY(0); animation: rise .8s ease both; }
+.motion-in-view { opacity: 1; transform: translateY(0) scale(1); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+@keyframes rise { from { opacity: .2; transform: translateY(26px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 980px) {
+  .hero, .split, .lead-capture { grid-template-columns: 1fr; }
+  .cards { grid-template-columns: 1fr; }
+  .hero-preview { min-height: 300px; }
+}
+@media (max-width: 720px) {
+  .site-header { align-items: flex-start; flex-direction: column; }
+  .site-header nav { gap: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+""".strip()
 
 
 def _motion_script() -> str:
-    return """(() => { const scenes=[...document.querySelectorAll('[data-amarktai-motion-scene]')]; document.documentElement.dataset.motionRuntime='active'; const reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches; if(reduce){document.documentElement.dataset.motionRuntime='reduced'; return;} const io=new IntersectionObserver((entries)=>{ entries.forEach((entry)=>{ if(entry.isIntersecting){ entry.target.classList.add('motion-in-view'); } }); },{threshold:.18}); scenes.forEach((scene,index)=>{ scene.style.transition='transform 700ms ease, opacity 700ms ease'; scene.style.transitionDelay=`${Math.min(index*70,420)}ms`; io.observe(scene); }); })();\n"""
+    return """
+(() => {
+  const scenes = Array.from(document.querySelectorAll('[data-amarktai-motion-scene]'));
+  const motionNodes = Array.from(document.querySelectorAll('[data-motion-runtime], [data-amarktai-motion-scene]'));
+  document.documentElement.dataset.motionRuntime = 'active';
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce) {
+    document.documentElement.dataset.motionRuntime = 'reduced';
+    return;
+  }
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('motion-in-view');
+      }
+    });
+  }, { threshold: 0.18 });
+  scenes.forEach((scene, index) => {
+    scene.style.transition = 'transform 700ms ease, opacity 700ms ease';
+    scene.style.transitionDelay = `${Math.min(index * 70, 420)}ms`;
+    io.observe(scene);
+  });
+  motionNodes.forEach((node) => node.setAttribute('data-motion-runtime', 'active'));
+})();
+""".lstrip()
 
 
 def premium_static_fallback_files(prompt: str) -> list[dict]:
@@ -331,15 +619,52 @@ def premium_static_fallback_files(prompt: str) -> list[dict]:
     html = _premium_static_index(prompt)
     css = _premium_styles()
     script = _motion_script()
+    motion_manifest = {
+        "status": "ready",
+        "runtime": "static-css-js",
+        "selectors": ["[data-amarktai-motion-scene]", "[data-motion-runtime]"],
+        "changed_files": ["index.html", "styles.css", "script.js"],
+        "reduced_motion_supported": True,
+        "created_at": _now(),
+    }
     files = [
         _file("index.html", html),
         _file("styles.css", css),
         _file("script.js", script),
-        _file("README.md", _readme("static-site", "landing-page", prompt)),
+        _file("README.md", _premium_static_readme(prompt)),
         _file("preview-manifest.json", json.dumps({"required": True, "strategy": "static", "status": "ready", "entry": "index.html"}, indent=2)),
+        _file("motion_manifest.json", json.dumps(motion_manifest, indent=2)),
     ]
     files.append(_file("amarktai.project.json", _manifest("static-site", "landing-page", prompt, files)))
     return files
+
+
+def _premium_static_readme(prompt: str) -> str:
+    return f"""# {_project_name(prompt, "Amarktai Builder")}
+
+Generated by Amarktai App Builder as a static premium fallback bundle after severe model output corruption.
+
+## Files
+
+- `index.html`
+- `styles.css`
+- `script.js`
+- `README.md`
+- `preview-manifest.json`
+- `motion_manifest.json`
+- `amarktai.project.json`
+
+## Runtime Contract
+
+- Static site only; no React, Vite, or package scaffold files are part of this bundle.
+- Motion is implemented with CSS keyframes and `script.js` selectors that exist in `index.html`.
+- Media runtime must add `media_manifest.json` and persisted local assets before a media-required premium build can be finalized.
+- Runtime QA must add `runtime-qa/` artifacts before final production release.
+
+## Original Prompt
+
+{prompt}
+"""
 
 
 def _styles() -> str:
@@ -510,8 +835,45 @@ def _static_file_issues(files_by_path: dict[str, dict]) -> list[str]:
         missing_selectors = [name for name in sorted(class_names)[:25] if f".{name}" not in css]
         if len(missing_selectors) > 6:
             issues.append("styles.css does not match key selectors referenced by index.html.")
+    if html:
+        ids = set(re.findall(r'id=["\']([^"\']+)["\']', html))
+        for href in re.findall(r'href=["\']#([^"\']+)["\']', html):
+            if href and href not in ids:
+                issues.append(f"index.html contains broken anchor: #{href}.")
+        required_sections = {
+            "hero",
+            "media-showcase",
+            "sales-agent",
+            "repo-workbench",
+            "runtime-qa",
+            "media-evidence",
+            "production-readiness",
+            "lead-capture",
+        }
+        missing_sections = sorted(required_sections - ids)
+        if missing_sections:
+            issues.append(f"index.html is missing required premium sections: {', '.join(missing_sections)}.")
+    if script:
+        for selector in re.findall(r"querySelector(?:All)?\(['\"]([^'\"]+)['\"]\)", script):
+            if selector.startswith("#") and selector[1:] not in re.findall(r'id=["\']([^"\']+)["\']', html):
+                issues.append(f"script.js targets missing selector: {selector}.")
+            if selector.startswith(".") and f'class="' in html and selector[1:] not in re.findall(r'class=["\']([^"\']+)["\']', html):
+                issues.append(f"script.js targets missing selector: {selector}.")
     if not script or "data-motion-runtime" not in html and "motionRuntime" not in script:
         issues.append("script.js/motion hooks are missing.")
+    for manifest_path in ("preview-manifest.json", "motion_manifest.json", "amarktai.project.json"):
+        if manifest_path not in files_by_path:
+            continue
+        try:
+            manifest = json.loads(str(files_by_path[manifest_path].get("content", "")))
+        except Exception:
+            issues.append(f"{manifest_path} is invalid JSON.")
+            continue
+        listed = manifest.get("files")
+        if isinstance(listed, list):
+            missing_listed = [path for path in listed if path not in files_by_path]
+            if missing_listed:
+                issues.append(f"{manifest_path} lists files that do not exist: {', '.join(missing_listed[:5])}.")
     return issues
 
 
@@ -537,10 +899,15 @@ def enforce_static_contract_files(project: dict, prompt: str, plan: dict | None,
     )
     if issues and not has_secret_like_content:
         fallback = {f["path"]: f for f in premium_static_fallback_files(prompt)}
-        for path, item in fallback.items():
-            if files_by_path.get(path, {}).get("content") != item.get("content"):
-                files_by_path[path] = item
-                changed.append(path)
+        fallback_issues = _static_file_issues(fallback)
+        if fallback_issues:
+            raise RuntimeError(
+                "premium_static_fallback_files produced invalid output: "
+                + "; ".join(fallback_issues)
+            )
+        changed.extend(path for path in files_by_path if path not in fallback)
+        changed.extend(path for path in fallback if files_by_path.get(path, {}).get("content") != fallback[path].get("content"))
+        files_by_path = fallback
     return list(files_by_path.values()), list(dict.fromkeys(changed))
 
 

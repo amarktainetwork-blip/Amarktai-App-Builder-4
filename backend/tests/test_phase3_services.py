@@ -1131,7 +1131,10 @@ class TestRuntimeMediaMotionServices:
         assert "index.html" in manifest["injected_files"]
         assert (tmp_path / "media_manifest.json").exists()
         assert len(list((tmp_path / "media").glob("*.png"))) == 3
-        assert "data-amarktai-media-asset" in (tmp_path / "index.html").read_text()
+        html = (tmp_path / "index.html").read_text()
+        assert html.count("data-amarktai-media-asset") == 3
+        for asset in manifest["assets"]:
+            assert asset["path"] in html
 
     @pytest.mark.asyncio
     async def test_genx_async_media_job_persists_job_metadata_and_manifest(self, tmp_path):
@@ -1162,11 +1165,53 @@ class TestRuntimeMediaMotionServices:
                 genx_image_model="genx-image-live",
                 allow_stock_fallback=False,
             )
-        assert manifest["stored_asset_count"] == 1
+        assert manifest["stored_asset_count"] == 3
+        assert manifest["asset_count"] == 3
         assert manifest["assets"][0]["source"] == "genx"
         assert manifest["assets"][0]["job_id"] == "job_123"
+        assert {asset["source"] for asset in manifest["assets"]} == {"genx", "local_runtime_fallback"}
         assert (tmp_path / "media_manifest.json").exists()
         assert "media/" in (tmp_path / "index.html").read_text()
+
+    @pytest.mark.asyncio
+    async def test_provider_failures_persist_honest_local_runtime_fallback_assets(self, tmp_path):
+        from app.services import media_runtime_service as svc
+        (tmp_path / "index.html").write_text("<html><body><main><h1>Amarktai</h1></main></body></html>")
+        (tmp_path / "styles.css").write_text("body{}")
+        with patch.object(svc, "generate_genx_media_job", AsyncMock(return_value={
+            "ok": False,
+            "provider": "genx",
+            "status": "timeout",
+            "error": "GenX job timed out",
+        })), \
+             patch.object(svc, "_openai_image_endpoint", AsyncMock(return_value={
+                 "ok": False,
+                 "provider": "qwen",
+                 "error": "qwen image endpoint HTTP 404",
+             })), \
+             patch.object(svc, "search_images", AsyncMock(side_effect=Exception("Pixabay 429"))), \
+             patch.object(svc, "search_videos", AsyncMock(return_value=[])):
+            manifest = await svc.execute_media_plan(
+                tmp_path,
+                project_id="p-fallback",
+                prompt="premium Amarktai Builder website",
+                genx_api_key="genx-key",
+                genx_image_model="genx-image-live",
+                qwen_api_key="qwen-key",
+                qwen_image_model="qwen-image-live",
+                pixabay_api_key="pixabay-test",
+            )
+        assert manifest["status"] == "ready"
+        assert manifest["asset_count"] == 3
+        assert all(asset["source"] == "local_runtime_fallback" for asset in manifest["assets"])
+        assert all(asset["provider"] == "local_runtime_fallback" for asset in manifest["assets"])
+        assert any("not AI-generated" in attempt.get("reason", "") for attempt in manifest["attempts"])
+        assert len(list((tmp_path / "media").glob("*.png"))) == 3
+        assert (tmp_path / "media_manifest.json").exists()
+        html = (tmp_path / "index.html").read_text()
+        assert html.count("data-amarktai-media-asset") == 3
+        for asset in manifest["assets"]:
+            assert asset["path"] in html
 
 
 # ════════════════════════════════════════════════════════════════════════════
