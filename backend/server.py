@@ -95,6 +95,7 @@ from app.services.quality_gate_service import run_quality_gate
 from app.services.runtime_qa_service import run_runtime_qa
 from app.services.build_contract_service import final_gate_blockers
 from app.services.media_runtime_service import execute_media_plan
+from app.services.repo_workflow_guard_service import repo_pr_blockers
 from app.services.idea_builder_service import (
     IDEA_BUILDER_SYSTEM_PROMPT,
     compose_final_prompt,
@@ -3496,6 +3497,9 @@ async def repo_create_pr(
     proj = await db.projects.find_one({"id": repo_id}, {"_id": 0})
     if not proj or not proj.get("github"):
         raise HTTPException(400, "Project was not imported from a GitHub repo")
+    blockers = repo_pr_blockers(proj)
+    if blockers:
+        raise HTTPException(409, {"message": "Repo Workbench PR is blocked.", "blockers": blockers})
     pat = body.github_pat or await _runtime_secret("GITHUB_PAT")
     if not pat:
         raise HTTPException(403, "Connect GitHub PAT in Settings to open pull requests.")

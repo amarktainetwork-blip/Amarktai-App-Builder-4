@@ -62,6 +62,7 @@ export default function WorkspacePage() {
   const [runtimeQa, setRuntimeQa] = useState(null);
   const [mediaRuntime, setMediaRuntime] = useState(null);
   const [motionManifest, setMotionManifest] = useState(null);
+  const [voiceAvatarManifest, setVoiceAvatarManifest] = useState(null);
   const [qualityReport, setQualityReport] = useState(null);
   const [contentQualityReport, setContentQualityReport] = useState(null);
 
@@ -95,6 +96,7 @@ export default function WorkspacePage() {
       if (p?.runtime_qa) setRuntimeQa(p.runtime_qa);
       if (p?.media_runtime || p?.media_manifest) setMediaRuntime(p.media_runtime || p.media_manifest);
       if (p?.motion_manifest) setMotionManifest(p.motion_manifest);
+      if (p?.voice_avatar_manifest) setVoiceAvatarManifest(p.voice_avatar_manifest);
       if (p?.quality_report) setQualityReport(p.quality_report);
       if (p?.content_quality_report || p?.quality_report?.content_quality_report) {
         setContentQualityReport(p.content_quality_report || p.quality_report.content_quality_report);
@@ -208,6 +210,8 @@ export default function WorkspacePage() {
       if (evt.data) setMediaRuntime(evt.data);
     } else if (evt.type === "motion_manifest") {
       if (evt.data) setMotionManifest(evt.data);
+    } else if (evt.type === "voice_avatar_manifest") {
+      if (evt.data) setVoiceAvatarManifest(evt.data);
     } else if (evt.type === "quality_report") {
       if (evt.data) {
         setQualityReport(evt.data);
@@ -596,6 +600,7 @@ export default function WorkspacePage() {
             runtimeQa={runtimeQa}
             mediaRuntime={mediaRuntime}
             motionManifest={motionManifest}
+            voiceAvatarManifest={voiceAvatarManifest}
             qualityReport={qualityReport}
             contentQualityReport={contentQualityReport}
           />
@@ -856,6 +861,7 @@ export default function WorkspacePage() {
               runtimeQa={runtimeQa}
               mediaRuntime={mediaRuntime}
               motionManifest={motionManifest}
+              voiceAvatarManifest={voiceAvatarManifest}
               qualityReport={qualityReport}
               contentQualityReport={contentQualityReport}
             />
@@ -886,8 +892,8 @@ export default function WorkspacePage() {
   );
 }
 
-function RuntimeEvidencePanel({ runtimeQa, mediaRuntime, motionManifest, qualityReport, contentQualityReport }) {
-  if (!runtimeQa && !mediaRuntime && !motionManifest && !qualityReport && !contentQualityReport) return null;
+function RuntimeEvidencePanel({ runtimeQa, mediaRuntime, motionManifest, voiceAvatarManifest, qualityReport, contentQualityReport }) {
+  if (!runtimeQa && !mediaRuntime && !motionManifest && !voiceAvatarManifest && !qualityReport && !contentQualityReport) return null;
   const runtimePass = runtimeQa?.pass;
   const mediaCount = mediaRuntime?.asset_count ?? mediaRuntime?.assets?.length;
   const motionFiles = motionManifest?.changed_files || [];
@@ -925,6 +931,9 @@ function RuntimeEvidencePanel({ runtimeQa, mediaRuntime, motionManifest, quality
         )}
         {motionManifest && (
           <div>Motion: {motionManifest.strategy || "patched"} · files {motionFiles.join(", ") || "none"}</div>
+        )}
+        {voiceAvatarManifest && (
+          <div>Voice/avatar: {voiceAvatarManifest.status || "unknown"} - provider voice {voiceAvatarManifest.provider_backed_voice_live ? "live" : "not live/browser fallback"}</div>
         )}
         {contentQualityReport && (
           <div>Content: score {contentQualityReport.score ?? 0} - sections {contentQualityReport.section_count ?? 0} - CTAs {contentQualityReport.cta_count ?? 0}</div>
