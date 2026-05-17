@@ -551,6 +551,12 @@ class TestGenxModelSync:
         caps = self.svc._classify_model("whisper-large-v3")
         assert "audio" in caps
 
+    def test_classify_kling_avatar_model(self):
+        caps = self.svc._classify_model("kling-avatar-v2-pro")
+        assert "avatar" in caps
+        assert "video" in caps
+        assert "audio_image_to_video" in caps
+
     def test_classify_model_embedding(self):
         caps = self.svc._classify_model("text-embedding-3-large")
         assert "embeddings" in caps
@@ -644,6 +650,31 @@ class TestGenxRuntimeTruth:
         assert extract_models({"data": [{"id": "text-a"}]}, category="text")[0]["id"] == "text-a"
         assert extract_models({"models": [{"name": "image-a"}]}, category="image")[0]["category"] == "image"
 
+    def test_mocked_59_model_catalog_classifies_avatar_and_modalities(self):
+        from app.services.genx_live_probe_service import build_capability_index, extract_models
+
+        payload = {"data": [
+            {"id": "kling-avatar-v2-pro", "input_modalities": ["image", "audio"], "output_modalities": ["video"]},
+            {"id": "genxlm-voice-v1", "input_modalities": ["audio", "text"], "output_modalities": ["audio"]},
+            {"id": "aura-2", "input_modalities": ["text"], "output_modalities": ["audio"]},
+            {"id": "grok-tts", "input_modalities": ["text"], "output_modalities": ["audio"]},
+            {"id": "genxlm-pro-v1-tr", "input_modalities": ["audio"], "output_modalities": ["text"]},
+            {"id": "gpt-image-2"},
+            {"id": "nano-banana-pro"},
+            {"id": "recraft-v4.1-pro"},
+            {"id": "veo-3.1"},
+            {"id": "seedance-2-i2v"},
+        ] + [{"id": f"gpt-5-test-{i}"} for i in range(49)]}
+        models = extract_models(payload, category="video")
+        index = build_capability_index(models)
+        assert len(models) == 59
+        assert any(item["id"] == "kling-avatar-v2-pro" for item in index["avatar"])
+        assert any(item["id"] == "kling-avatar-v2-pro" for item in index["audio_image_to_video"])
+        assert any(item["id"] == "genxlm-voice-v1" for item in index["voice"])
+        assert any(item["id"] == "genxlm-pro-v1-tr" for item in index["speech_to_text"])
+        assert any(item["id"] == "gpt-image-2" for item in index["image"])
+        assert any(item["id"] == "veo-3.1" for item in index["video"])
+
     def test_capability_truth_uses_runtime_genx_media_categories(self):
         from app.services.capability_truth_service import CapabilityTruthService
 
@@ -669,6 +700,50 @@ class TestGenxRuntimeTruth:
         assert truth["capabilities"]["video_generation"]["provider"] == "genx"
         assert truth["capabilities"]["voice_generation"]["available"] is True
         assert any(m.get("id") == "genx-image-live" and m.get("source") == "genx_runtime_discovery" for m in truth["models"])
+
+    def test_capability_truth_marks_avatar_available_only_with_kling_avatar_model(self):
+        from app.services.capability_truth_service import CapabilityTruthService
+
+        async def resolver(key: str):
+            return {"value": "test", "source": "settings", "configured": True} if key == "GENX_API_KEY" else {"value": None, "source": "missing", "configured": False}
+
+        cached = {
+            "genx": {
+                "status": "key_present_live_ok",
+                "runtime": {
+                    "capabilities": {"text": True, "streaming": True, "image": True, "video": True, "audio": True, "voice": True, "avatar": True},
+                    "category_counts": {"text": 19, "image": 14, "video": 19, "audio": 2, "voice": 3, "avatar": 0},
+                    "capability_counts": {"avatar": 1, "audio_image_to_video": 1, "video": 1},
+                    "capability_models": {"avatar": [{"id": "kling-avatar-v2-pro", "category": "video", "provider": "genx"}]},
+                    "models": [{"id": "kling-avatar-v2-pro", "category": "video", "provider": "genx", "capabilities": ["avatar", "video", "audio_image_to_video"]}],
+                },
+            }
+        }
+        truth = asyncio.run(CapabilityTruthService(resolver, cached_probes=cached).build())
+        assert truth["capabilities"]["avatar_generation"]["available"] is True
+        assert truth["capabilities"]["avatar_generation"]["provider"] == "genx"
+        assert "kling-avatar-v2-pro" in truth["capabilities"]["avatar_generation"]["model_ids"]
+
+    def test_capability_truth_marks_avatar_unavailable_without_avatar_model(self):
+        from app.services.capability_truth_service import CapabilityTruthService
+
+        async def resolver(key: str):
+            return {"value": "test", "source": "settings", "configured": True} if key == "GENX_API_KEY" else {"value": None, "source": "missing", "configured": False}
+
+        cached = {
+            "genx": {
+                "status": "key_present_live_ok",
+                "runtime": {
+                    "capabilities": {"text": True, "streaming": True, "image": True, "video": True, "audio": True, "voice": True, "avatar": False},
+                    "category_counts": {"text": 19, "image": 14, "video": 18, "audio": 2, "voice": 3, "avatar": 0},
+                    "capability_models": {"video": [{"id": "veo-3.1", "category": "video", "provider": "genx"}]},
+                    "models": [{"id": "veo-3.1", "category": "video", "provider": "genx", "capabilities": ["video"]}],
+                },
+            }
+        }
+        truth = asyncio.run(CapabilityTruthService(resolver, cached_probes=cached).build())
+        assert truth["capabilities"]["avatar_generation"]["available"] is False
+        assert truth["capabilities"]["avatar_generation"]["provider"] is None
 
     @pytest.mark.asyncio
     async def test_genx_async_generate_accepts_immediate_base64_payload(self):
@@ -1144,6 +1219,67 @@ class TestRuntimeMediaMotionServices:
         assert patched == files
         assert manifest["status"] == "skipped"
         assert "reason" in manifest
+
+    @pytest.mark.asyncio
+    async def test_avatar_runtime_success_writes_manifest_and_video(self, tmp_path):
+        from app.services import avatar_runtime_service as svc
+
+        png_asset = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+            b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
+            b"\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U"
+            b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        audio_asset = b"fake-mp3-audio"
+        video_asset = b"\x00\x00\x00\x18ftypmp42fake-video"
+        (tmp_path / "index.html").write_text("<html><body><main><section id='hero'>Amarktai</section></main></body></html>")
+        (tmp_path / "styles.css").write_text("body{}")
+        with patch.object(svc, "generate_genx_media_job", AsyncMock(side_effect=[
+            {"ok": True, "bytes": png_asset, "content_type": "image/png", "job_id": "img1", "status": "succeeded"},
+            {"ok": True, "bytes": audio_asset, "content_type": "audio/mpeg", "job_id": "aud1", "status": "succeeded"},
+            {"ok": True, "bytes": video_asset, "content_type": "video/mp4", "job_id": "vid1", "status": "succeeded", "result_url": "https://genx.test/avatar.mp4"},
+        ])):
+            manifest = await svc.execute_avatar_pipeline(
+                tmp_path,
+                project_id="avatar-proof",
+                prompt="premium AI sales-agent avatar page",
+                genx_api_key="genx-key",
+                genx_runtime={"capability_models": {"avatar": [{"id": "kling-avatar-v2-pro"}], "image": [{"id": "gpt-image-2"}], "voice": [{"id": "genxlm-voice-v1"}]}},
+            )
+        assert manifest["status"] == "ready"
+        assert manifest["model"] == "kling-avatar-v2-pro"
+        assert manifest["video_path"].startswith("media/")
+        assert (tmp_path / "avatar_manifest.json").exists()
+        assert (tmp_path / manifest["video_path"]).exists()
+        assert "data-genx-avatar-video" in (tmp_path / "index.html").read_text()
+
+    @pytest.mark.asyncio
+    async def test_avatar_runtime_failure_uses_browser_fallback_manifest(self, tmp_path):
+        from app.services import avatar_runtime_service as svc
+
+        (tmp_path / "index.html").write_text("<html><body><main><section id='hero'>Amarktai</section></main></body></html>")
+        (tmp_path / "styles.css").write_text("body{}")
+        (tmp_path / "script.js").write_text("")
+        with patch.object(svc, "generate_genx_media_job", AsyncMock(return_value={
+            "ok": False,
+            "provider": "genx",
+            "status": "timeout",
+            "error": "GenX avatar timed out",
+        })):
+            manifest = await svc.execute_avatar_pipeline(
+                tmp_path,
+                project_id="avatar-fallback",
+                prompt="premium AI sales-agent avatar page",
+                genx_api_key="genx-key",
+                avatar_model="kling-avatar-v2-pro",
+                image_model="gpt-image-2",
+                voice_model="genxlm-voice-v1",
+            )
+        assert manifest["status"] == "fallback"
+        assert manifest["fallback_used"] is True
+        assert manifest["video_path"] is None
+        assert "voice_avatar_fallback" in manifest
+        assert "data-voice-avatar-runtime" in (tmp_path / "index.html").read_text()
 
     def test_repo_workbench_blocks_empty_prs(self):
         from app.services.repo_workflow_guard_service import diff_has_changes, repo_pr_blockers

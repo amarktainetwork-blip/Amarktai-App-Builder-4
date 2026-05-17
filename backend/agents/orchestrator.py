@@ -80,6 +80,7 @@ from app.services.build_context_service import (
 from app.services.build_storage_service import create_generated_workspace, update_workspace_metadata
 from app.services.quality_gate_service import run_quality_gate
 from app.services.media_runtime_service import execute_media_plan
+from app.services.avatar_runtime_service import execute_avatar_pipeline
 from app.services.content_quality_service import run_content_quality_check_for_files
 from app.services.motion_runtime_service import patch_motion_files, prompt_requires_motion
 from app.services.voice_avatar_runtime_service import patch_voice_avatar_files, prompt_requires_voice_avatar
@@ -1398,11 +1399,15 @@ class Orchestrator:
             await self.emit({"type": "media_runtime", "data": media_manifest})
             await self.fs.write("media_manifest.json", json.dumps(media_manifest, indent=2), "json")
             await self.emit({"type": "file_written", "data": {"path": "media_manifest.json"}})
+            if "media_manifest.json" not in written:
+                written.append("media_manifest.json")
             for changed_rel in media_manifest.get("injected_files", []):
                 changed_path = workspace / str(changed_rel).lstrip("/")
                 if changed_path.exists() and changed_path.is_file():
                     await self.fs.write(str(changed_rel), changed_path.read_text(encoding="utf-8", errors="replace"), "text")
                     await self.emit({"type": "file_written", "data": {"path": str(changed_rel)}})
+                    if str(changed_rel) not in written:
+                        written.append(str(changed_rel))
             await self._record_event(
                 "media_director",
                 "runtime_completed" if media_manifest.get("asset_count", 0) else "runtime_failed",
@@ -1421,6 +1426,41 @@ class Orchestrator:
                 raise MediaRuntimeBlocker(
                     f"{detail} Attempts: {json.dumps(last_attempts, default=str)[:1200]}"
                 )
+        avatar_manifest: dict[str, Any] | None = None
+        if prompt_requires_voice_avatar(prompt, mode):
+            await self._record_event("avatar_runtime", "runtime_started", "Attempting GenX image+audio-to-video avatar generation.")
+            avatar_manifest = await execute_avatar_pipeline(
+                workspace,
+                project_id=self.project_id,
+                prompt=prompt,
+                genx_api_key=await self._secret_value("GENX_API_KEY"),
+                genx_base_url=await self._secret_value("GENX_BASE_URL", "https://query.genx.sh/v1"),
+                avatar_model=await self._secret_value("GENX_MODEL_AVATAR", "kling-avatar-v2-pro"),
+                image_model=await self._secret_value("GENX_MODEL_IMAGE"),
+                voice_model=await self._secret_value("GENX_MODEL_VOICE", "genxlm-voice-v1"),
+            )
+            await self.emit({"type": "avatar_manifest", "data": avatar_manifest})
+            await self.fs.write("avatar_manifest.json", json.dumps(avatar_manifest, indent=2), "json")
+            await self.emit({"type": "file_written", "data": {"path": "avatar_manifest.json"}})
+            if "avatar_manifest.json" not in written:
+                written.append("avatar_manifest.json")
+            for changed_rel in avatar_manifest.get("injected_files", []):
+                changed_path = workspace / str(changed_rel).lstrip("/")
+                if changed_path.exists() and changed_path.is_file():
+                    await self.fs.write(str(changed_rel), changed_path.read_text(encoding="utf-8", errors="replace"), "text")
+                    await self.emit({"type": "file_written", "data": {"path": str(changed_rel)}})
+                    if str(changed_rel) not in written:
+                        written.append(str(changed_rel))
+            await self._record_event(
+                "avatar_runtime",
+                "runtime_completed" if avatar_manifest.get("status") == "ready" else "fallback",
+                (
+                    "GenX avatar video persisted."
+                    if avatar_manifest.get("status") == "ready"
+                    else f"Avatar video unavailable; browser fallback patched. {avatar_manifest.get('reason', '')}"
+                ),
+                meta=avatar_manifest,
+            )
         quality_report = run_quality_gate(
             workspace,
             strict=quality_tier == "premium",
@@ -1458,6 +1498,7 @@ class Orchestrator:
                 "quality_pass": quality_report.get("pass"),
                 "coverage_score": coverage.get("coverageScore"),
                 "media_asset_count": (media_manifest or {}).get("asset_count", 0),
+                "avatar_status": (avatar_manifest or {}).get("status"),
             },
         )
         await self.db.projects.update_one(
@@ -1473,6 +1514,7 @@ class Orchestrator:
                 "runtime_qa_result": quality_report.get("runtime_qa"),
                 "media_runtime": media_manifest,
                 "media_manifest": media_manifest,
+                "avatar_manifest": avatar_manifest,
                 "quality_report_path": str(workspace / "quality-report.json"),
                 "updated_at": _now(),
             }},

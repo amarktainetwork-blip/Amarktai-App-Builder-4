@@ -53,6 +53,23 @@ def _genx_capability(provider: dict[str, Any], capability: str) -> bool:
     return _availability(provider) and bool(caps.get(capability))
 
 
+def _genx_models_for(provider: dict[str, Any], capability: str) -> list[str]:
+    runtime = _genx_runtime(provider)
+    capability_models = runtime.get("capability_models") or {}
+    models = capability_models.get(capability) or []
+    ids = [str(item.get("id")) for item in models if isinstance(item, dict) and item.get("id")]
+    if ids:
+        return sorted(dict.fromkeys(ids))
+    out: list[str] = []
+    for item in runtime.get("models", []):
+        if not isinstance(item, dict):
+            continue
+        caps = item.get("capabilities") or [item.get("category")]
+        if capability in caps and item.get("id"):
+            out.append(str(item["id"]))
+    return sorted(dict.fromkeys(out))
+
+
 class CapabilityTruthService:
     """Single runtime truth source for provider, capability, and model state."""
 
@@ -166,7 +183,14 @@ class CapabilityTruthService:
         genx_voice_ok = _genx_capability(providers["genx"], "voice")
         genx_avatar_ok = _genx_capability(providers["genx"], "avatar")
 
-        def cap(available: bool, provider: str | None, reason: str, fallback: str = "") -> dict[str, Any]:
+        def cap(
+            available: bool,
+            provider: str | None,
+            reason: str,
+            fallback: str = "",
+            *,
+            model_ids: list[str] | None = None,
+        ) -> dict[str, Any]:
             return {
                 "available": available,
                 "configured": bool(provider and providers.get(provider, {}).get("configured")),
@@ -174,6 +198,8 @@ class CapabilityTruthService:
                 "live_status": providers.get(provider or "", {}).get("live_status") if provider else None,
                 "reason": None if available else reason,
                 "fallback": fallback,
+                "model_ids": model_ids or [],
+                "model_count": len(model_ids or []),
             }
 
         return {
@@ -189,23 +215,38 @@ class CapabilityTruthService:
                 "genx" if genx_image_ok else "qwen",
                 providers["genx"]["reason"] or providers["qwen"]["reason"] or "Image provider not configured",
                 "Pixabay stock media fallback is available only when Pixabay live validation passes.",
+                model_ids=_genx_models_for(providers["genx"], "image") if genx_image_ok else [qwen_models["image_model"]],
             ),
             "video_generation": cap(
                 genx_video_ok or (qwen_ok and bool(qwen_models["video_model"])),
                 "genx" if genx_video_ok else "qwen",
                 providers["genx"]["reason"] or "GenX video category was not live-discovered; QWEN_API_KEY and QWEN_MODEL_VIDEO are required.",
+                model_ids=_genx_models_for(providers["genx"], "video") if genx_video_ok else [qwen_models["video_model"]],
             ),
             "audio": cap(
                 genx_audio_ok or (qwen_ok and bool(qwen_models["audio_model"])),
                 "genx" if genx_audio_ok else "qwen",
                 providers["genx"]["reason"] or "GenX audio category was not live-discovered; QWEN_API_KEY and QWEN_MODEL_AUDIO are required.",
+                model_ids=_genx_models_for(providers["genx"], "audio") if genx_audio_ok else [qwen_models["audio_model"]],
             ),
             "voice_generation": cap(
                 genx_voice_ok or (qwen_ok and bool(qwen_models["audio_model"])),
                 "genx" if genx_voice_ok else "qwen",
                 providers["genx"]["reason"] or "GenX voice category was not live-discovered; QWEN_API_KEY and QWEN_MODEL_AUDIO are required.",
+                model_ids=_genx_models_for(providers["genx"], "voice") if genx_voice_ok else [qwen_models["audio_model"]],
             ),
-            "avatar_generation": cap(genx_avatar_ok, "genx", providers["genx"]["reason"] or "GenX avatar category was not live-discovered."),
+            "speech_to_text": cap(
+                _genx_capability(providers["genx"], "speech_to_text"),
+                "genx",
+                providers["genx"]["reason"] or "GenX speech-to-text model was not live-discovered.",
+                model_ids=_genx_models_for(providers["genx"], "speech_to_text"),
+            ),
+            "avatar_generation": cap(
+                genx_avatar_ok,
+                "genx",
+                providers["genx"]["reason"] or "No live GenX image/audio-to-video avatar model was discovered.",
+                model_ids=_genx_models_for(providers["genx"], "avatar") or _genx_models_for(providers["genx"], "avatar_generation"),
+            ),
             "github_integration": cap(github_ok, "github", providers["github"]["reason"] or "GITHUB_PAT not configured", "File export remains available."),
             "web_research": cap(brave_ok, "brave", providers["brave"]["reason"] or "BRAVE_SEARCH_API_KEY not configured", "Scout continues without live web research."),
             "stock_media": cap(pixabay_ok, "pixabay", providers["pixabay"]["reason"] or "PIXABAY_API_KEY not configured", "Use AI images if available or CSS/SVG visuals."),
@@ -269,7 +310,7 @@ class CapabilityTruthService:
                 "model": model_id,
                 "provider": "genx",
                 "category": category,
-                "capabilities": [category],
+                "capabilities": item.get("capabilities") or [category],
                 "known": True,
                 "source": "genx_runtime_discovery",
                 "configured_model": genx_state.get("configured", False),

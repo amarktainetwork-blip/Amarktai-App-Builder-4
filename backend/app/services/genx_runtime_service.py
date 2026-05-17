@@ -89,6 +89,16 @@ def _job_status(data: dict[str, Any]) -> str:
     return str(_pick(data, "status", "job.status", "data.status") or "").lower()
 
 
+def _default_content_type(category: str) -> str:
+    if category == "image":
+        return "image/png"
+    if category == "video":
+        return "video/mp4"
+    if category in {"voice", "audio"}:
+        return "audio/mpeg"
+    return "application/octet-stream"
+
+
 async def _download(url: str) -> tuple[bytes, str]:
     async with httpx.AsyncClient(timeout=GENX_GENERATE_TIMEOUT, follow_redirects=True) as client:
         response = await client.get(url)
@@ -146,7 +156,7 @@ async def generate_genx_media_job(
                     "category": category,
                     "status": "succeeded",
                     "bytes": base64.b64decode(b64),
-                    "content_type": "image/png" if category == "image" else "application/octet-stream",
+                    "content_type": _default_content_type(category),
                     "created_at": _now(),
                 }
 
@@ -206,7 +216,7 @@ async def generate_genx_media_job(
                             "job_id": job_id,
                             "status": "succeeded",
                             "bytes": base64.b64decode(b64),
-                            "content_type": "image/png" if category == "image" else "application/octet-stream",
+                            "content_type": _default_content_type(category),
                             "created_at": _now(),
                         }
                     if result_url:

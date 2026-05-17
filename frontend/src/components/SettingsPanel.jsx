@@ -153,6 +153,16 @@ export default function SettingsPanel({ active = true, onClose, embedded = false
           />
           <CapabilityNote label="AI media" capability={capabilities?.summary?.image_generation} />
           <CapabilityNote label="Qwen video/audio" capability={capabilities?.summary?.video_generation || capabilities?.summary?.voice_generation} />
+          <CapabilityNote label="GenX avatar video" capability={capabilities?.summary?.avatar_generation} />
+          {capabilities?.providers?.genx?.runtime && (
+            <p className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3">
+              GenX discovered models: {capabilities.providers.genx.runtime.models?.length || 0} ·
+              image {capabilities.providers.genx.runtime.capability_counts?.image || capabilities.providers.genx.runtime.category_counts?.image || 0} ·
+              video {capabilities.providers.genx.runtime.capability_counts?.video || capabilities.providers.genx.runtime.category_counts?.video || 0} ·
+              voice {capabilities.providers.genx.runtime.capability_counts?.voice || capabilities.providers.genx.runtime.category_counts?.voice || 0} ·
+              avatar {capabilities.providers.genx.runtime.capability_counts?.avatar || capabilities.providers.genx.runtime.category_counts?.avatar || 0}
+            </p>
+          )}
         </TabsContent>
 
         <TabsContent value="github" className="m-0 flex-1 space-y-4 overflow-y-auto p-5">
@@ -226,6 +236,7 @@ function ProviderSummary({ settings, capabilities }) {
 
 function capabilityStatusLabel(capability, configured, required = false) {
   if (capability?.live_status === "decrypt_failed" || capability?.source === "decrypt_failed") return "Needs settings cleanup";
+  if (capability && capability.available === false) return (configured || capability?.configured) ? "Unavailable" : (required ? "Missing" : "Missing");
   if (capability?.live_status === "live_ok" || capability?.live_status === "key_present_live_ok") return "Available";
   if (capability?.live_status === "live_fail" || capability?.live_status === "key_present_live_fail" || capability?.live_status === "provider_timeout") return "Live check failed";
   if (configured || capability?.configured) return "Configured";
@@ -234,7 +245,7 @@ function capabilityStatusLabel(capability, configured, required = false) {
 }
 
 function StatusText({ status }) {
-  const color = status === "Available" ? "#00E676" : status === "Live check failed" || status === "Needs settings cleanup" ? "#FF5722" : status === "Coming soon" ? "#A1A1AA" : "#FFC107";
+  const color = status === "Available" ? "#00E676" : status === "Live check failed" || status === "Needs settings cleanup" || status === "Unavailable" ? "#FF5722" : status === "Coming soon" ? "#A1A1AA" : "#FFC107";
   return <div className="mt-1 font-mono text-xs uppercase tracking-wider" style={{ color }}>{status}</div>;
 }
 

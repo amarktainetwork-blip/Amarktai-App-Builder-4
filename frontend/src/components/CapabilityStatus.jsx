@@ -7,8 +7,9 @@ const CAPABILITIES = [
   { key: "text_generation", label: "GenX text/reasoning" },
   { key: "repo_analysis", label: "GenX repo analysis" },
   { key: "image_generation", label: "GenX image media" },
-  { key: "video_generation", label: "Qwen video" },
-  { key: "voice_generation", label: "Qwen voice/audio" },
+  { key: "video_generation", label: "GenX/Qwen video" },
+  { key: "voice_generation", label: "GenX/Qwen voice/audio" },
+  { key: "avatar_generation", label: "GenX avatar video" },
   { key: "github_integration", label: "GitHub import/PR" },
   { key: "web_research", label: "Brave research" },
   { key: "stock_media", label: "Pixabay media" },
@@ -42,6 +43,9 @@ export default function CapabilityStatus({ compact = false }) {
           <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Refresh
         </button>
       </div>
+      {!compact && data?.providers?.genx?.runtime && (
+        <GenxModelSummary runtime={data.providers.genx.runtime} />
+      )}
       <div className={`grid gap-px bg-amk-line ${compact ? "sm:grid-cols-2 lg:grid-cols-3" : "md:grid-cols-2 xl:grid-cols-3"}`}>
         {CAPABILITIES.map(({ key, label }) => {
           const cap = data?.summary?.[key];
@@ -54,7 +58,12 @@ export default function CapabilityStatus({ compact = false }) {
               </div>
               {!compact && cap?.provider && (
                 <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-amk-fg3">
-                  {cap.provider} / {cap.live_status || "not_tested"}
+                  {cap.provider} / {cap.live_status || "not_tested"}{cap.model_count ? ` / ${cap.model_count} model${cap.model_count === 1 ? "" : "s"}` : ""}
+                </p>
+              )}
+              {!compact && cap?.model_ids?.length > 0 && (
+                <p className="mt-2 line-clamp-2 font-mono text-[10px] text-amk-fg3">
+                  {cap.model_ids.slice(0, 5).join(", ")}{cap.model_ids.length > 5 ? ` +${cap.model_ids.length - 5} more` : ""}
                 </p>
               )}
               {!compact && cap?.reason && <p className="mt-2 text-xs leading-5 text-amk-fg3">{cap.reason}</p>}
@@ -66,8 +75,35 @@ export default function CapabilityStatus({ compact = false }) {
   );
 }
 
+function GenxModelSummary({ runtime }) {
+  const counts = runtime?.capability_counts || runtime?.category_counts || {};
+  const total = Array.isArray(runtime?.models) ? runtime.models.length : Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+  const rows = [
+    ["text", "Text"],
+    ["image", "Image"],
+    ["video", "Video"],
+    ["voice", "Voice"],
+    ["audio", "Audio"],
+    ["avatar", "Avatar"],
+  ];
+  return (
+    <div className="border-b border-amk-line bg-amk-base px-4 py-3">
+      <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3">GenX live catalog</div>
+      <div className="mt-2 flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-wider text-amk-fg2">
+        <span className="border border-amk-line px-2 py-1 text-amk-accent">{total} discovered models</span>
+        {rows.map(([key, label]) => (
+          <span key={key} className="border border-amk-line px-2 py-1">{label}: {counts[key] || 0}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function getStatus(capability, key) {
   if (capability?.live_status === "decrypt_failed") return { label: "Needs settings cleanup", color: "#FF5722" };
+  if (capability && capability.available === false) {
+    return { label: capability.configured ? "Unavailable" : "Missing", color: capability.configured ? "#FF5722" : "#FFC107" };
+  }
   if (capability?.live_status === "live_ok" || capability?.live_status === "key_present_live_ok" || capability?.provider === "sandbox") return { label: "Available", color: "#00E676" };
   if (capability?.live_status === "live_fail" || capability?.live_status === "key_present_live_fail" || capability?.live_status === "provider_timeout") {
     return { label: "Live check failed", color: "#FF5722" };
