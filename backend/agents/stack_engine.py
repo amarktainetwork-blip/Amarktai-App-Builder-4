@@ -23,7 +23,7 @@ from app.services.tier_service import normalize_quality_tier
 RESEARCH_MODES = {"research"}
 STATIC_MODES = {"landing_page", "website", "media_page"}
 APP_MODES = {"web_app", "pwa"}
-FULLSTACK_MODES = {"full_stack", "dashboard", "admin_panel"}
+FULLSTACK_MODES = {"full_stack", "dashboard", "admin_panel", "ecommerce_scaffold", "booking_portal", "ai_chat_rag_app", "crm_dashboard"}
 SERVICE_MODES = {"api_service", "automation_bot"}
 BOT_MODES = {"trading_bot_scaffold"}
 IMPORT_MODES = {"repo_fix"}
@@ -42,6 +42,10 @@ REQUIRED_FILES: dict[str, list[str]] = {
     "full_stack": ["README.md", ".env.example", "docker-compose.yml", "amarktai.project.json"],
     "dashboard": ["README.md", "amarktai.project.json"],
     "admin_panel": ["README.md", "amarktai.project.json"],
+    "ecommerce_scaffold": ["README.md", ".env.example", "amarktai.project.json"],
+    "booking_portal": ["README.md", ".env.example", "amarktai.project.json"],
+    "ai_chat_rag_app": ["README.md", ".env.example", "amarktai.project.json"],
+    "crm_dashboard": ["README.md", "amarktai.project.json"],
     "api_service": ["README.md", ".env.example", "amarktai.project.json"],
     "automation_bot": ["README.md", ".env.example", "amarktai.project.json"],
     "trading_bot_scaffold": ["README.md", ".env.example", "amarktai.project.json"],
@@ -86,6 +90,22 @@ _STACK_DEFAULTS: dict[str, dict[str, str]] = {
     "admin_panel": {
         "frontend": "React / Vite", "backend": "FastAPI", "database": "MariaDB",
         "auth": "JWT + RBAC", "realtime": "none", "queue": "none", "deployment": "Docker / VPS",
+    },
+    "ecommerce_scaffold": {
+        "frontend": "React / Vite", "backend": "FastAPI", "database": "MongoDB",
+        "auth": "JWT", "realtime": "none", "queue": "none", "deployment": "Docker / VPS",
+    },
+    "booking_portal": {
+        "frontend": "React / Vite", "backend": "FastAPI", "database": "MongoDB",
+        "auth": "JWT", "realtime": "SSE / WebSocket", "queue": "async task queue", "deployment": "Docker / VPS",
+    },
+    "ai_chat_rag_app": {
+        "frontend": "React / Vite", "backend": "FastAPI", "database": "MongoDB + vector store",
+        "auth": "JWT", "realtime": "SSE / WebSocket", "queue": "async task queue", "deployment": "Docker / VPS",
+    },
+    "crm_dashboard": {
+        "frontend": "React / Vite", "backend": "FastAPI", "database": "MongoDB",
+        "auth": "JWT", "realtime": "none", "queue": "none", "deployment": "Docker / VPS",
     },
     "api_service": {
         "frontend": "none", "backend": "FastAPI", "database": "MongoDB",
@@ -222,15 +242,6 @@ def decide_stack(
             )
     else:
         recommended_tier = quality_tier
-
-    # Cheap on standard complexity → warn but allow
-    if quality_tier == "cheap" and complexity in ("standard", "advanced", "high_risk"):
-        if not requires_upgrade_confirmation:
-            requires_upgrade_confirmation = True
-            upgrade_reason = (
-                f"Cheap tier selected for a {complexity} project. "
-                f"Balanced or premium is recommended for better results."
-            )
 
     # ── build the stack ───────────────────────────────────────
     stack = dict(_STACK_DEFAULTS.get(mode, _STACK_DEFAULTS["web_app"]))

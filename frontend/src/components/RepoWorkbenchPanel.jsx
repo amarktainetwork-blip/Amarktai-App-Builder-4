@@ -101,6 +101,27 @@ export default function RepoWorkbenchPanel({
       {expanded && analysis && (
         <div className="px-3 pb-3 space-y-3 border-t border-white/10">
           {/* Summary grid */}
+          <div className="grid gap-2 md:grid-cols-4">
+            {[
+              ["1", "Select repo", project?.github?.html_url ? "complete" : "dashboard"],
+              ["2", "Analyze stack", analysis ? "complete" : "pending"],
+              ["3", "Plan and repair", coverage ? "ready" : "needs prompt"],
+              ["4", "Diff and PR", project?.pr_url ? "PR saved" : "locked until checks pass"],
+            ].map(([num, label, state]) => (
+              <div key={label} className="border border-amk-line bg-amk-base p-2">
+                <div className="text-agent-coder">{num}. {label}</div>
+                <div className="mt-0.5 text-amk-fg3">{state}</div>
+              </div>
+            ))}
+          </div>
+
+          {project?.pr_url && (
+            <a href={project.pr_url} target="_blank" rel="noreferrer" className="block border border-agent-coder bg-agent-coder/10 px-3 py-2 text-agent-coder">
+              Open saved pull request
+            </a>
+          )}
+
+          {/* Summary grid */}
           <div className="pt-2 grid grid-cols-2 gap-x-4 gap-y-1">
             <InfoRow icon={<Box className="w-2.5 h-2.5" />} label="Type" value={analysis.detectedType} />
             <InfoRow icon={<Globe className="w-2.5 h-2.5" />} label="Frameworks" value={(analysis.frameworks || []).join(", ") || "—"} />

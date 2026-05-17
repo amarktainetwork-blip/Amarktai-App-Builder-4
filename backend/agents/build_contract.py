@@ -37,12 +37,14 @@ PROJECT_TYPES = (
     "static-site", "multi-page-site", "react-app", "next-app", "pwa",
     "fullstack-app", "api-service", "dashboard", "repo-upgrade",
     "automation-bot-scaffold", "trading-bot-scaffold",
+    "ecommerce-scaffold", "booking-portal", "ai-chat-rag-app",
 )
 
 BUILD_MODES = (
     "landing-page", "multi-page-website", "pwa", "fullstack-saas",
     "dashboard", "api-service", "repo-upgrade", "automation-bot",
-    "trading-bot-scaffold", "custom",
+    "trading-bot-scaffold", "ecommerce-scaffold", "booking-portal",
+    "ai-chat-rag-app", "crm-dashboard", "custom",
 )
 
 QUALITY_TIERS = PUBLIC_TIERS
@@ -61,6 +63,10 @@ MODE_PROJECT_TYPE = {
     "fullstack-saas": ("fullstack-app", "fullstack-saas"),
     "dashboard": ("dashboard", "dashboard"),
     "admin_panel": ("dashboard", "dashboard"),
+    "ecommerce_scaffold": ("ecommerce-scaffold", "ecommerce-scaffold"),
+    "booking_portal": ("booking-portal", "booking-portal"),
+    "ai_chat_rag_app": ("ai-chat-rag-app", "ai-chat-rag-app"),
+    "crm_dashboard": ("dashboard", "crm-dashboard"),
     "api_service": ("api-service", "api-service"),
     "api-service": ("api-service", "api-service"),
     "repo_fix": ("repo-upgrade", "repo-upgrade"),

@@ -137,6 +137,7 @@ export const System = {
   githubBranches: (owner, repo, params = {}) =>
     api.get(`/integrations/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`, { params }).then((r) => r.data),
   capabilitiesStatus: () => api.get("/capabilities/status").then((r) => r.data),
+  modelRouterStatus: () => api.get("/models/router-status").then((r) => r.data),
 };
 
 export const Builds = {

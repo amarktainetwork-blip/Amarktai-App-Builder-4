@@ -7,23 +7,31 @@ import CapabilityStatus from "@/components/CapabilityStatus";
 import { Button } from "@/components/ui/button";
 import { Clarify, Projects, System } from "@/lib/amk-api";
 import { readinessBlockMessage, readinessBlocksBuild } from "@/lib/readiness";
+import { QUALITY_TIERS, normalizeQualityTier, tierLabel } from "@/lib/tiers";
 
 const MODES = [
-  ["landing_page", "Landing page", "Static, image-rich page"],
+  ["landing_page", "Landing Page", "A polished one-page website"],
   ["website", "Website", "Multi-page content site"],
-  ["web_app", "Web app", "Interactive local app"],
   ["pwa", "PWA", "Installable mobile-friendly app"],
+  ["web_app", "Web App", "Interactive local app"],
   ["dashboard", "Dashboard", "Charts, tables, admin UI"],
-  ["full_stack", "Full stack", "Frontend, backend, docs"],
-  ["api_service", "API service", "REST API scaffold"],
-  ["repo_fix", "Repo fix", "Imported repo changes"],
+  ["full_stack", "Full-Stack App", "Frontend, backend, docs"],
+  ["api_service", "API Service", "REST API scaffold"],
+  ["repo_fix", "Repo Fix", "Imported repo changes"],
+  ["automation_bot", "Automation Bot", "Worker or scheduler scaffold"],
+  ["admin_panel", "Admin/Internal Tool", "Internal CRUD and operations UI"],
+  ["ecommerce_scaffold", "Ecommerce Scaffold", "Catalog, cart, checkout scaffold"],
+  ["booking_portal", "Booking/Portal", "Booking flow and customer portal"],
+  ["ai_chat_rag_app", "AI Chat/RAG App", "Chat, retrieval, and knowledge UX"],
+  ["crm_dashboard", "CRM/Dashboard", "Pipeline, accounts, and reporting"],
 ];
 
 const MEDIA_OPTIONS = [
-  ["auto", "Let AI decide", "Use the best configured source and fall back honestly.", Cpu],
-  ["AI-generated images (GenX)", "AI images", "Requires GENX_API_KEY and explicit model availability.", Sparkles],
-  ["Stock images from Pixabay", "Pixabay stock", "Requires PIXABAY_API_KEY.", Image],
-  ["SVG / CSS visuals only (no external images)", "CSS/SVG only", "No external media dependency.", Palette],
+  ["auto", "Auto", "Use the best live source and label fallbacks honestly.", Cpu],
+  ["ai", "AI media", "Use configured GenX/Qwen media providers when live.", Sparkles],
+  ["pixabay", "Stock/free media", "Use Pixabay stock media when available.", Image],
+  ["css_svg", "CSS/SVG only", "No external media dependency.", Palette],
+  ["uploaded", "Uploaded media", "Use assets you provide through Media Studio.", Image],
 ];
 
 export default function NewBuildPage() {
@@ -31,8 +39,8 @@ export default function NewBuildPage() {
   const location = useLocation();
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [mode, setMode] = useState("web_app");
-  const [qualityTier, setQualityTier] = useState("balanced");
+  const [mode, setMode] = useState("landing_page");
+  const [qualityTier, setQualityTier] = useState("standard");
   const [mediaChoice, setMediaChoice] = useState("auto");
   const [readiness, setReadiness] = useState(null);
   const [creating, setCreating] = useState(false);
@@ -46,7 +54,7 @@ export default function NewBuildPage() {
     if (state.ideaPrompt) setPrompt(state.ideaPrompt);
     if (state.projectName) setName(state.projectName);
     if (state.mode) setMode(state.mode);
-    if (state.qualityTier) setQualityTier(state.qualityTier);
+    if (state.qualityTier) setQualityTier(normalizeQualityTier(state.qualityTier));
     if (state.mediaChoice) setMediaChoice(state.mediaChoice);
   }, [location.state]);
 
@@ -63,7 +71,7 @@ export default function NewBuildPage() {
     try {
       const proj = await Projects.create(name.trim(), enrichedPrompt.trim(), {
         mode,
-        quality_tier: qualityTier,
+        quality_tier: normalizeQualityTier(qualityTier),
         upgrade_confirmation_acknowledged: upgradeAcknowledged,
         media_requirements: mediaChoice !== "auto" ? mediaChoice : undefined,
         ...extraParams,
@@ -131,7 +139,7 @@ export default function NewBuildPage() {
         <div className="border-b border-amk-line p-5">
           <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-amk-fg3">New build</div>
           <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight text-white">Describe the product. Let the system route the build.</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-amk-fg2">Prompt-first creation with explicit mode, quality, and media constraints. Provider-backed options stay marked as setup-dependent.</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-amk-fg2">Prompt-first creation with explicit mode, quality, and media constraints. Provider-backed options stay marked as live, fallback, or setup-needed.</p>
         </div>
 
         <form onSubmit={create} className="space-y-5 p-5" data-testid="create-project-form">
@@ -140,7 +148,10 @@ export default function NewBuildPage() {
           </Field>
 
           <Field label="Build prompt">
-            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={7} placeholder="Build a private beta SaaS dashboard with..." className="field-input resize-none leading-6" data-testid="project-prompt-input" />
+            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={7} placeholder="Build a modern one-page website for a luxury local bakery with hero, services, gallery, testimonials, contact section, responsive design, and polished visuals." className="field-input resize-none leading-6" data-testid="project-prompt-input" />
+            <p className="mt-2 text-xs leading-5 text-amk-fg3">
+              Examples: a premium product landing page, a PWA for bookings, an admin dashboard, or a repo repair brief.
+            </p>
           </Field>
 
           <div>
@@ -157,10 +168,11 @@ export default function NewBuildPage() {
 
           <div>
             <Label>Quality tier</Label>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {["cheap", "balanced", "premium"].map((tier) => (
-                <button key={tier} type="button" onClick={() => setQualityTier(tier)} className={`border p-3 text-left font-mono text-xs capitalize ${qualityTier === tier ? "border-amk-accent bg-amk-accent/10 text-white" : "border-amk-line bg-amk-base text-amk-fg2 hover:bg-amk-surface"}`}>
-                  {tier}
+            <div className="grid gap-2 sm:grid-cols-2" data-testid="quality-tier-selector">
+              {QUALITY_TIERS.map((tier) => (
+                <button key={tier.id} type="button" data-testid={`tier-${tier.id}`} onClick={() => setQualityTier(tier.id)} className={`border p-3 text-left ${qualityTier === tier.id ? "border-amk-accent bg-amk-accent/10 text-white" : "border-amk-line bg-amk-base text-amk-fg2 hover:bg-amk-surface"}`}>
+                  <span className="block font-mono text-xs">{tier.label}</span>
+                  <span className="mt-1 block text-[10px] leading-4 text-amk-fg3">{tier.description}</span>
                 </button>
               ))}
             </div>
@@ -179,6 +191,13 @@ export default function NewBuildPage() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="border border-amk-line bg-amk-base p-3">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3">What happens next</div>
+            <p className="mt-2 text-xs leading-5 text-amk-fg2">
+              Planner, Scout, Architect, Coder, Reviewer, Media, Motion, Runtime QA, and deployment gates run in order. Failures show a clear next action in the workspace.
+            </p>
           </div>
 
           <Button type="submit" disabled={creating} className="h-11 w-full bg-amk-accent font-mono text-xs uppercase tracking-wider text-black hover:bg-emerald-300" data-testid="create-project-btn">
@@ -201,11 +220,11 @@ export default function NewBuildPage() {
       {upgradeModal && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
           <div className="w-full max-w-md border border-amk-line bg-amk-panel p-5">
-            <div className="font-mono text-[10px] uppercase tracking-wider text-agent-scout">Upgrade suggested</div>
+            <div className="font-mono text-[10px] uppercase tracking-wider text-agent-scout">Better fit suggested</div>
             <p className="mt-3 text-sm leading-6 text-amk-fg2">{upgradeModal.upgrade_reason}</p>
             <div className="mt-4 flex gap-2">
-              <Button onClick={() => { const data = upgradeModal; setUpgradeModal(null); if (data.recommended_tier) setQualityTier(data.recommended_tier); doCreate(data.enrichedPrompt || prompt, true, data.extraParams || {}); }} className="flex-1 bg-amk-accent text-black hover:bg-emerald-300">
-                Use {upgradeModal.recommended_tier}
+              <Button onClick={() => { const data = upgradeModal; setUpgradeModal(null); if (data.recommended_tier) setQualityTier(normalizeQualityTier(data.recommended_tier)); doCreate(data.enrichedPrompt || prompt, true, data.extraParams || {}); }} className="flex-1 bg-amk-accent text-black hover:bg-emerald-300">
+                Use {tierLabel(upgradeModal.recommended_tier)}
               </Button>
               <Button variant="outline" onClick={() => { const data = upgradeModal; setUpgradeModal(null); doCreate(data.enrichedPrompt || prompt, true, data.extraParams || {}); }} className="flex-1 border-amk-line">
                 Continue

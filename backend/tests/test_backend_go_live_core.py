@@ -13,6 +13,7 @@ from app.services.build_contract_service import final_gate_blockers
 from app.services.capability_truth_service import CapabilityTruthService
 from app.services.model_router import get_router_status
 from app.services.tier_service import normalize_quality_tier, repair_attempt_limit
+from agents.stack_engine import decide_stack
 
 
 def test_legacy_tiers_map_to_public_tiers():
@@ -22,6 +23,14 @@ def test_legacy_tiers_map_to_public_tiers():
     assert normalize_quality_tier("premium") == "premium"
     assert repair_attempt_limit("balanced") == 2
     assert repair_attempt_limit("premium") == 3
+
+
+def test_public_mode_aliases_are_contract_backed():
+    for mode in ["ecommerce_scaffold", "booking_portal", "ai_chat_rag_app", "crm_dashboard"]:
+        decision = decide_stack(prompt="Build a business workflow", mode=mode, quality_tier="standard")
+        assert decision["recommended_mode"] == mode
+        assert decision["quality_tier"] == "standard"
+        assert decision["required_files"]
 
 
 def test_report_files_are_filtered_from_agent_app_payloads():

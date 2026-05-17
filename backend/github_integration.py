@@ -39,7 +39,7 @@ MAX_BYTES = 256_000  # per file
 
 def parse_repo_url(url: str) -> tuple[str, str]:
     """github.com/owner/repo[.git][/...] → (owner, repo)."""
-    m = re.search(r"github\.com[:/]+([^/]+)/([^/#?\s.]+)(?:\.git)?", url.strip())
+    m = re.search(r"github\.com[:/]+([^/]+)/([A-Za-z0-9_.-]{1,100})(?:\.git)?(?:[/#?].*)?$", url.strip())
     if not m:
         raise ValueError(f"Not a GitHub repo URL: {url}")
     return m.group(1), m.group(2)

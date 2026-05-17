@@ -18,6 +18,7 @@ import RepoWorkbenchPanel from "@/components/RepoWorkbenchPanel";
 import SettingsDialog from "@/components/SettingsDialog";
 import PRDialog from "@/components/PRDialog";
 import MediaLibraryDialog from "@/components/MediaLibraryDialog";
+import CapabilityStatus from "@/components/CapabilityStatus";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Projects, openProjectSocket } from "@/lib/amk-api";
 import { useAuth } from "@/lib/auth-context";
@@ -40,7 +41,7 @@ export default function WorkspacePage() {
   const [finalizing, setFinalizing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const [tab, setTab] = useState("preview");
+  const [tab, setTab] = useState("overview");
   // Tracks the current pipeline sub-phase for the preview panel ("validating" | "repairing" | null)
   const [buildPhase, setBuildPhase] = useState(null);
   // Validation result surfaced from the last quality/design/security pass
@@ -588,12 +589,7 @@ export default function WorkspacePage() {
                 : "WebSocket disconnected. Reconnecting…"}
             </div>
           )}
-          {failed && project?.error && (
-            <div className="border-y border-red-900 bg-red-950/30 px-3 py-2 font-mono text-[10px] text-red-400">
-              {project.failed_agent && <span className="font-semibold">{project.failed_agent}: </span>}
-              {project.error}
-            </div>
-          )}
+            {failed && project?.error && <FriendlyFailurePanel project={project} onRetry={retryAgent} retrying={retrying} compact />}
           {/* Phase 2: Quality/design/security + extended validation scores */}
           <ValidationPanel validation={validation} />
           {/* Phase 4: Build plan (shown during/after build, collapses by default) */}
@@ -753,24 +749,46 @@ export default function WorkspacePage() {
         {/* RIGHT 65% — code & preview */}
         <section className="flex-1 flex flex-col bg-amk-panel overflow-hidden">
           <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col min-h-0">
-            <div className="h-9 border-b border-amk-line bg-amk-base flex items-center px-2 shrink-0">
-              <TabsList className="bg-transparent h-9 p-0 gap-0">
+            <div className="h-9 border-b border-amk-line bg-amk-base flex items-center overflow-x-auto px-2 shrink-0">
+              <TabsList className="bg-transparent h-9 min-w-max p-0 gap-0">
+                {[
+                  ["overview", "Overview"],
+                  ["brief", "Prompt / Brief"],
+                  ["timeline", "Build Timeline"],
+                  ["preview", "Live Preview"],
+                  ["code", "Files / Code"],
+                  ["agents", "Agents"],
+                  ["capabilities", "Capabilities"],
+                  ["media", "Media Studio"],
+                  ["qa", "Runtime QA"],
+                  ["repo", "Repo Workbench"],
+                  ["deploy", "Deploy / Finalize"],
+                  ["logs", "Logs / Debug"],
+                ].map(([value, label]) => (
                 <TabsTrigger
-                  value="preview"
-                  data-testid="tab-preview"
+                  key={value}
+                  value={value}
+                  data-testid={`tab-${value}`}
                   className="font-mono text-[11px] uppercase tracking-wider px-3 h-9 rounded-none border-r border-amk-line data-[state=active]:bg-amk-panel data-[state=active]:text-white data-[state=active]:shadow-none data-[state=active]:border-t-2 data-[state=active]:border-t-white text-amk-fg3"
                 >
-                  Live Preview
+                  {label}
                 </TabsTrigger>
-                <TabsTrigger
-                  value="code"
-                  data-testid="tab-code"
-                  className="font-mono text-[11px] uppercase tracking-wider px-3 h-9 rounded-none border-r border-amk-line data-[state=active]:bg-amk-panel data-[state=active]:text-white data-[state=active]:shadow-none data-[state=active]:border-t-2 data-[state=active]:border-t-white text-amk-fg3"
-                >
-                  Code
-                </TabsTrigger>
+                ))}
               </TabsList>
             </div>
+
+            <TabsContent value="overview" className="flex-1 m-0 min-h-0 overflow-auto bg-amk-base p-5">
+              <WorkspaceOverview project={project} files={files} runtimeQa={runtimeQa} mediaRuntime={mediaRuntime} motionManifest={motionManifest} onRetry={retryAgent} retrying={retrying} />
+            </TabsContent>
+
+            <TabsContent value="brief" className="flex-1 m-0 min-h-0 overflow-auto bg-amk-base p-5">
+              <PanelTitle eyebrow="Prompt / Brief" title={project?.name || "Project brief"} />
+              <pre className="mt-4 whitespace-pre-wrap rounded border border-amk-line bg-amk-panel p-4 text-sm leading-6 text-amk-fg2">{project?.prompt || "No prompt saved yet."}</pre>
+            </TabsContent>
+
+            <TabsContent value="timeline" className="flex-1 m-0 min-h-0 overflow-y-auto bg-amk-base">
+              <AgentTimeline events={events} />
+            </TabsContent>
 
             <TabsContent value="preview" className="flex-1 m-0 min-h-0">
               <LivePreview
@@ -791,6 +809,42 @@ export default function WorkspacePage() {
                 <FileTree files={files} activePath={activePath} onSelect={setActivePath} />
                 <CodeViewer projectId={projectId} path={activePath} />
               </div>
+            </TabsContent>
+
+            <TabsContent value="agents" className="flex-1 m-0 min-h-0 overflow-y-auto bg-amk-base">
+              <AgentTimeline events={events} />
+            </TabsContent>
+
+            <TabsContent value="capabilities" className="flex-1 m-0 min-h-0 overflow-auto bg-amk-base p-4">
+              <CapabilityStatus />
+            </TabsContent>
+
+            <TabsContent value="media" className="flex-1 m-0 min-h-0 overflow-auto bg-amk-base p-4">
+              <PanelTitle eyebrow="Media Studio" title="Generated, stock, uploaded, voice, and avatar assets" />
+              <button onClick={() => setMediaLibraryOpen(true)} className="mt-3 border border-amk-line px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:bg-amk-surface hover:text-white">Open Media Studio</button>
+              <RuntimeEvidencePanel mediaRuntime={mediaRuntime} motionManifest={motionManifest} voiceAvatarManifest={voiceAvatarManifest} avatarManifest={avatarManifest} />
+            </TabsContent>
+
+            <TabsContent value="qa" className="flex-1 m-0 min-h-0 overflow-auto bg-amk-base p-4">
+              <PanelTitle eyebrow="Runtime QA" title="Screenshots, accessibility, performance, console, links, media, and motion checks" />
+              <RuntimeEvidencePanel runtimeQa={runtimeQa} qualityReport={qualityReport} contentQualityReport={contentQualityReport} />
+            </TabsContent>
+
+            <TabsContent value="repo" className="flex-1 m-0 min-h-0 overflow-auto bg-amk-base p-4">
+              {isRepoProject ? (
+                <RepoWorkbenchPanel projectId={projectId} project={project} repoAnalysis={repoAnalysis} coverage={coverageResult} onRunPreview={runPreviewFallback} onContinueMissing={continueMissingRequirements} busy={busy} />
+              ) : (
+                <EmptyPanel title="Repo Workbench" body="Import a GitHub repo from the dashboard to analyze, repair, test, diff, and open a PR." />
+              )}
+            </TabsContent>
+
+            <TabsContent value="deploy" className="flex-1 m-0 min-h-0 overflow-auto bg-amk-base p-5">
+              <DeployPanel project={project} canFinalize={canFinalize} finalizing={finalizing} onFinalize={finalize} />
+            </TabsContent>
+
+            <TabsContent value="logs" className="flex-1 m-0 min-h-0 overflow-auto bg-amk-base p-4">
+              <PanelTitle eyebrow="Logs / Debug" title="Agent events and technical details" />
+              <pre className="mt-4 whitespace-pre-wrap rounded border border-amk-line bg-amk-panel p-4 text-[11px] leading-5 text-amk-fg2">{JSON.stringify(events.slice(-50), null, 2)}</pre>
             </TabsContent>
           </Tabs>
         </section>
@@ -853,12 +907,7 @@ export default function WorkspacePage() {
                 {wsState === "reconnecting" ? "WebSocket reconnecting..." : "WebSocket disconnected. Reconnecting..."}
               </div>
             )}
-            {failed && project?.error && (
-              <div className="border-b border-red-900 bg-red-950/30 px-3 py-2 font-mono text-[10px] text-red-400">
-                {project.failed_agent && <span className="font-semibold">{project.failed_agent}: </span>}
-                {project.error}
-              </div>
-            )}
+            {failed && project?.error && <FriendlyFailurePanel project={project} onRetry={retryAgent} retrying={retrying} compact />}
             <ValidationPanel validation={validation} />
             <BuildPlanBanner plan={buildPlan} />
             <AdvisorPanel advisor={advisorResult} />
@@ -955,4 +1004,152 @@ function RuntimeEvidencePanel({ runtimeQa, mediaRuntime, motionManifest, voiceAv
       </div>
     </div>
   );
+}
+
+function WorkspaceOverview({ project, files, runtimeQa, mediaRuntime, motionManifest, onRetry, retrying }) {
+  const failed = project?.status === "failed" || project?.status === "cancelled";
+  const appFiles = files.filter((f) => !isReportFile(f.path) && !isMediaFile(f.path));
+  const reportFiles = files.filter((f) => isReportFile(f.path));
+  const mediaFiles = files.filter((f) => isMediaFile(f.path));
+  return (
+    <div className="space-y-5">
+      <PanelTitle eyebrow="Overview" title={project?.name || "Workspace"} />
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Status" value={project?.status || "unknown"} tone={project?.status === "ready" ? "good" : failed ? "bad" : "neutral"} />
+        <Metric label="App files" value={appFiles.length} />
+        <Metric label="Reports" value={reportFiles.length} />
+        <Metric label="Media assets" value={mediaFiles.length || mediaRuntime?.asset_count || 0} />
+      </div>
+      {failed && <FriendlyFailurePanel project={project} onRetry={onRetry} retrying={retrying} />}
+      <div className="grid gap-3 md:grid-cols-3">
+        <EvidenceCard title="Preview" value={project?.preview_url ? "Available" : appFiles.length ? "Files available" : "Pending"} body="Open Live Preview to inspect the generated output or see the next action." />
+        <EvidenceCard title="Runtime QA" value={runtimeQa ? (runtimeQa.pass ? "Pass" : "Blocked") : "Pending"} body="Screenshots, accessibility, performance, links, media, and motion checks appear in Runtime QA." />
+        <EvidenceCard title="Motion" value={motionManifest ? "Evidence saved" : "Pending"} body="Motion evidence includes selectors, changed files, and runtime checks for premium builds." />
+      </div>
+    </div>
+  );
+}
+
+function FriendlyFailurePanel({ project, onRetry, retrying, compact = false }) {
+  const raw = project?.error || "The build stopped before completion.";
+  const friendly = friendlyBuildError(raw);
+  return (
+    <div data-testid="friendly-error-panel" className={`border border-red-900 bg-red-950/30 ${compact ? "px-3 py-2 font-mono text-[10px]" : "p-4"}`}>
+      <div className="font-mono text-[10px] uppercase tracking-wider text-red-300">Build needs attention</div>
+      <p className="mt-2 text-sm leading-6 text-amk-fg">{friendly.message}</p>
+      <p className="mt-1 text-xs leading-5 text-amk-fg3">{friendly.action}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {["coder", "reviewer", "repair", "pipeline"].map((agent) => (
+          <button key={agent} type="button" disabled={retrying} onClick={() => onRetry(agent)} className="border border-amk-line px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:bg-amk-surface hover:text-white disabled:opacity-50">
+            {agent === "pipeline" ? "Restart Build" : `Retry ${agent}`}
+          </button>
+        ))}
+      </div>
+      <details className="mt-3">
+        <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-wider text-amk-fg3">Debug details</summary>
+        <pre className="mt-2 whitespace-pre-wrap break-words rounded border border-amk-line bg-amk-base p-2 text-[10px] text-amk-fg2">
+          {project?.failed_agent ? `${project.failed_agent}: ` : ""}{raw}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
+function friendlyBuildError(raw) {
+  const text = String(raw || "");
+  if (/content_quality_report\.json/i.test(text)) {
+    return {
+      message: "A report file was requested like an app source file.",
+      action: "Use Retry Repair first. If it repeats, restart the build so agents regenerate the source/report split.",
+    };
+  }
+  if (/decide_stack|takes 0 positional arguments/i.test(text)) {
+    return {
+      message: "Repo stack detection hit an internal mismatch.",
+      action: "Retry Repair after refreshing the workspace. The import route now uses the corrected stack detector.",
+    };
+  }
+  if (/reviewer|invalid output|malformed/i.test(text)) {
+    return {
+      message: "The reviewer could not produce a valid audit result.",
+      action: "Retry Reviewer. If the same issue returns, use Restart Build to regenerate cleaner files.",
+    };
+  }
+  if (/pipeline|failed/i.test(text)) {
+    return {
+      message: "The build pipeline stopped before all required gates completed.",
+      action: "Restart Build for full regeneration, or Retry Repair if files already exist.",
+    };
+  }
+  return {
+    message: "The build stopped and needs a recovery step.",
+    action: "Use Retry Repair when files exist, Retry Coder for generation issues, or Restart Build for a clean run.",
+  };
+}
+
+function PanelTitle({ eyebrow, title }) {
+  return (
+    <div>
+      <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3">{eyebrow}</div>
+      <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-white">{title}</h2>
+    </div>
+  );
+}
+
+function Metric({ label, value, tone = "neutral" }) {
+  const color = tone === "good" ? "#00E676" : tone === "bad" ? "#FF5722" : "#A1A1AA";
+  return (
+    <div className="border border-amk-line bg-amk-panel p-3">
+      <div className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3">{label}</div>
+      <div className="mt-2 font-mono text-sm uppercase tracking-wider" style={{ color }}>{value}</div>
+    </div>
+  );
+}
+
+function EvidenceCard({ title, value, body }) {
+  return (
+    <div className="border border-amk-line bg-amk-panel p-4">
+      <div className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3">{title}</div>
+      <div className="mt-2 font-mono text-xs uppercase tracking-wider text-amk-accent">{value}</div>
+      <p className="mt-2 text-xs leading-5 text-amk-fg2">{body}</p>
+    </div>
+  );
+}
+
+function EmptyPanel({ title, body }) {
+  return (
+    <div className="grid h-full place-items-center">
+      <div className="max-w-md border border-amk-line bg-amk-panel p-6 text-center">
+        <h2 className="font-display text-xl font-semibold text-white">{title}</h2>
+        <p className="mt-2 text-sm leading-6 text-amk-fg2">{body}</p>
+      </div>
+    </div>
+  );
+}
+
+function DeployPanel({ project, canFinalize, finalizing, onFinalize }) {
+  return (
+    <div className="space-y-4">
+      <PanelTitle eyebrow="Deploy / Finalize" title="Finalize generated work truthfully" />
+      <div className="border border-amk-line bg-amk-panel p-4">
+        <div className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3">Finalize state</div>
+        <p className="mt-2 text-sm leading-6 text-amk-fg2">
+          {canFinalize ? "All current gates allow finalize." : "Finalize is locked until required build, QA, media, repo, or validation gates pass."}
+        </p>
+        {project?.pr_url && <a className="mt-2 block text-sm text-amk-accent underline" href={project.pr_url} target="_blank" rel="noreferrer">Open saved PR</a>}
+        {project?.repo_url && <a className="mt-2 block text-sm text-amk-accent underline" href={project.repo_url} target="_blank" rel="noreferrer">Open repository</a>}
+        <button disabled={!canFinalize || finalizing} onClick={onFinalize} className="mt-4 border border-amk-line px-4 py-2 font-mono text-[10px] uppercase tracking-wider text-amk-fg2 hover:bg-amk-surface hover:text-white disabled:opacity-40">
+          {finalizing ? "Finalizing..." : "Finalize / Push"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function isReportFile(path = "") {
+  return /(?:report|manifest|runtime-qa|quality|accessibility|lighthouse|coverage)/i.test(path);
+}
+
+function isMediaFile(path = "") {
+  return /(?:^|\/)(media|assets)\//i.test(path) || /\.(png|jpe?g|webp|gif|mp4|webm|mp3|wav|ogg)$/i.test(path);
 }

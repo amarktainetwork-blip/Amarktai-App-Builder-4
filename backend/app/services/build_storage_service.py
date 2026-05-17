@@ -515,7 +515,7 @@ def detect_and_save_stack(workspace_path: Path, files: list[dict[str, Any]]) -> 
     _assert_inside_root(resolved, root)
 
     try:
-        stack = decide_stack("", "auto")
+        stack = decide_stack(prompt="", mode="repo_fix")
         # Try to infer from filenames
         paths = [f.get("path", "") for f in files]
         stack_info: dict[str, Any] = {

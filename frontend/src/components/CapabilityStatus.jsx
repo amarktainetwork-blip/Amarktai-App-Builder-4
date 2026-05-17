@@ -3,16 +3,31 @@ import { RefreshCw } from "lucide-react";
 import { System } from "@/lib/amk-api";
 
 const CAPABILITIES = [
-  { key: "preview_generation", label: "Preview generation" },
   { key: "text_generation", label: "GenX text/reasoning" },
+  { key: "code_generation", label: "GenX code generation" },
+  { key: "reasoning", label: "Reasoning" },
+  { key: "qwen", label: "Qwen routing" },
   { key: "repo_analysis", label: "GenX repo analysis" },
-  { key: "image_generation", label: "GenX image media" },
-  { key: "video_generation", label: "GenX/Qwen video" },
-  { key: "voice_generation", label: "GenX/Qwen voice/audio" },
-  { key: "avatar_generation", label: "GenX avatar video" },
+  { key: "image_generation", label: "Image generation" },
+  { key: "video_generation", label: "Video generation" },
+  { key: "audio_generation", label: "Audio/music" },
+  { key: "voice_generation", label: "Voice / STT / TTS" },
+  { key: "avatar_generation", label: "Avatar video" },
   { key: "github_integration", label: "GitHub import/PR" },
   { key: "web_research", label: "Brave research" },
-  { key: "stock_media", label: "Pixabay media" },
+  { key: "stock_media", label: "Pixabay / stock media" },
+  { key: "preview_generation", label: "Preview" },
+  { key: "runtime_qa", label: "Runtime QA" },
+  { key: "playwright", label: "Playwright" },
+  { key: "lighthouse", label: "Lighthouse" },
+  { key: "deployment_finalize", label: "Deployment / finalize" },
+  { key: "whisper", label: "Whisper", optional: true },
+  { key: "faiss", label: "FAISS", optional: true },
+  { key: "stable_diffusion", label: "Stable Diffusion", optional: true },
+  { key: "musicgen", label: "MusicGen", optional: true },
+  { key: "axe_core", label: "axe-core", optional: true },
+  { key: "playwright_traces", label: "Playwright traces", optional: true },
+  { key: "orchestration_graph", label: "Orchestration graph", optional: true },
 ];
 
 export default function CapabilityStatus({ compact = false }) {
@@ -101,18 +116,20 @@ function GenxModelSummary({ runtime }) {
 
 function getStatus(capability, key) {
   if (capability?.live_status === "decrypt_failed") return { label: "Needs settings cleanup", color: "#FF5722" };
+  if (capability?.fallback || capability?.source === "fallback") return { label: "Fallback", color: "#FFC107" };
   if (capability && capability.available === false) {
     return { label: capability.configured ? "Unavailable" : "Missing", color: capability.configured ? "#FF5722" : "#FFC107" };
   }
-  if (capability?.live_status === "live_ok" || capability?.live_status === "key_present_live_ok" || capability?.provider === "sandbox") return { label: "Available", color: "#00E676" };
+  if (capability?.live_status === "live_ok" || capability?.live_status === "key_present_live_ok" || capability?.provider === "sandbox") return { label: "Live", color: "#00E676" };
   if (capability?.live_status === "live_fail" || capability?.live_status === "key_present_live_fail" || capability?.live_status === "provider_timeout") {
     return { label: "Live check failed", color: "#FF5722" };
   }
   if (capability?.configured && (capability?.live_status === "not_tested" || capability?.live_status === "key_present_not_tested" || !capability?.live_status)) {
     return { label: "Configured", color: "#FFC107" };
   }
-  if (capability?.available) return { label: "Available", color: "#00E676" };
-  if (capability?.coming_soon) return { label: "Coming soon", color: "#A1A1AA" };
-  if (key === "preview_generation") return { label: "Available", color: "#00E676" };
-  return { label: key === "text_generation" || key === "repo_analysis" ? "Missing" : "Missing", color: "#FFC107" };
+  if (capability?.available) return { label: "Live", color: "#00E676" };
+  if (capability?.coming_soon) return { label: "Setup needed", color: "#A1A1AA" };
+  if (key === "preview_generation" || key === "runtime_qa" || key === "playwright" || key === "lighthouse" || key === "deployment_finalize") return { label: capability?.available === false ? "Unavailable" : "Live", color: capability?.available === false ? "#FF5722" : "#00E676" };
+  if (["whisper", "faiss", "stable_diffusion", "musicgen", "axe_core", "playwright_traces", "orchestration_graph"].includes(key)) return { label: "Setup needed", color: "#A1A1AA" };
+  return { label: "Setup needed", color: "#FFC107" };
 }
