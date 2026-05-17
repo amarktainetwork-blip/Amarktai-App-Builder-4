@@ -80,6 +80,14 @@ def get_build_contract(mode: str | None, *, prompt: str = "", quality_tier: str 
     )
 
 
+def is_static_preview_ready_workspace(workspace: str | Path, mode: str | None, *, prompt: str = "") -> bool:
+    ws = Path(workspace).resolve()
+    contract = get_build_contract(mode, prompt=prompt, quality_tier="standard")
+    if contract.project_type != "static-site":
+        return False
+    return all((ws / rel).exists() for rel in ("index.html", "styles.css", "preview-manifest.json"))
+
+
 def enforce_contract_files(project: dict[str, Any], prompt: str, plan: dict | None, files: list[dict]) -> tuple[list[dict], list[str]]:
     return enforce_static_contract_files(project, prompt, plan, files)
 
@@ -97,6 +105,8 @@ def final_gate_blockers(
     media_required: bool = False,
     motion_required: bool = False,
     runtime_required: bool = False,
+    allow_static_runtime_warnings: bool = False,
+    allow_static_media_fallback_warnings: bool = False,
 ) -> list[str]:
     """Return final filesystem-level blockers shared by API, dashboard, and finalize paths."""
     ws = Path(workspace).resolve()
@@ -111,6 +121,18 @@ def final_gate_blockers(
         if not (ws / rel).exists():
             blockers.append(f"Missing required file: {rel}")
     if media_required:
+        media_warning_only = False
+        if allow_static_media_fallback_warnings and is_static_preview_ready_workspace(ws, mode, prompt=prompt):
+            manifest_path = ws / "media_manifest.json"
+            if manifest_path.exists():
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    media_warning_only = (
+                        manifest.get("status") == "fallback"
+                        and manifest.get("reason") == "no_relevant_media_found"
+                    )
+                except Exception:
+                    media_warning_only = False
         if not (ws / "media_manifest.json").exists():
             blockers.append("Missing media_manifest.json.")
         media_dir = ws / "media"
@@ -120,11 +142,16 @@ def final_gate_blockers(
                 p for p in media_dir.rglob("*")
                 if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".mp4"}
             ])
-        if asset_count < 3:
+        if asset_count < 3 and not media_warning_only:
             blockers.append(f"Expected at least 3 persisted media assets; found {asset_count}.")
     if motion_required and not (ws / "motion_manifest.json").exists():
         blockers.append("Missing motion_manifest.json.")
-    if runtime_required:
+    runtime_warning_only = (
+        runtime_required
+        and allow_static_runtime_warnings
+        and is_static_preview_ready_workspace(ws, mode, prompt=prompt)
+    )
+    if runtime_required and not runtime_warning_only:
         for rel in contract.required_runtime_artifacts:
             if not (ws / rel).exists():
                 blockers.append(f"Missing runtime QA artifact: {rel}")

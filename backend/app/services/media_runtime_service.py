@@ -231,33 +231,58 @@ def _persist_local_runtime_fallbacks(
             break
 
 
+MEDIA_PROFILES: dict[str, dict[str, Any]] = {
+    "bakery": {
+        "triggers": {"bakery", "baker", "bread", "sourdough", "pastry", "pastries", "cafe", "coffee", "catering"},
+        "queries": ["artisan bakery", "sourdough bread", "pastry cafe", "coffee interior", "handcrafted pastry"],
+        "conflicts": {"software", "logistics", "courier", "transport", "programming", "app", "digital", "computer"},
+    },
+    "fashion": {
+        "triggers": {"fashion", "boutique", "runway", "couture", "atelier", "fabric", "wardrobe"},
+        "queries": ["editorial fashion", "luxury boutique", "runway fabric detail"],
+        "conflicts": {"software", "logistics", "courier", "warehouse", "truck", "computer"},
+    },
+    "fitness": {
+        "triggers": {"fitness", "gym", "workout", "strength", "trainer", "coaching", "pilates", "yoga"},
+        "queries": ["premium fitness studio", "strength coaching", "modern gym"],
+        "conflicts": {"software", "logistics", "courier", "transport", "programming", "computer"},
+    },
+    "software": {
+        "triggers": {"ai", "software", "dashboard", "automation", "repo", "developer", "coding", "app"},
+        "queries": ["artificial intelligence technology", "futuristic software dashboard", "digital media studio"],
+        "conflicts": set(),
+    },
+}
+
+
+def _media_profile(prompt: str, sections: list[str]) -> str:
+    text = re.sub(r"[^a-zA-Z0-9 ]+", " ", " ".join([prompt or "", " ".join(sections or [])])).lower()
+    tokens = set(text.split())
+    for name, profile in MEDIA_PROFILES.items():
+        if tokens & set(profile["triggers"]):
+            return name
+    return "generic"
+
+
 def _compact_media_query(prompt: str, sections: list[str]) -> str:
-    """Create a short stock-media query instead of sending an entire long user prompt to Pixabay."""
+    """Create a short industry-aware stock query instead of sending the raw user prompt to Pixabay."""
+    profile_name = _media_profile(prompt, sections)
+    if profile_name in MEDIA_PROFILES:
+        return MEDIA_PROFILES[profile_name]["queries"][0]
     text = re.sub(r"[^a-zA-Z0-9 ]+", " ", prompt or "").lower()
     stop = {
         "build", "create", "page", "landing", "website", "must", "include", "generated",
         "system", "itself", "using", "live", "with", "and", "the", "for", "our", "all",
-        "capabilities", "requirements", "mandatory", "production", "ready"
+        "capabilities", "requirements", "mandatory", "production", "ready", "responsive",
     }
     words = [w for w in text.split() if len(w) > 3 and w not in stop]
-    preferred = [w for w in words if w in {
-        "ai", "artificial", "intelligence", "software", "video", "voice", "audio",
-        "image", "robot", "technology", "coding", "automation", "dashboard",
-        "futuristic", "digital", "network", "studio", "creative"
-    }]
-    selected = preferred[:6] or words[:6] or ["artificial", "intelligence", "technology"]
-    return " ".join(selected[:8])
+    selected = words[:4] or ["premium", "editorial", "brand"]
+    return " ".join(selected[:6])
 
 
 def _media_queries(prompt: str, sections: list[str]) -> list[str]:
-    base = _compact_media_query(prompt, sections)
-    queries = [
-        base,
-        "artificial intelligence technology",
-        "futuristic software dashboard",
-        "digital media studio",
-        "robot artificial intelligence",
-    ]
+    profile_name = _media_profile(prompt, sections)
+    queries = list(MEDIA_PROFILES.get(profile_name, {}).get("queries", [])) or [_compact_media_query(prompt, sections)]
     seen: set[str] = set()
     out: list[str] = []
     for q in queries:
@@ -266,6 +291,52 @@ def _media_queries(prompt: str, sections: list[str]) -> list[str]:
             seen.add(q)
             out.append(q)
     return out
+
+
+def _asset_text(item: dict[str, Any]) -> str:
+    return " ".join(
+        str(item.get(key, ""))
+        for key in ("tags", "title", "attribution", "user", "description")
+    ).lower()
+
+
+def _explicitly_requested(prompt: str, term: str) -> bool:
+    text = (prompt or "").lower()
+    negative = re.search(rf"\b(?:do not|don't|without|no)\b[^\n.]*\b{re.escape(term)}\b", text)
+    return bool(term in text and not negative)
+
+
+def _asset_conflicts_with_prompt(item: dict[str, Any], prompt: str, sections: list[str]) -> str:
+    profile = MEDIA_PROFILES.get(_media_profile(prompt, sections), {})
+    conflicts = set(profile.get("conflicts", set()))
+    text = _asset_text(item)
+    for term in sorted(conflicts):
+        if term in text and not _explicitly_requested(prompt, term):
+            return term
+    return ""
+
+
+def _filter_relevant_pixabay_assets(
+    items: list[dict[str, Any]],
+    *,
+    prompt: str,
+    sections: list[str],
+    media_type: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    accepted: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for item in items:
+        conflict = _asset_conflicts_with_prompt(item, prompt, sections)
+        if conflict:
+            rejected.append({
+                "media_type": media_type,
+                "reason": f"conflicting_{conflict}",
+                "tags": item.get("tags", ""),
+                "title": item.get("title", ""),
+            })
+        else:
+            accepted.append(item)
+    return accepted, rejected
 
 
 async def execute_media_plan(
@@ -356,23 +427,47 @@ async def execute_media_plan(
     if _approved_asset_count(assets) < 3 and allow_stock_fallback and pixabay_api_key:
         selected_images: list[dict[str, Any]] = []
         selected_videos: list[dict[str, Any]] = []
+        rejected_assets: list[dict[str, Any]] = []
         for query in _media_queries(prompt, sections):
             try:
                 images = await search_images(query, pixabay_api_key, per_page=8, min_width=1024, min_height=576)
                 videos = await search_videos(query, pixabay_api_key, per_page=3, min_width=1024, min_height=576)
+                accepted_images, rejected_images = _filter_relevant_pixabay_assets(
+                    images,
+                    prompt=prompt,
+                    sections=sections,
+                    media_type="image",
+                )
+                accepted_videos, rejected_videos = _filter_relevant_pixabay_assets(
+                    videos,
+                    prompt=prompt,
+                    sections=sections,
+                    media_type="video",
+                )
+                rejected_assets.extend(rejected_images + rejected_videos)
                 attempts.append({
                     "provider": "pixabay_search",
                     "ok": True,
                     "query": query,
                     "images_found": len(images),
                     "videos_found": len(videos),
+                    "images_accepted": len(accepted_images),
+                    "videos_accepted": len(accepted_videos),
+                    "rejected_conflicts": len(rejected_images) + len(rejected_videos),
                 })
-                selected_images.extend(images)
-                selected_videos.extend(videos)
+                selected_images.extend(accepted_images)
+                selected_videos.extend(accepted_videos)
                 if len(selected_images) >= 6:
                     break
             except Exception as exc:
                 attempts.append({"provider": "pixabay_search", "ok": False, "query": query, "reason": str(exc)})
+        if rejected_assets:
+            attempts.append({
+                "provider": "pixabay_relevance_filter",
+                "ok": True,
+                "rejected": rejected_assets[:20],
+                "rejected_count": len(rejected_assets),
+            })
 
         seen_remote: set[str] = set()
         for item in selected_images:
@@ -423,7 +518,14 @@ async def execute_media_plan(
             except Exception as exc:
                 attempts.append({"provider": "pixabay_video", "ok": False, "remote_url": remote, "reason": str(exc)})
 
-    if _approved_asset_count(assets) < 3:
+    no_relevant_stock = (
+        allow_stock_fallback
+        and pixabay_api_key
+        and _approved_asset_count(assets) < 3
+        and any(a.get("provider") == "pixabay_search" and a.get("ok") for a in attempts)
+        and not any(a.get("provider") in {"pixabay", "pixabay_video"} and a.get("ok") for a in attempts)
+    )
+    if _approved_asset_count(assets) < 3 and not no_relevant_stock:
         _persist_local_runtime_fallbacks(
             workspace,
             prompt=prompt,
@@ -431,11 +533,19 @@ async def execute_media_plan(
             attempts=attempts,
             minimum_assets=3,
         )
+    elif no_relevant_stock:
+        attempts.append({
+            "provider": "media_relevance_policy",
+            "ok": True,
+            "status": "fallback",
+            "reason": "no_relevant_media_found",
+        })
 
     injected_files = inject_media_assets(workspace, assets) if assets else []
     manifest = {
         "project_id": project_id,
-        "status": "ready" if _approved_asset_count(assets) >= 3 else "failed",
+        "status": "ready" if _approved_asset_count(assets) >= 3 else ("fallback" if no_relevant_stock else "failed"),
+        "reason": "no_relevant_media_found" if no_relevant_stock else "",
         "assets": assets,
         "attempts": attempts,
         "asset_count": _approved_asset_count(assets),

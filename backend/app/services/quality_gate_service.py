@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from app.services.content_quality_service import check_content_quality
+from app.services.build_contract_service import is_static_preview_ready_workspace
 from app.services.runtime_qa_service import run_runtime_qa
 
 logger = logging.getLogger("amarktai.quality_gate")
@@ -63,6 +64,34 @@ _STRICT_WARNING_BLOCKERS = {
     "broken_assets",
     "template_contamination",
 }
+
+_OPTIONAL_RUNTIME_TOOLING = re.compile(
+    r"axe-core|lighthouse|chrome_path|chromium|chrome executable|playwright browser execution failed|playwright traces",
+    re.IGNORECASE,
+)
+
+
+def _runtime_qa_can_warn_for_static(ws: Path, mode: str, prompt: str, runtime_report: dict[str, Any]) -> bool:
+    """Static preview builds can be ready with QA warnings when only optional browser tooling is missing."""
+    if not is_static_preview_ready_workspace(ws, mode, prompt=prompt):
+        return False
+    blockers = [str(b) for b in runtime_report.get("blockers", [])]
+    if not blockers:
+        return False
+    return all(_OPTIONAL_RUNTIME_TOOLING.search(message) for message in blockers)
+
+
+def _media_fallback_can_warn_for_static(ws: Path, mode: str, prompt: str) -> bool:
+    if not is_static_preview_ready_workspace(ws, mode, prompt=prompt):
+        return False
+    manifest_path = ws / "media_manifest.json"
+    if not manifest_path.exists():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return manifest.get("status") == "fallback" and manifest.get("reason") == "no_relevant_media_found"
 
 _SECRET_PATTERNS = [
     r"(?i)(api[_-]?key|apikey|secret[_-]?key|private[_-]?key)\s*=\s*['\"][a-zA-Z0-9_\-\.]{16,}['\"]",
@@ -468,6 +497,18 @@ def run_quality_gate(
     }
     if strict or require_media:
         checks["media_manifest"] = check_media_manifest(ws)
+        if (
+            not checks["media_manifest"].get("ok")
+            and _media_fallback_can_warn_for_static(ws, mode, prompt)
+        ):
+            checks["media_manifest"] = {
+                **checks["media_manifest"],
+                "ok": False,
+                "blocker": False,
+                "warning": True,
+                "message": "No relevant stock media was found; static preview uses the CSS/SVG visual system and finalize remains locked.",
+                "finalize_locked": True,
+            }
     if strict or require_motion:
         checks["motion_manifest"] = check_motion_manifest(ws)
     runtime_report: dict[str, Any] | None = None
@@ -482,12 +523,21 @@ def run_quality_gate(
         except RuntimeError:
             runtime_report = run_runtime_qa(ws)
 
+        runtime_warn_only = _runtime_qa_can_warn_for_static(ws, mode, prompt, runtime_report)
         checks["runtime_qa"] = {
             "ok": bool(runtime_report.get("pass")),
-            "blocker": True,
-            "message": "; ".join(runtime_report.get("blockers", [])) or "Runtime QA failed.",
+            "blocker": not runtime_warn_only,
+            "warning": runtime_warn_only,
+            "message": (
+                "Runtime QA tooling warning: "
+                if runtime_warn_only else ""
+            ) + ("; ".join(runtime_report.get("blockers", [])) or "Runtime QA failed."),
             "report_path": runtime_report.get("report_path"),
+            "finalize_locked": runtime_warn_only,
         }
+        if runtime_warn_only:
+            runtime_report["policy"] = "static_preview_ready_with_runtime_warnings"
+            runtime_report["finalize_locked"] = True
 
     blockers = []
     warnings = []

@@ -131,7 +131,7 @@ export default function WorkspacePage() {
         failed_agent: evt.data.failed_agent ?? p.failed_agent,
       } : p);
       // Clear build phase when project finishes
-      if (["ready", "failed", "cancelled"].includes(evt.data.status)) {
+      if (["ready", "ready_with_warnings", "failed", "cancelled"].includes(evt.data.status)) {
         setBuildPhase(null);
         setCancelling(false);
         if (evt.data.status === "cancelled") toast.success("Build cancelled.");
@@ -433,7 +433,8 @@ export default function WorkspacePage() {
 
   const busy = project?.status === "running" || project?.status === "queued";
   const failed = project?.status === "failed" || project?.status === "cancelled";
-  const ready = project?.status === "ready";
+  const ready = project?.status === "ready" || project?.status === "ready_with_warnings";
+  const finalizableStatus = project?.status === "ready";
   // Phase 2: Gate finalize on validation scores
   const validation = lastValidation || project?.last_validation;
   // Phase 6: Also gate on coverage for repo-update intents
@@ -441,7 +442,7 @@ export default function WorkspacePage() {
   const updateIntent = project?.update_intent || coverageResult?.intent;
   const coverageOk = !updateIntent || !_COVERAGE_INTENTS.has(updateIntent)
     || (coverageResult?.coverageScore ?? 100) >= 80;
-  const canFinalize = ready && (!validation || validation.canFinalize !== false) && coverageOk;
+  const canFinalize = finalizableStatus && (!validation || validation.canFinalize !== false) && coverageOk;
 
   // Phase 3: action to fetch preview fallback on demand
   const runPreviewFallback = async () => {

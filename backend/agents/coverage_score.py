@@ -47,6 +47,8 @@ _MEDIA_REQ = re.compile(
     re.IGNORECASE,
 )
 
+_STATIC_MODES = {"landing_page", "website", "media_page", "static_landing_page", "static_multi_page_website"}
+
 
 # ── File presence checkers ────────────────────────────────────────────────────
 
@@ -147,6 +149,10 @@ def _has_css_file(files: list[dict]) -> bool:
     return any(f["path"].endswith(".css") for f in files)
 
 
+def _has_path(files: list[dict], path: str) -> bool:
+    return path in _paths(files)
+
+
 def _css_linked_in_pages(files: list[dict]) -> tuple[int, int]:
     """Return (total_html_pages, pages_with_linked_css_or_styling).
 
@@ -205,6 +211,8 @@ def compute_coverage_score(
     satisfied: list[str] = []
     total_points = 0
     earned_points = 0
+    normalized_mode = (mode or "web_app").replace("-", "_")
+    is_static_mode = normalized_mode in _STATIC_MODES
 
     def check(name: str, condition: bool, points: int, required: bool = True) -> None:
         nonlocal total_points, earned_points
@@ -225,10 +233,17 @@ def compute_coverage_score(
     _meta = {"requirements.md", "tech_stack.json"}
     app_files = [f for f in files if f["path"] not in _meta]
     check("app files generated", len(app_files) > 0, 15)
+    if is_static_mode:
+        check("index.html present", _has_path(files, "index.html"), 10)
+        check("styles.css present", _has_path(files, "styles.css"), 10)
+        check("README.md present", _has_readme(files), 6)
+        check("amarktai.project.json present", _has_path(files, "amarktai.project.json"), 6)
+        check("preview-manifest.json present", _has_path(files, "preview-manifest.json"), 6)
 
     # ── Core: README ──────────────────────────────────────────────────────
     readme_required = (
         _README_REQ.search(prompt) is not None
+        or is_static_mode
         or mode in ("full_stack", "dashboard", "admin_panel", "api_service",
                     "fullstack-saas", "automation_bot", "trading_bot_scaffold", "repo_fix")
         or intent in ("full_app_completion", "production_hardening", "full_rebuild_inside_repo")
@@ -237,31 +252,31 @@ def compute_coverage_score(
 
     # ── Auth ─────────────────────────────────────────────────────────────
     auth_required = bool(
-        _AUTH_REQ.search(prompt)
-        or mode in ("full_stack", "dashboard", "admin_panel", "fullstack-saas")
+        (not is_static_mode and _AUTH_REQ.search(prompt))
+        or normalized_mode in ("full_stack", "dashboard", "admin_panel", "fullstack_saas")
     )
     if auth_required:
         check("authentication implementation", _has_auth_files(files), 12)
 
     # ── Backend ──────────────────────────────────────────────────────────
     backend_required = bool(
-        _BACKEND_REQ.search(prompt)
-        or mode in ("full_stack", "api_service", "fullstack-saas")
+        (not is_static_mode and _BACKEND_REQ.search(prompt))
+        or normalized_mode in ("full_stack", "api_service", "fullstack_saas")
     )
     if backend_required:
         check("backend / API present", _has_backend(files), 10)
 
     # ── Docker ───────────────────────────────────────────────────────────
     docker_required = bool(
-        _DOCKER_REQ.search(prompt)
-        or mode in ("full_stack", "fullstack-saas")
+        (not is_static_mode and _DOCKER_REQ.search(prompt))
+        or normalized_mode in ("full_stack", "fullstack_saas")
     )
     if docker_required:
         check("Docker configuration present", _has_docker(files), 6)
         check(".env.example present", _has_env_example(files), 5)
 
     # ── PWA ──────────────────────────────────────────────────────────────
-    pwa_required = bool(_PWA_REQ.search(prompt) or mode == "pwa")
+    pwa_required = bool((not is_static_mode and _PWA_REQ.search(prompt)) or normalized_mode == "pwa")
     if pwa_required:
         check("manifest.json present", _has_manifest(files), 8)
         check("service worker present", _has_service_worker(files), 8)
@@ -281,7 +296,7 @@ def compute_coverage_score(
 
     # ── CSS stylesheet ────────────────────────────────────────────────────
     # For static/multi-page/landing modes, a stylesheet is mandatory.
-    css_required = mode in ("landing_page", "website", "media_page")
+    css_required = is_static_mode
     if css_required:
         has_css = any(f["path"].endswith(".css") for f in files) or bool(
             re.search(
@@ -300,7 +315,7 @@ def compute_coverage_score(
         check("responsive layout present", _has_responsive(files), 6)
 
     # ── Media ────────────────────────────────────────────────────────────
-    if _MEDIA_REQ.search(prompt):
+    if _MEDIA_REQ.search(prompt) and not is_static_mode:
         check("media/images present", _has_media(files), 6)
 
     # ── Full app completion: require substantial file count ───────────────
@@ -312,7 +327,7 @@ def compute_coverage_score(
     # ── CSS / Stylesheet checks for websites / landing pages ─────────────
     _WEBSITE_MODES = ("website", "landing_page", "media_page",
                       "multi-page-website", "multi_page_website")
-    is_website_mode = mode in _WEBSITE_MODES
+    is_website_mode = is_static_mode or mode in _WEBSITE_MODES
     total_html, linked_html = _css_linked_in_pages(files)
     css_check_required = is_website_mode or total_html >= 2
     if css_check_required:
