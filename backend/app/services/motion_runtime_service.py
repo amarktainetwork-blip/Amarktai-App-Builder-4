@@ -34,13 +34,23 @@ def patch_motion_files(files: list[dict[str, Any]], prompt: str = "", mode: str 
   .amarktai-motion-reveal { opacity: 0; transform: translateY(22px) scale(.985); animation: amarktaiReveal .85s cubic-bezier(.2,.8,.2,1) forwards; }
   .amarktai-motion-float { animation: amarktaiFloat 7s ease-in-out infinite; }
   .amarktai-motion-orbit { animation: amarktaiOrbit 18s linear infinite; transform-origin: center; }
+  .amarktai-motion-depth { transition: transform .35s ease, box-shadow .35s ease; will-change: transform; }
+  .amarktai-motion-depth:hover { transform: translateY(-6px) scale(1.01); box-shadow: 0 28px 90px rgba(0, 230, 118, .18); }
+  .amarktai-waveform-bar { transform-origin: bottom; animation: amarktaiWave 1.3s ease-in-out infinite; }
+  .amarktai-waveform-bar:nth-child(2n) { animation-delay: .14s; }
+  .amarktai-waveform-bar:nth-child(3n) { animation-delay: .28s; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .amarktai-motion-reveal, .amarktai-motion-float, .amarktai-motion-orbit { animation: none !important; opacity: 1 !important; transform: none !important; }
+  .amarktai-motion-reveal, .amarktai-motion-float, .amarktai-motion-orbit, .amarktai-waveform-bar { animation: none !important; opacity: 1 !important; transform: none !important; }
 }
 @keyframes amarktaiReveal { to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes amarktaiFloat { 0%,100% { transform: translate3d(0,0,0); } 50% { transform: translate3d(0,-14px,0); } }
 @keyframes amarktaiOrbit { to { transform: rotate(360deg); } }
+@keyframes amarktaiWave { 0%, 100% { transform: scaleY(.28); } 50% { transform: scaleY(1); } }
+.amarktai-motion-proof { position: relative; z-index: 1; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); padding: clamp(1rem, 3vw, 2rem); border: 1px solid rgba(255,255,255,.12); border-radius: 16px; background: rgba(255,255,255,.045); }
+.amarktai-motion-proof strong { display: block; font-size: clamp(1.7rem, 4vw, 3.4rem); line-height: 1; color: var(--color-accent, #00e676); }
+.amarktai-waveform { display: flex; align-items: end; gap: 4px; min-height: 44px; }
+.amarktai-waveform-bar { width: 7px; min-height: 9px; border-radius: 999px; background: linear-gradient(180deg, var(--color-cyan, #53d8ff), var(--color-accent, #00e676)); }
 """.strip()
 
     js = """
@@ -48,10 +58,29 @@ def patch_motion_files(files: list[dict[str, Any]], prompt: str = "", mode: str 
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   document.documentElement.dataset.motionRuntime = reduce ? 'reduced' : 'active';
   if (reduce) return;
-  document.querySelectorAll('section, .card, [data-motion-target]').forEach((el, index) => {
+  document.querySelectorAll('section, .card, article, [data-motion-target]').forEach((el, index) => {
     el.classList.add('amarktai-motion-reveal');
+    if (index % 3 === 0) el.classList.add('amarktai-motion-depth');
     el.style.animationDelay = `${Math.min(index * 70, 560)}ms`;
   });
+  const counters = document.querySelectorAll('[data-motion-counter]');
+  counters.forEach((node) => {
+    const target = Number(node.getAttribute('data-motion-counter') || '0');
+    const start = performance.now();
+    const tick = (now) => {
+      const progress = Math.min(1, (now - start) / 1100);
+      node.textContent = String(Math.round(target * progress));
+      if (progress < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  const parallaxNodes = document.querySelectorAll('[data-motion-parallax]');
+  window.addEventListener('scroll', () => {
+    const offset = window.scrollY * 0.035;
+    parallaxNodes.forEach((node, index) => {
+      node.style.transform = `translate3d(0, ${Math.sin(offset + index) * 10}px, 0)`;
+    });
+  }, { passive: true });
   const hero = document.querySelector('main, .hero, section');
   if (hero && !document.querySelector('[data-amarktai-motion-scene]')) {
     const scene = document.createElement('canvas');
@@ -100,6 +129,22 @@ def patch_motion_files(files: list[dict[str, Any]], prompt: str = "", mode: str 
 
     if "index.html" in by_path:
         html = by_path["index.html"].get("content", "")
+        if "data-amarktai-motion-scene" not in html:
+            html = re.sub(r"<section(\s|>)", r"<section data-amarktai-motion-scene\1", html, count=1, flags=re.IGNORECASE)
+        if "data-motion-runtime" not in html:
+            html = re.sub(r"<body([^>]*)>", r"<body\1 data-motion-runtime=\"pending\">", html, count=1, flags=re.IGNORECASE)
+        if "amarktai-motion-proof" not in html:
+            proof = """
+  <section id="motion-intelligence" class="amarktai-motion-proof" data-amarktai-motion-scene data-motion-parallax="subtle" aria-label="Motion runtime proof">
+    <div><strong data-motion-counter="28">0</strong><span>coordinated agents</span></div>
+    <div><strong data-motion-counter="3">0</strong><span>browser viewport checks</span></div>
+    <div class="amarktai-waveform" data-motion-waveform aria-hidden="true"><span class="amarktai-waveform-bar"></span><span class="amarktai-waveform-bar"></span><span class="amarktai-waveform-bar"></span><span class="amarktai-waveform-bar"></span><span class="amarktai-waveform-bar"></span><span class="amarktai-waveform-bar"></span></div>
+  </section>
+""".rstrip()
+            if "</main>" in html:
+                html = html.replace("</main>", f"{proof}\n</main>", 1)
+            else:
+                html = html.replace("</body>", f"{proof}\n</body>", 1)
         if 'href="styles.css"' not in html and css_path == "styles.css":
             html = html.replace("</head>", '  <link rel="stylesheet" href="styles.css">\n</head>')
         if 'src="script.js"' not in html and js_path == "script.js":
@@ -113,6 +158,12 @@ def patch_motion_files(files: list[dict[str, Any]], prompt: str = "", mode: str 
         "requires_3d": requires_3d,
         "libraries": ["css_keyframes", "canvas_runtime"] + (["three_js_cdn_ready"] if requires_3d else ["gsap_ready"]),
         "changed_files": sorted(set(changed)),
+        "choreography": [
+            {"phase": "opening", "runtime": "parallax hero reveal", "selectors": ["[data-amarktai-motion-scene]"]},
+            {"phase": "capability_proof", "runtime": "staggered reveal and hover depth", "selectors": ["section", "article", ".card"]},
+            {"phase": "evidence", "runtime": "animated counters", "selectors": ["[data-motion-counter]"]},
+            {"phase": "voice_media", "runtime": "waveform animation", "selectors": ["[data-motion-waveform]", ".amarktai-waveform-bar"]},
+        ],
         "reduced_motion_supported": True,
         "runtime_validation_selector": "[data-amarktai-motion-scene], [data-motion-runtime]",
         "generated_at": _now(),

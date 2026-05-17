@@ -82,6 +82,7 @@ from app.services.quality_gate_service import run_quality_gate
 from app.services.media_runtime_service import execute_media_plan
 from app.services.content_quality_service import run_content_quality_check_for_files
 from app.services.motion_runtime_service import patch_motion_files, prompt_requires_motion
+from app.services.voice_avatar_runtime_service import patch_voice_avatar_files, prompt_requires_voice_avatar
 from app.services.build_contract_service import final_gate_blockers
 from settings_store import safe_get_secret
 
@@ -2261,6 +2262,34 @@ class Orchestrator:
                 "completed",
                 f"Motion/3D agent patched {len(motion_manifest.get('changed_files', []))} file(s).",
                 meta=motion_manifest,
+            )
+
+        if prompt_requires_voice_avatar(user_prompt, mode):
+            await self._record_event("voice_avatar", "started", "Voice/avatar runtime patching generated files.")
+            voice_files_before = await self.fs.list_full()
+            voice_files, voice_manifest = patch_voice_avatar_files(
+                voice_files_before,
+                prompt=user_prompt,
+                mode=mode,
+                capabilities=(project_meta.get("capabilities") or {}),
+            )
+            before_paths = {f.get("path"): f.get("content") for f in voice_files_before}
+            for item in voice_files:
+                path = item.get("path", "")
+                if not path or before_paths.get(path) == item.get("content"):
+                    continue
+                await self.fs.write(path, item.get("content", ""), item.get("language", "text"))
+                await self.emit({"type": "file_written", "data": {"path": path}})
+            await self.db.projects.update_one(
+                {"id": self.project_id},
+                {"$set": {"voice_avatar_manifest": voice_manifest, "updated_at": _now()}},
+            )
+            await self.emit({"type": "voice_avatar_manifest", "data": voice_manifest})
+            await self._record_event(
+                "voice_avatar",
+                "completed" if voice_manifest.get("status") == "ready" else "skipped",
+                voice_manifest.get("fallback_message") or voice_manifest.get("reason") or "Voice/avatar runtime evaluated.",
+                meta=voice_manifest,
             )
 
         # Post-validation readiness checks

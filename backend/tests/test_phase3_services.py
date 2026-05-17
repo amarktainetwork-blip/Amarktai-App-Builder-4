@@ -1091,6 +1091,83 @@ class TestRuntimeMediaMotionServices:
         assert "script.js" in paths
         assert manifest["reduced_motion_supported"] is True
 
+    def test_motion_patch_adds_unified_choreography_selectors(self):
+        from app.services.motion_runtime_service import patch_motion_files
+
+        files, manifest = patch_motion_files(
+            [
+                {"path": "index.html", "content": "<html><head></head><body><main><section id='hero'><h1>Amarktai</h1></section></main></body></html>", "language": "html"},
+                {"path": "styles.css", "content": ":root{--color-accent:#00e676}", "language": "css"},
+                {"path": "script.js", "content": "", "language": "javascript"},
+            ],
+            prompt="cinematic parallax animated sales agent website",
+            mode="landing_page",
+        )
+
+        by_path = {f["path"]: f["content"] for f in files}
+        assert "data-motion-runtime" in by_path["index.html"]
+        assert "data-motion-counter" in by_path["index.html"]
+        assert "data-motion-waveform" in by_path["index.html"]
+        assert "data-motion-parallax" in by_path["index.html"]
+        assert "amarktaiWave" in by_path["styles.css"]
+        assert "[data-motion-counter]" in by_path["script.js"]
+        phases = {item["phase"] for item in manifest["choreography"]}
+        assert {"opening", "capability_proof", "evidence", "voice_media"} <= phases
+
+    def test_voice_avatar_runtime_patches_static_files_truthfully(self):
+        from app.services.voice_avatar_runtime_service import patch_voice_avatar_files
+
+        files, manifest = patch_voice_avatar_files(
+            [
+                {"path": "index.html", "content": "<html><head></head><body><main><section id='hero'>Hi</section></main></body></html>", "language": "html"},
+                {"path": "styles.css", "content": "", "language": "css"},
+                {"path": "script.js", "content": "", "language": "javascript"},
+            ],
+            prompt="Create an AI sales-agent landing page with voice and avatar conversation",
+            mode="landing_page",
+            capabilities={"voice_generation": {"available": False}, "avatar_generation": {"available": False}},
+        )
+
+        by_path = {f["path"]: f["content"] for f in files}
+        assert manifest["status"] == "ready"
+        assert manifest["provider_backed_voice_live"] is False
+        assert "data-voice-avatar-runtime" in by_path["index.html"]
+        assert "navigator.mediaDevices" in by_path["script.js"]
+        assert "speechSynthesis" in by_path["script.js"]
+        assert "voice_avatar_manifest.json" in by_path
+
+    def test_voice_avatar_runtime_skips_with_reason_when_not_requested(self):
+        from app.services.voice_avatar_runtime_service import patch_voice_avatar_files
+
+        files = [{"path": "index.html", "content": "<html><body></body></html>", "language": "html"}]
+        patched, manifest = patch_voice_avatar_files(files, prompt="Create a simple FAQ page", mode="website")
+        assert patched == files
+        assert manifest["status"] == "skipped"
+        assert "reason" in manifest
+
+    def test_repo_workbench_blocks_empty_prs(self):
+        from app.services.repo_workflow_guard_service import diff_has_changes, repo_pr_blockers
+
+        project = {
+            "github": {"owner": "amarktainetwork-blip", "repo": "Amarktai-App-Builder-4"},
+            "diff_summary": {"files_changed": 0, "file_diffs": []},
+            "validation_state": {"status": "passed"},
+            "coverage_score": {"qualityOk": True},
+        }
+        assert diff_has_changes(project["diff_summary"]) is False
+        assert any("empty pull requests" in blocker for blocker in repo_pr_blockers(project))
+
+    def test_repo_workbench_allows_changed_validated_pr_state(self):
+        from app.services.repo_workflow_guard_service import repo_pr_blockers
+
+        project = {
+            "github": {"owner": "amarktainetwork-blip", "repo": "Amarktai-App-Builder-4"},
+            "diff_summary": {"files_changed": 1, "file_diffs": [{"path": "README.md", "action": "modified"}]},
+            "validation_state": {"status": "passed"},
+            "coverage_score": {"qualityOk": True},
+        }
+        assert repo_pr_blockers(project) == []
+
     def test_media_injects_persisted_assets(self, tmp_path):
         from app.services.media_runtime_service import inject_media_assets
         (tmp_path / "index.html").write_text("<html><body><main></main></body></html>")
