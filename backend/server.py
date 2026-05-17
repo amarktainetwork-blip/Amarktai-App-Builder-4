@@ -1242,11 +1242,10 @@ def _coder_tier(tier: str, tiers: dict) -> str | None:
 
 @secured.get("/models/router")
 async def models_router(tier: str = "standard") -> dict:
-    """Return the model routed for a given tier (cheap|balanced|premium).
+    """Return the model routed for a given public tier (standard|premium).
 
-    cheap     → edits/lightweight model
-    balanced  → research/fast model (default)
-    premium   → reasoning/coding model
+    standard → efficient high-quality model routes
+    premium  → best available reasoning/coding routes
 
     Returns the full agent-role model map as specified in the product spec:
       research, planning, architecture, frontend_coding, backend_coding,
@@ -1267,8 +1266,6 @@ async def models_router(tier: str = "standard") -> dict:
     coding_model = _coder_tier(tier_lower, tiers)
     fast_model = tiers.get("research", {}).get("model")
     premium_model = tiers.get("reasoning", {}).get("model")
-    cheap_model = tiers.get("edits", {}).get("model")
-
     # Media generation: placeholder-only unless premium confirmed at generation time
     if tier_lower == "premium":
         media_model = premium_model
@@ -1343,7 +1340,7 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
 
     Explicit media source choices take priority over automatic selection:
       "pixabay"  → Pixabay stock images/videos (requires PIXABAY_API_KEY)
-      "ai"       → GenX/Qwen AI image generation (requires balanced/premium tier)
+      "ai"       → GenX/Qwen AI image generation when provider capability is live
       "css_svg"  → CSS + SVG visual compositions only; no external image URLs
       "auto"     → best available option (original auto-selection logic)
     """
@@ -1398,6 +1395,15 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
                 "CSS gradients and inline SVG visual compositions only. "
                 "No external image URLs or API calls will be made."
             ),
+        }
+
+    if req == "uploaded":
+        return {
+            "mode": "uploaded",
+            "confirmed": True,
+            "models_used": [],
+            "source": "uploaded",
+            "notes": "Use media already persisted in the Media Studio. Missing uploads are shown as setup-needed, not fake generated media.",
         }
 
     # ── Auto mode (original logic) ─────────────────────────────────────────────
@@ -2273,7 +2279,7 @@ async def iterate_project(project_id: str, body: IterateBody, claims: dict = Dep
 
     Request body:
         message: the change request (required)
-        tier:    quality tier override (optional: cheap|balanced|premium)
+        tier:    quality tier override (optional: standard|premium; legacy values are normalized)
         mediaSource: media source hint (optional)
 
     Response:
@@ -2316,8 +2322,7 @@ async def assistant_message(body: AssistantMessage, claims: dict = Depends(requi
     """Amarktai Wingman — help with prompts, modes, failures, and next steps.
 
     If project_id is provided, the assistant uses the project's current state
-    to answer context-aware questions. Uses a cheap/fast model to avoid burning
-    premium credits on assistant queries.
+    to answer context-aware questions. Uses an efficient model route for assistant queries.
     """
     if not await _runtime_secret("GENX_API_KEY"):
         raise HTTPException(503, "GENX_API_KEY is required for Amarktai Wingman.")
@@ -3745,7 +3750,7 @@ async def orchestration_health() -> dict:
             "preview_generation": preview_available,
         },
         "premium_output_enforced": True,
-        "cheap_mode_still_premium": True,
+        "standard_mode_still_high_quality": True,
         "motion_trigger_keywords": sorted(MOTION_TRIGGER_KEYWORDS),
         "checked_at": _now(),
     }
@@ -3785,7 +3790,7 @@ async def detect_build_mode_for_prompt(
         "needs_backend": bool(classification.auth_required or mode in ("full_stack", "api_service", "dashboard", "admin_panel")),
         "needs_security": bool(classification.auth_required or mode in ("full_stack", "api_service", "dashboard", "admin_panel")),
         "premium_required": True,
-        "cheap_mode_design_gated": True,
+        "standard_mode_design_gated": True,
         "detected_at": _now(),
     }
 

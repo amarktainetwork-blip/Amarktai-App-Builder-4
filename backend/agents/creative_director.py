@@ -235,7 +235,7 @@ def run_creative_director(
     mode: str = "landing_page",
     audience: str = "",
     industry: str = "",
-    tier: str = "balanced",
+    tier: str = "standard",
     design_direction: dict | None = None,
     previous_signatures: list[dict] | None = None,
 ) -> DesignBlueprint:
@@ -252,7 +252,7 @@ def run_creative_director(
     industry:
         Optional industry label for context.
     tier:
-        Quality tier (``"cheap"`` | ``"balanced"`` | ``"premium"``).
+        Quality tier (``"standard"`` | ``"premium"``). Legacy aliases are normalized upstream.
     design_direction:
         Pre-computed design direction dict from ``design_engine``.
         If omitted, one is generated from the prompt.

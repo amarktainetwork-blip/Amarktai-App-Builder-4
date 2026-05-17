@@ -55,10 +55,13 @@ export default function LivePreview({ projectId, refreshKey, projectStatus, proj
               </p>
             )}
             {projectError && (
-              <p className="font-mono text-[11px] text-amk-fg2 break-words">{projectError}</p>
+              <details className="text-left">
+                <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-wider text-amk-fg3">Debug details</summary>
+                <p className="mt-2 font-mono text-[11px] text-amk-fg2 break-words">{projectError}</p>
+              </details>
             )}
             <p className="font-mono text-[11px] text-amk-fg3">
-              No preview files were generated because the build failed.
+              Open Files / Code to inspect any generated artifacts. Use Retry Repair when files exist, or Restart Build for a clean run.
             </p>
           </div>
         </div>

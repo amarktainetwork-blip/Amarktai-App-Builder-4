@@ -196,7 +196,51 @@ test("project list has build mode hints", () => {
     "utf8"
   );
   expect(content).toMatch(/landing_page/);
-  expect(content).toMatch(/Static, image-rich page/);
+  expect(content).toMatch(/A polished one-page website/);
+});
+
+test("new build and project list expose only Standard and Premium user tiers", () => {
+  const fs = require("fs");
+  const files = [
+    require.resolve("../pages/dashboard/NewBuildPage.jsx"),
+    require.resolve("../pages/ProjectList.jsx"),
+  ];
+  const tierSource = fs.readFileSync(require.resolve("../lib/tiers.js"), "utf8");
+  expect(tierSource).toMatch(/Standard/);
+  expect(tierSource).toMatch(/Premium/);
+  for (const file of files) {
+    const content = fs.readFileSync(file, "utf8");
+    const oldBasic = "Che" + "ap";
+    const oldMiddle = "Balan" + "ced";
+    expect(content).not.toMatch(new RegExp(`\\b${oldBasic}\\b|\\b${oldMiddle}\\b|${oldBasic.toLowerCase()}\\/${oldMiddle.toLowerCase()}|${oldMiddle.toLowerCase()}\\/premium`, "i"));
+  }
+});
+
+test("new build exposes go-live build modes and media sources", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/dashboard/NewBuildPage.jsx"),
+    "utf8"
+  );
+  [
+    "Landing Page",
+    "Website",
+    "PWA",
+    "Web App",
+    "Dashboard",
+    "Full-Stack App",
+    "API Service",
+    "Repo Fix",
+    "Automation Bot",
+    "Admin/Internal Tool",
+    "Ecommerce Scaffold",
+    "Booking/Portal",
+    "AI Chat/RAG App",
+    "CRM/Dashboard",
+    "AI media",
+    "Stock/free media",
+    "Uploaded media",
+  ].forEach((label) => expect(content).toMatch(new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))));
 });
 
 // ── Multi-page warning ────────────────────────────────────────────────────────
@@ -218,9 +262,53 @@ test("media choice has improved descriptions", () => {
     require.resolve("../pages/dashboard/NewBuildPage.jsx"),
     "utf8"
   );
-  expect(content).toMatch(/best configured source/);
-  expect(content).toMatch(/Requires PIXABAY_API_KEY/);
+  expect(content).toMatch(/best live source/);
+  expect(content).toMatch(/Stock\/free media/);
   expect(content).toMatch(/No external media dependency/);
+});
+
+test("workspace exposes go-live tabs and friendly failure panel", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../pages/Workspace.jsx"),
+    "utf8"
+  );
+  [
+    "Prompt / Brief",
+    "Build Timeline",
+    "Media Studio",
+    "Runtime QA",
+    "Repo Workbench",
+    "Deploy / Finalize",
+    "friendly-error-panel",
+  ].forEach((label) => expect(content).toMatch(new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))));
+});
+
+test("capability center shows runtime and optional setup-needed capabilities", () => {
+  const fs = require("fs");
+  const content = fs.readFileSync(
+    require.resolve("../components/CapabilityStatus.jsx"),
+    "utf8"
+  );
+  [
+    "Avatar video",
+    "Runtime QA",
+    "Playwright",
+    "Lighthouse",
+    "Whisper",
+    "FAISS",
+    "Stable Diffusion",
+    "Setup needed",
+  ].forEach((label) => expect(content).toMatch(new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))));
+});
+
+test("repo import uses from-repo route and friendly import errors", () => {
+  const fs = require("fs");
+  const page = fs.readFileSync(require.resolve("../pages/ProjectList.jsx"), "utf8");
+  const api = fs.readFileSync(require.resolve("../lib/amk-api.js"), "utf8");
+  expect(page).toMatch(/Projects\.fromRepo/);
+  expect(page).toMatch(/friendlyRepoImportError/);
+  expect(api).toMatch(/\/projects\/from-repo/);
 });
 
 // ── Smoke script ──────────────────────────────────────────────────────────────

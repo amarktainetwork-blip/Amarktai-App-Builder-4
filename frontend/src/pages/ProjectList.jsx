@@ -12,6 +12,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Projects, System, Clarify } from "@/lib/amk-api";
 import { useAuth } from "@/lib/auth-context";
 import { readinessBlockMessage, readinessBlocksBuild } from "@/lib/readiness";
+import { QUALITY_TIERS, normalizeQualityTier, tierLabel } from "@/lib/tiers";
 
 const PROMPT_TEMPLATES = [
   { name: "Lead Desk",   prompt: "Create a worldwide lead-gen PWA called 'Lead Desk' with a bright design, hero search, and a contact-capture form." },
@@ -27,8 +28,8 @@ export default function ProjectListPage() {
   const [tab, setTab] = useState("prompt");
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [mode, setMode] = useState("web_app");
-  const [qualityTier, setQualityTier] = useState("balanced");
+  const [mode, setMode] = useState("landing_page");
+  const [qualityTier, setQualityTier] = useState("standard");
   const [mediaChoice, setMediaChoice] = useState("auto");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [upgradeModal, setUpgradeModal] = useState(null);
@@ -60,7 +61,7 @@ export default function ProjectListPage() {
       const mediaRequirements = mediaChoice !== "auto" ? mediaChoice : undefined;
       const proj = await Projects.create(name.trim(), enrichedPrompt.trim(), {
         mode,
-        quality_tier: qualityTier,
+        quality_tier: normalizeQualityTier(qualityTier),
         upgrade_confirmation_acknowledged: upgradeAcknowledged,
         media_requirements: mediaRequirements,
         ...extraParams,
@@ -128,7 +129,7 @@ export default function ProjectListPage() {
     const ep = upgradeModal?.enrichedPrompt || prompt;
     const params = upgradeModal?.extraParams || {};
     setUpgradeModal(null);
-    if (tier) setQualityTier(tier);
+    if (tier) setQualityTier(normalizeQualityTier(tier));
     doCreate(ep, true, params);
   };
 
@@ -151,7 +152,7 @@ export default function ProjectListPage() {
       toast.success(`Imported ${proj.name}`);
       nav(`/workspace/${proj.id}`);
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Import failed");
+      toast.error(friendlyRepoImportError(e.response?.data?.detail || e.message));
     } finally {
       setCreating(false);
     }
@@ -166,7 +167,7 @@ export default function ProjectListPage() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Clarification modal — shown before starting a build when prompt is vague */}
+      {/* Clarification modal - shown before starting a build when prompt is vague */}
       {clarification && (
         <ClarificationModal
           questions={clarification.questions}
@@ -202,7 +203,7 @@ export default function ProjectListPage() {
             </h1>
             <p className="text-sm text-amk-fg2 mb-8 leading-relaxed">
               Describe a landing page, multi-page website, PWA, dashboard, API, or SaaS app.
-              Four AI agents plan, code, review, and validate — files stream live.
+              Four AI agents plan, code, review, and validate - files stream live.
             </p>
             <ReadinessStrip readiness={readiness} onRefresh={refreshReadiness} />
 
@@ -246,28 +247,29 @@ export default function ProjectListPage() {
                     onChange={(e) => setMode(e.target.value)}
                     className="w-full bg-amk-panel border border-amk-line h-10 px-3 font-mono text-sm focus:outline-none focus:border-white text-amk-fg"
                   >
-                    <optgroup label="── Static / Marketing ──">
-                      <option value="landing_page">Landing page — static, images, hero</option>
-                      <option value="website">Website — multi-section, content site</option>
-                      <option value="media_page">Media page — image/video/music friendly</option>
+                    <optgroup label="Static and marketing">
+                      <option value="landing_page">Landing Page - one polished page</option>
+                      <option value="website">Website - multi-section or multi-page site</option>
                     </optgroup>
-                    <optgroup label="── Apps ──">
-                      <option value="web_app">Web app — interactive, localStorage</option>
-                      <option value="pwa">Progressive Web App (PWA) — installable</option>
+                    <optgroup label="Apps">
+                      <option value="pwa">PWA - installable mobile-friendly app</option>
+                      <option value="web_app">Web App - interactive browser app</option>
+                      <option value="dashboard">Dashboard - charts, tables, operational UI</option>
                     </optgroup>
-                    <optgroup label="── Full Stack / Services ──">
-                      <option value="full_stack">Full-stack app — frontend + backend + DB</option>
-                      <option value="dashboard">Dashboard — charts, tables, admin UI</option>
-                      <option value="admin_panel">Admin panel — CRUD, user management</option>
-                      <option value="api_service">API / Backend service — REST + health endpoint</option>
+                    <optgroup label="Full stack and services">
+                      <option value="full_stack">Full-Stack App - frontend, backend, database notes</option>
+                      <option value="api_service">API Service - REST API scaffold</option>
+                      <option value="automation_bot">Automation Bot - worker or scheduler scaffold</option>
+                      <option value="admin_panel">Admin/Internal Tool - internal CRUD and operations</option>
                     </optgroup>
-                    <optgroup label="── Bots / Automation ──">
-                      <option value="automation_bot">Automation bot — worker/scheduler scaffold</option>
-                      <option value="trading_bot_scaffold">Trading bot scaffold — paper mode, risk controls</option>
+                    <optgroup label="Business scaffolds">
+                      <option value="ecommerce_scaffold">Ecommerce Scaffold - catalog and checkout scaffold</option>
+                      <option value="booking_portal">Booking/Portal - booking flow and portal scaffold</option>
+                      <option value="ai_chat_rag_app">AI Chat/RAG App - chat and knowledge scaffold</option>
+                      <option value="crm_dashboard">CRM/Dashboard - pipeline and account dashboard</option>
                     </optgroup>
-                    <optgroup label="── Research / Import ──">
-                      <option value="research">Research — brief + recommended build prompt</option>
-                      <option value="repo_fix">Repo fix — imported repo edits only</option>
+                    <optgroup label="Repo">
+                      <option value="repo_fix">Repo Fix - imported repo repair workflow</option>
                     </optgroup>
                   </select>
                   <BuildModeHint mode={mode} />
@@ -275,12 +277,8 @@ export default function ProjectListPage() {
 
                   {/* Quality tier selector */}
                   <FieldLabel>Quality tier</FieldLabel>
-                  <div className="grid grid-cols-3 gap-2" data-testid="quality-tier-selector">
-                    {[
-                      { id: "cheap", label: "Cheap", desc: "Fast · simple · low credit" },
-                      { id: "balanced", label: "Balanced", desc: "Recommended · best value" },
-                      { id: "premium", label: "Premium", desc: "Best for complex apps" },
-                    ].map((t) => (
+                  <div className="grid grid-cols-2 gap-2" data-testid="quality-tier-selector">
+                    {QUALITY_TIERS.map((t) => (
                       <button
                         key={t.id}
                         type="button"
@@ -293,7 +291,7 @@ export default function ProjectListPage() {
                         }`}
                       >
                         <div className="font-mono text-xs font-medium">{t.label}</div>
-                        <div className="text-[10px] text-amk-fg3 leading-relaxed mt-0.5">{t.desc}</div>
+                        <div className="text-[10px] text-amk-fg3 leading-relaxed mt-0.5">{t.description}</div>
                       </button>
                     ))}
                   </div>
@@ -312,10 +310,10 @@ export default function ProjectListPage() {
                 {upgradeModal && (
                   <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
                     <div className="bg-amk-panel border border-amk-line max-w-md w-full p-6 space-y-4">
-                      <div className="font-mono text-[10px] uppercase tracking-wider text-agent-scout">[ upgrade suggested ]</div>
+                      <div className="font-mono text-[10px] uppercase tracking-wider text-agent-scout">[ better fit suggested ]</div>
                       <p className="text-sm text-amk-fg leading-relaxed">{upgradeModal.upgrade_reason}</p>
                       <p className="text-sm text-amk-fg2">
-                        Recommended: <span className="text-white font-mono">{upgradeModal.recommended_tier}</span>
+                        Recommended: <span className="text-white font-mono">{tierLabel(upgradeModal.recommended_tier)}</span>
                         {" "}tier for this <span className="text-white">{upgradeModal.complexity}</span> project.
                       </p>
                       <div className="flex gap-2">
@@ -324,7 +322,7 @@ export default function ProjectListPage() {
                           onClick={handleUpgradeAndCreate}
                           className="flex-1 bg-amk-accent text-black hover:bg-emerald-300 font-mono text-xs h-9"
                         >
-                          Upgrade to {upgradeModal.recommended_tier}
+                          Use {tierLabel(upgradeModal.recommended_tier)}
                         </Button>
                         <Button
                           data-testid="upgrade-continue-btn"
@@ -356,7 +354,7 @@ export default function ProjectListPage() {
                     placeholder="https://github.com/owner/repo"
                     className="w-full bg-amk-panel border border-amk-line h-10 px-3 font-mono text-sm focus:outline-none focus:border-white text-amk-fg placeholder:text-amk-fg3"
                   />
-                  <FieldLabel>Branch <span className="text-amk-fg3 normal-case">(optional — defaults to repo's default)</span></FieldLabel>
+                  <FieldLabel>Branch <span className="text-amk-fg3 normal-case">(optional - defaults to repo's default)</span></FieldLabel>
                   <input
                     data-testid="repo-branch-input"
                     value={branch}
@@ -443,6 +441,15 @@ function FieldLabel({ children }) {
   return <label className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3 block mb-1.5">{children}</label>;
 }
 
+function friendlyRepoImportError(detail) {
+  const raw = typeof detail === "string" ? detail : JSON.stringify(detail || "");
+  if (!raw) return "Repo import failed. Check the URL, branch, and GitHub settings.";
+  if (/400|bad request/i.test(raw)) return "Repo import could not start. Check that the GitHub URL and branch are valid.";
+  if (/private|auth|token|permission|not found/i.test(raw)) return "Repo access failed. Public repos import directly; private repos need a GitHub PAT in Settings.";
+  if (/decide_stack|takes 0 positional arguments/i.test(raw)) return "Repo imported, but stack detection hit an internal mismatch. Try again after refreshing.";
+  return raw;
+}
+
 function ReadinessStrip({ readiness, onRefresh }) {
   const overall = readiness?.overall || "FAIL";
   const genx = readiness?.checks?.find((c) => c.name.toLowerCase().includes("genx"));
@@ -511,22 +518,28 @@ const MEDIA_OPTIONS = [
     icon: <Cpu className="w-3.5 h-3.5" strokeWidth={1.5} />,
   },
   {
-    id: "AI-generated images (GenX)",
-    label: "AI Images",
-    desc: "Use configured GenX/Qwen image models when available.",
+    id: "ai",
+    label: "AI media",
+    desc: "Use configured GenX/Qwen media providers when live.",
     icon: <Sparkles className="w-3.5 h-3.5" strokeWidth={1.5} />,
   },
   {
-    id: "Stock images from Pixabay",
-    label: "Pixabay",
-    desc: "Use Pixabay stock images/videos. Requires Pixabay API key.",
+    id: "pixabay",
+    label: "Stock/free media",
+    desc: "Use Pixabay stock images/videos when available.",
     icon: <Image className="w-3.5 h-3.5" strokeWidth={1.5} />,
   },
   {
-    id: "SVG / CSS visuals only (no external images)",
+    id: "css_svg",
     label: "CSS/SVG only",
     desc: "No external images. Generate premium CSS/SVG visuals.",
     icon: <Palette className="w-3.5 h-3.5" strokeWidth={1.5} />,
+  },
+  {
+    id: "uploaded",
+    label: "Uploaded media",
+    desc: "Use assets you provide through Media Studio.",
+    icon: <Image className="w-3.5 h-3.5" strokeWidth={1.5} />,
   },
 ];
 
@@ -557,14 +570,14 @@ function MediaChoiceSelect({ value, onChange }) {
           </button>
         ))}
       </div>
-      {value === "Stock images from Pixabay" && (
+      {value === "pixabay" && (
         <p className="font-mono text-[10px] text-amk-fg3 mt-1.5">
           Requires <span className="text-amk-fg">PIXABAY_API_KEY</span> in Settings. Attribution is shown on all Pixabay assets.
         </p>
       )}
-      {value === "AI-generated images (GenX)" && (
+      {value === "ai" && (
         <p className="font-mono text-[10px] text-amk-fg3 mt-1.5">
-          Uses GenX image models. Requires balanced/premium tier and explicit confirmation before generating.
+          Uses live GenX/Qwen image models when available. Tier changes depth and QA, not feature access.
         </p>
       )}
     </div>
@@ -582,7 +595,7 @@ function MultiPageWarning({ prompt, mode }) {
       className="font-mono text-[10px] mt-1.5 leading-relaxed"
       style={{ color: "#FFC107" }}
     >
-      ⚠ Your prompt mentions multiple pages. Consider switching build mode to{" "}
+      Your prompt mentions multiple pages. Consider switching build mode to{" "}
       <strong>Website</strong> for a complete multi-page site with separate pages.
     </p>
   );

@@ -10,7 +10,7 @@ Usage::
         prompt="A SaaS for horse management",
         project_type="static-site",
         audience="equestrian professionals",
-        tier="balanced",
+        tier="standard",
     )
 
 The returned dict is passed to the Coder agent as part of the shared context
@@ -567,7 +567,7 @@ def create_design_direction(
     prompt: str,
     project_type: str = "static-site",
     audience: str = "",
-    tier: str = "balanced",
+    tier: str = "standard",
     recent_signatures: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Generate a unique design direction for the given project context.
@@ -580,7 +580,7 @@ def create_design_direction(
         prompt: The user's build prompt.
         project_type: Amarktai project type string.
         audience: Audience description from Scout (if available).
-        tier: Quality tier ("cheap" | "balanced" | "premium").
+        tier: Quality tier ("standard" | "premium"). Legacy aliases are normalized upstream.
         recent_signatures: Optional list of recent design signatures for
             diversity penalty (from project memory or user history).
 
