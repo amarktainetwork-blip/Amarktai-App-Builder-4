@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.services.genx_live_probe_service import discover_genx_runtime
+from app.services.genx_live_probe_service import classify_genx_model_capabilities, discover_genx_runtime
 
 logger = logging.getLogger("amarktai.genx_model_sync")
 
@@ -63,9 +63,14 @@ _CAPABILITY_PATTERNS: dict[str, list[str]] = {
     "reasoning":    ["o3", "o4", "o1", "r1", "sonnet", "opus", "gemini-2.5-pro", "grok-3$", "qwen3-max", "qwen3-plus"],
     "coding":       ["sonnet", "haiku", "gpt-4", "gpt-5", "claude", "codex", "qwen.*coder", "deepseek", "llama"],
     "vision":       ["vision", "vl", "gemini", "gpt-4", "gpt-5", "claude-sonnet", "claude-opus", "claude-haiku"],
-    "image":        ["image", "dall-e", "stable", "flux", "midjourney", "ideogram"],
-    "audio":        ["audio", "whisper", "tts", "asr", "omni", "realtime"],
-    "video":        ["video", "sora", "kling"],
+    "image":        ["image", "img", "imagine", "recraft", "nano-banana", "gpt-image", "genxlm-pro-v1-img", "dall-e", "stable", "flux", "midjourney", "ideogram"],
+    "audio":        ["audio", "whisper", "tts", "asr", "omni", "realtime", "voice", "aura", "lyria"],
+    "voice":        ["tts", "voice", "aura", "grok-tts", "genxlm-voice"],
+    "speech_to_text": ["asr", "transcrib", "genxlm-pro-v1-tr"],
+    "video":        ["video", "sora", "kling", "veo", "seedance", "pixverse", "i2v"],
+    "avatar":       ["avatar", "kling-avatar"],
+    "image_to_video": ["i2v", "image-to-video"],
+    "audio_image_to_video": ["avatar", "kling-avatar"],
     "long_context": ["gemini-2.5", "claude-opus", "claude-sonnet", "qwen-long", "128k", "200k"],
     "tool_use":     ["sonnet", "haiku", "opus", "gpt-4", "gpt-5", "gemini", "llama-4"],
     "streaming":    ["sonnet", "haiku", "opus", "gpt-4", "gpt-5", "gemini", "llama"],
@@ -144,7 +149,9 @@ def _build_model_list(raw: list) -> list[dict]:
             continue
         if not model_id:
             continue
-        caps = _classify_model(model_id)
+        caps = classify_genx_model_capabilities(item if isinstance(item, dict) else {"id": model_id, "raw": {"id": model_id}})
+        if not caps:
+            caps = _classify_model(model_id)
         if isinstance(item, dict) and item.get("category") and item["category"] not in caps:
             caps.append(str(item["category"]))
         models.append({
