@@ -25,7 +25,7 @@ from agents.mcp_tools import TOOL_SCHEMAS, ProjectFS
 from agents.orchestrator import Orchestrator
 from agents.preview import render_preview
 from agents.stack_engine import decide_stack
-from agents.build_contract import infer_build_mode, infer_project_type
+from agents.build_contract import filter_app_source_files, infer_build_mode, infer_project_type
 from agents.prompts import ASSISTANT_PROMPT
 from agents.clarification import check_clarification_needed, apply_clarification_answers
 from agents.pixabay import search_images, search_videos, build_media_manifest
@@ -96,6 +96,7 @@ from app.services.runtime_qa_service import run_runtime_qa
 from app.services.build_contract_service import final_gate_blockers
 from app.services.media_runtime_service import execute_media_plan
 from app.services.repo_workflow_guard_service import repo_pr_blockers
+from app.services.tier_service import normalize_quality_tier, repair_attempt_limit, tier_description
 from app.services.idea_builder_service import (
     IDEA_BUILDER_SYSTEM_PROMPT,
     compose_final_prompt,
@@ -389,7 +390,7 @@ class ProjectCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=12000)
     # Optional build parameters (all have safe defaults for backward compat)
     mode: Optional[str] = "web_app"
-    quality_tier: Optional[str] = "balanced"
+    quality_tier: Optional[str] = "standard"
     stack_preference: Optional[str] = None
     database_preference: Optional[str] = None
     auth_required: Optional[bool] = False
@@ -420,7 +421,7 @@ class Project(BaseModel):
     mode: str = "web_app"
     project_type: str | None = None
     build_mode: str | None = None
-    quality_tier: str = "balanced"
+    quality_tier: str = "standard"
     status: str = "queued"
     error: str | None = None
     failed_agent: str | None = None
@@ -595,9 +596,9 @@ async def _capability_truth() -> dict:
     return await service.build()
 
 
-async def _genx_provider(quality_tier: str = "balanced") -> GenXProvider:
+async def _genx_provider(quality_tier: str = "standard") -> GenXProvider:
     key = await _runtime_secret("GENX_API_KEY")
-    return GenXProvider(api_key=key, quality_tier=quality_tier)
+    return GenXProvider(api_key=key, quality_tier=normalize_quality_tier(quality_tier))
 
 
 async def _launch_pipeline(project_id: str, prompt: str, mode: str,
@@ -620,7 +621,7 @@ async def _launch_pipeline(project_id: str, prompt: str, mode: str,
         await emit({"type": "project_status", "data": {"status": "running"}})
         try:
             project = await db.projects.find_one({"id": project_id}, {"_id": 0, "quality_tier": 1}) or {}
-            provider = await _genx_provider(project.get("quality_tier", "balanced"))
+            provider = await _genx_provider(project.get("quality_tier", "standard"))
             orch = Orchestrator(db, provider, project_id, emit)
             # Global timeouts: build 25 min, iterate 10 min
             global_timeout = 1500 if mode == "build" else 600
@@ -739,7 +740,7 @@ async def _launch_retry(project_id: str, agent: str, quality_tier: str | None) -
         await emit({"type": "project_status", "data": {"status": "running"}})
         try:
             project = await db.projects.find_one({"id": project_id}, {"_id": 0, "quality_tier": 1}) or {}
-            provider = await _genx_provider(quality_tier or project.get("quality_tier", "balanced"))
+            provider = await _genx_provider(quality_tier or project.get("quality_tier", "standard"))
             orch = Orchestrator(db, provider, project_id, emit)
             await asyncio.wait_for(orch.run_retry(agent, quality_tier), timeout=1500)
             proj = await db.projects.find_one({"id": project_id}, {"_id": 0, "status": 1})
@@ -1235,17 +1236,12 @@ async def audio_models_status() -> dict:
 
 def _coder_tier(tier: str, tiers: dict) -> str | None:
     """Select the internal tier key for the Coder agent based on the user's quality tier."""
-    if tier == "premium":
-        key = "reasoning"
-    elif tier == "balanced":
-        key = "research"
-    else:
-        key = "edits"
+    key = "reasoning" if normalize_quality_tier(tier) == "premium" else "research"
     return tiers.get(key, {}).get("model")
 
 
 @secured.get("/models/router")
-async def models_router(tier: str = "balanced") -> dict:
+async def models_router(tier: str = "standard") -> dict:
     """Return the model routed for a given tier (cheap|balanced|premium).
 
     cheap     → edits/lightweight model
@@ -1256,15 +1252,8 @@ async def models_router(tier: str = "balanced") -> dict:
       research, planning, architecture, frontend_coding, backend_coding,
       database_design, media_generation, validation, repair, review, assistant
     """
-    tier_map = {
-        "cheap": "edits",
-        "balanced": "research",
-        "premium": "reasoning",
-    }
-    tier_lower = tier.lower()
-    internal_tier = tier_map.get(tier_lower)
-    if not internal_tier:
-        raise HTTPException(400, f"Unknown tier '{tier}'. Use cheap, balanced, or premium.")
+    tier_lower = normalize_quality_tier(tier)
+    internal_tier = "reasoning" if tier_lower == "premium" else "research"
     tiers = GenXProvider.list_tiers()
     info = tiers.get(internal_tier)
     if not info:
@@ -1284,14 +1273,11 @@ async def models_router(tier: str = "balanced") -> dict:
     if tier_lower == "premium":
         media_model = premium_model
         media_note = "GenX image/video models available — user confirmation required before generating."
-    elif tier_lower == "balanced":
-        media_model = fast_model
-        media_note = "Lightweight GenX image model if confirmed. Placeholders used by default."
     else:
-        media_model = None
-        media_note = "Placeholders/free assets only. Upgrade to balanced/premium for GenX image generation."
+        media_model = fast_model
+        media_note = "Standard uses efficient media-capable routes when providers are live; unavailable providers fall back honestly."
 
-    tier_model = cheap_model if tier_lower == "cheap" else (fast_model if tier_lower == "balanced" else premium_model)
+    tier_model = fast_model if tier_lower == "standard" else premium_model
     selected_models = {
         "research":        tier_model,
         "planning":        tier_model,
@@ -1301,21 +1287,18 @@ async def models_router(tier: str = "balanced") -> dict:
         "database_design": coding_model,
         "media_generation": media_model,
         "validation":      tier_model,
-        "repair":          cheap_model if tier_lower == "cheap" else tier_model,
+        "repair":          tier_model,
         "review":          tier_model,
         "assistant":       tier_model,
     }
 
-    repair_limit = {"cheap": 1, "balanced": 2, "premium": 3}.get(tier_lower, 2)
+    repair_limit = repair_attempt_limit(tier_lower)
 
     warnings: list[str] = []
     if not genx_available:
         warnings.append(genx_state.get("reason") or "GenX provider is not live-validated; routing is informational only.")
     if tier_lower == "premium":
         warnings.append("Premium tier uses the most capable model and incurs higher GenX credit usage.")
-    elif tier_lower == "cheap":
-        warnings.append("Cheap tier may struggle with complex apps. Balanced is recommended for most builds.")
-        warnings.append("Media generation is disabled at cheap tier. Placeholders will be used.")
 
     reasons = {
         "research":        "Scout research and Wingman assistant routing.",
@@ -1349,9 +1332,8 @@ async def models_router(tier: str = "balanced") -> dict:
         "reasons": reasons,
         "warnings": warnings,
         "tier_description": {
-            "cheap": "Fast and affordable. Good for simple landing pages and minor edits.",
-            "balanced": "Recommended for most builds. Balances quality and cost.",
-            "premium": "Best for complex apps, full-stack, SaaS, and trading bots.",
+            "standard": tier_description("standard"),
+            "premium": tier_description("premium"),
         }.get(tier_lower, ""),
     }
 
@@ -1366,6 +1348,7 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
       "auto"     → best available option (original auto-selection logic)
     """
     req = (media_requirements or "auto").lower().strip()
+    quality_tier = normalize_quality_tier(quality_tier)
     premium_static = quality_tier == "premium" and mode in ("media_page", "landing_page", "website")
 
     # ── Explicit "pixabay" choice ──────────────────────────────────────────────
@@ -1384,23 +1367,13 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
 
     # ── Explicit "ai" choice ───────────────────────────────────────────────────
     if req == "ai":
-        if quality_tier in ("balanced", "premium"):
-            return {
-                "mode": "ai_generated",
-                "confirmed": False,
-                "models_used": [],
-                "notes": (
-                    "AI image generation will be used if a GenX or Qwen media model is available. "
-                    "Falls back to persisted Pixabay assets if no media model is configured."
-                ),
-            }
         return {
-            "mode": "placeholder",
+            "mode": "ai_generated",
             "confirmed": False,
             "models_used": [],
             "notes": (
-                "AI image generation requires balanced or premium tier. "
-                "Upgrade your quality tier to enable AI media."
+                "AI image generation will be used if a GenX or Qwen media model is available. "
+                "Falls back to persisted Pixabay assets if no media model is configured."
             ),
         }
 
@@ -1432,7 +1405,7 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
         kw in media_requirements.lower()
         for kw in ("generat", "image", "video", "audio", "music", "photo", "ai image")
     )
-    if wants_media and quality_tier in ("balanced", "premium"):
+    if wants_media:
         return {
             "mode": "genx_generated",
             "confirmed": False,  # always requires explicit user confirmation
@@ -1440,16 +1413,6 @@ def _build_media_strategy(mode: str, quality_tier: str, media_requirements: str 
             "notes": (
                 "Custom AI image/video generation is available at this tier. "
                 "User must confirm before generation to authorise additional GenX credit usage."
-            ),
-        }
-    if wants_media and quality_tier == "cheap":
-        return {
-            "mode": "placeholder",
-            "confirmed": False,
-            "models_used": [],
-            "notes": (
-                "Media generation is not included at cheap tier. "
-                "Upgrade to balanced or premium to enable GenX image/video generation."
             ),
         }
     if mode in ("media_page", "landing_page", "website"):
@@ -1678,7 +1641,7 @@ async def add_idea_builder_message(
     source = "deterministic"
     if await _runtime_secret("GENX_API_KEY"):
         try:
-            provider = await _genx_provider("balanced")
+            provider = await _genx_provider("standard")
             result = await provider.complete(
                 agent="idea_builder",
                 system_prompt=IDEA_BUILDER_SYSTEM_PROMPT,
@@ -1724,7 +1687,7 @@ async def finalize_idea_builder_session(
     source = "deterministic"
     if await _runtime_secret("GENX_API_KEY"):
         try:
-            provider = await _genx_provider("balanced")
+            provider = await _genx_provider("standard")
             result = await provider.complete(
                 agent="idea_builder",
                 system_prompt=IDEA_BUILDER_SYSTEM_PROMPT,
@@ -1847,9 +1810,7 @@ async def create_project(body: ProjectCreate, claims: dict = Depends(require_use
 
     # Normalize mode
     build_mode = (body.mode or "web_app").lower().strip()
-    quality_tier = (body.quality_tier or "balanced").lower().strip()
-    if quality_tier not in ("cheap", "balanced", "premium"):
-        quality_tier = "balanced"
+    quality_tier = normalize_quality_tier(body.quality_tier)
 
     # Run stack decision engine
     sd = decide_stack(
@@ -2220,10 +2181,9 @@ async def retry_project(project_id: str, body: RetryBody, claims: dict = Depends
         raise HTTPException(409, "Build already in progress")
     updates = {"status": "queued", "cancel_requested": False, "updated_at": _now()}
     if body.quality_tier:
-        if body.quality_tier not in ("cheap", "balanced", "premium"):
-            raise HTTPException(400, "quality_tier must be cheap, balanced, or premium.")
-        updates["quality_tier"] = body.quality_tier
-        updates["recommended_tier"] = body.quality_tier
+        normalized_tier = normalize_quality_tier(body.quality_tier)
+        updates["quality_tier"] = normalized_tier
+        updates["recommended_tier"] = normalized_tier
     await db.projects.update_one({"id": project_id}, {"$set": updates})
     # Record retry event
     now = _now()
@@ -2336,8 +2296,8 @@ async def iterate_project(project_id: str, body: IterateBody, claims: dict = Dep
             "No app files found. Build the project first before requesting changes.",
         )
     updates: dict = {"status": "queued", "cancel_requested": False, "updated_at": _now()}
-    if body.tier and body.tier in ("cheap", "balanced", "premium"):
-        updates["quality_tier"] = body.tier
+    if body.tier:
+        updates["quality_tier"] = normalize_quality_tier(body.tier)
     await db.projects.update_one({"id": project_id}, {"$set": updates})
     await hub.broadcast(project_id, {"type": "project_status", "data": {"status": "queued"}})
     # Route imported-repo (repo_fix) projects through the build pipeline with build_mode="repo_fix"
@@ -2372,7 +2332,7 @@ async def assistant_message(body: AssistantMessage, claims: dict = Depends(requi
             context_parts.append(
                 f"Project: {proj.get('name', '?')}\n"
                 f"Mode: {proj.get('mode', 'web_app')}\n"
-                f"Quality tier: {proj.get('quality_tier', 'balanced')}\n"
+                f"Quality tier: {normalize_quality_tier(proj.get('quality_tier', 'standard'))}\n"
                 f"Status: {proj.get('status', '?')}\n"
                 f"Build prompt: {proj.get('prompt', '')[:300]}\n"
             )
@@ -2434,7 +2394,7 @@ async def assistant_message_unauth(body: AssistantMessage) -> dict:
 async def stack_decide(
     prompt: str = "",
     mode: str = "web_app",
-    tier: str = "balanced",
+    tier: str = "standard",
 ) -> dict:
     """Quick stack decision — no auth required. Use for pre-build recommendations."""
     return decide_stack(prompt=prompt, mode=mode, quality_tier=tier)
@@ -2522,7 +2482,7 @@ async def finalize(project_id: str, body: FinalizeOptions = FinalizeOptions(), c
         raise HTTPException(409, "Project must be ready before finalize/push.")
     workspace_path = (proj or {}).get("workspace_path")
     if workspace_path:
-        tier = (proj or {}).get("quality_tier", "balanced")
+        tier = normalize_quality_tier((proj or {}).get("quality_tier", "standard"))
         mode = (proj or {}).get("mode", "web_app")
         prompt = (proj or {}).get("prompt", "")
         needs_media = tier == "premium" or bool(re.search(r"\b(media|image|photo|video|cinematic|visual|gallery|background)\b", prompt, re.I))
@@ -2614,7 +2574,7 @@ async def finalize_as_branch_pr(project_id: str, claims: dict = Depends(require_
         raise HTTPException(409, "Project must be ready before pushing.")
     workspace_path = proj.get("workspace_path")
     if workspace_path:
-        tier = proj.get("quality_tier", "balanced")
+        tier = normalize_quality_tier(proj.get("quality_tier", "standard"))
         prompt = proj.get("prompt", "")
         needs_media = tier == "premium" or bool(re.search(r"\b(media|image|photo|video|cinematic|visual|gallery|background)\b", prompt, re.I))
         needs_motion = tier == "premium" or bool(re.search(r"\b(motion|animation|animated|3d|cinematic)\b", prompt, re.I))
@@ -3540,7 +3500,7 @@ async def repo_create_pr(
     files = await ProjectFS(db, repo_id).list_full()
     payload_files = [
         {"path": f["path"], "content": f["content"]}
-        for f in files
+        for f in filter_app_source_files(files)
         if f["path"] != ".env" and not f["path"].endswith("/.env")
     ]
     branch = body.branch_name or f"amarktai/repair-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"

@@ -424,11 +424,11 @@ def test_stack_research_mode():
     assert sd["required_files"] == []
 
 
-def test_stack_cheap_tier_complex_warns():
-    """Cheap tier on a complex project must require upgrade confirmation."""
+def test_stack_cheap_tier_maps_to_standard():
+    """Legacy cheap tier maps to Standard without disabling capabilities."""
     sd = decide_stack(prompt="Build a full-stack app with login", mode="full_stack", quality_tier="cheap")
-    assert sd["requires_upgrade_confirmation"] is True
-    assert sd["upgrade_reason"] is not None
+    assert sd["quality_tier"] == "standard"
+    assert sd["recommended_tier"] in {"standard", "premium"}
 
 
 def test_stack_unknown_mode_defaults_web_app():
@@ -655,12 +655,12 @@ def test_media_strategy_genx_generated_premium():
     assert ms["confirmed"] is False  # still needs user confirmation
 
 
-def test_media_strategy_cheap_tier_blocks_genx():
-    """Cheap tier cannot use genx_generated even if media requested."""
+def test_media_strategy_legacy_cheap_does_not_block_genx():
+    """Legacy cheap tier maps to Standard and no longer disables media capability."""
     import server
     ms = server._build_media_strategy("landing_page", "cheap", "generate images please")
-    assert ms["mode"] == "placeholder"
-    assert "Upgrade" in ms["notes"] or "upgrade" in ms["notes"]
+    assert ms["mode"] == "genx_generated"
+    assert "upgrade" not in ms["notes"].lower()
 
 
 # ---------- model router spec format ----------
@@ -3683,12 +3683,12 @@ def test_media_strategy_ai_choice_balanced():
     assert ms["mode"] == "ai_generated"
 
 
-def test_media_strategy_ai_choice_cheap_downgrades():
-    """Explicit 'ai' choice with cheap tier falls back to placeholder."""
+def test_media_strategy_ai_choice_legacy_cheap_uses_standard():
+    """Explicit AI media stays available when old cheap values are normalized."""
     import server
     ms = server._build_media_strategy("web_app", "cheap", "ai")
-    assert ms["mode"] == "placeholder"
-    assert "upgrade" in ms["notes"].lower()
+    assert ms["mode"] == "ai_generated"
+    assert "falls back to persisted pixabay assets" in ms["notes"].lower()
 
 
 def test_media_strategy_css_svg_choice_is_upgraded_for_premium_static():

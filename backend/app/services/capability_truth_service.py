@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
@@ -38,6 +39,27 @@ def _probe_status(provider: str, configured: bool, source: str, cached_probes: d
 
 def _availability(provider: dict[str, Any]) -> bool:
     return bool(provider.get("configured")) and provider.get("live_status") == "live_ok"
+
+
+def _module_available(name: str) -> bool:
+    try:
+        __import__(name)
+        return True
+    except Exception:
+        return False
+
+
+def _optional_integration(env_key: str, label: str) -> dict[str, Any]:
+    configured = bool(os.environ.get(env_key))
+    return {
+        "available": False,
+        "configured": configured,
+        "provider": None,
+        "live_status": "configured_not_tested" if configured else "setup_needed",
+        "reason": f"{label} is optional and not live-tested in this deployment.",
+        "fallback": "Core builder remains available without this optional open-source integration.",
+        "env_key": env_key,
+    }
 
 
 def _genx_runtime(provider: dict[str, Any]) -> dict[str, Any]:
@@ -251,6 +273,17 @@ class CapabilityTruthService:
             "web_research": cap(brave_ok, "brave", providers["brave"]["reason"] or "BRAVE_SEARCH_API_KEY not configured", "Scout continues without live web research."),
             "stock_media": cap(pixabay_ok, "pixabay", providers["pixabay"]["reason"] or "PIXABAY_API_KEY not configured", "Use AI images if available or CSS/SVG visuals."),
             "preview_generation": {"available": True, "configured": True, "provider": "sandbox", "live_status": "local", "reason": None, "fallback": ""},
+            "runtime_qa": {"available": True, "configured": True, "provider": "local", "live_status": "local", "reason": None, "fallback": ""},
+            "playwright": {"available": _module_available("playwright"), "configured": _module_available("playwright"), "provider": "local" if _module_available("playwright") else None, "live_status": "local" if _module_available("playwright") else "setup_needed", "reason": None if _module_available("playwright") else "Install Playwright/Chromium in the runtime image.", "fallback": ""},
+            "lighthouse": {"available": bool(shutil.which("lighthouse")), "configured": bool(shutil.which("lighthouse")), "provider": "local" if shutil.which("lighthouse") else None, "live_status": "local" if shutil.which("lighthouse") else "setup_needed", "reason": None if shutil.which("lighthouse") else "Install Lighthouse CLI in the runtime image.", "fallback": "Browser performance audit reports setup-needed if Lighthouse is absent."},
+            "axe_core": {"available": _module_available("axe_core") or _module_available("axe_selenium_python"), "configured": _module_available("axe_core") or _module_available("axe_selenium_python"), "provider": "local" if (_module_available("axe_core") or _module_available("axe_selenium_python")) else None, "live_status": "local" if (_module_available("axe_core") or _module_available("axe_selenium_python")) else "setup_needed", "reason": None if (_module_available("axe_core") or _module_available("axe_selenium_python")) else "Install axe-core accessibility runtime.", "fallback": ""},
+            "deployment_finalize": {"available": True, "configured": True, "provider": "local", "live_status": "local", "reason": None, "fallback": ""},
+            "whisper_stt": _optional_integration("WHISPER_MODEL_PATH", "Whisper/STT"),
+            "faiss_vector_memory": _optional_integration("FAISS_INDEX_PATH", "FAISS vector memory/RAG"),
+            "stable_diffusion_fallback": _optional_integration("STABLE_DIFFUSION_BASE_URL", "Stable Diffusion image fallback"),
+            "musicgen_fallback": _optional_integration("MUSICGEN_BASE_URL", "MusicGen music/audio fallback"),
+            "playwright_traces": _optional_integration("PLAYWRIGHT_TRACE_DIR", "Playwright traces"),
+            "orchestration_graph": _optional_integration("LANGGRAPH_ENABLED", "LangGraph-style orchestration graph"),
             "qwen": {
                 "available": qwen_ok,
                 "configured": providers["qwen"]["configured"],

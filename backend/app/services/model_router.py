@@ -58,6 +58,20 @@ TASK_ROUTING: dict[str, dict[str, Any]] = {
         "cost_tier": "medium",
         "description": "Image generation",
     },
+    "video_generation": {
+        "required_caps": ["video"],
+        "preferred_caps": [],
+        "preferred_models": ["kling-avatar-v2-pro", "veo-3", "kling-v2"],
+        "cost_tier": "medium",
+        "description": "Video generation and image-to-video media",
+    },
+    "avatar_generation": {
+        "required_caps": ["avatar_generation", "video"],
+        "preferred_caps": ["audio_image_to_video"],
+        "preferred_models": ["kling-avatar-v2-pro"],
+        "cost_tier": "high",
+        "description": "Avatar video generation from image and audio",
+    },
     "audio_voice": {
         "required_caps": ["audio"],
         "preferred_caps": [],
@@ -100,6 +114,44 @@ TASK_ROUTING: dict[str, dict[str, Any]] = {
         "cost_tier": "low",
         "description": "General purpose task",
     },
+}
+
+
+AGENT_TASK_MAP: dict[str, str] = {
+    "manager": "general",
+    "prompt_optimizer": "research",
+    "planner": "research",
+    "scout": "research",
+    "product_strategist": "research",
+    "creative_director": "frontend_design",
+    "architect": "backend_architecture",
+    "ux_architect": "frontend_design",
+    "ui_designer": "frontend_design",
+    "coder": "frontend_design",
+    "frontend_coder": "frontend_design",
+    "backend_coder": "backend_architecture",
+    "data_architect": "backend_architecture",
+    "tool_integration": "backend_architecture",
+    "component_librarian": "frontend_design",
+    "media_director": "image_generation",
+    "motion_3d": "frontend_design",
+    "reviewer": "qa_security_accessibility",
+    "visual_qa": "qa_security_accessibility",
+    "accessibility": "qa_security_accessibility",
+    "seo_performance": "qa_security_accessibility",
+    "security": "qa_security_accessibility",
+    "runtime_engineer": "qa_security_accessibility",
+    "deployment": "documentation",
+    "documentation": "documentation",
+    "repo_engineer": "repo_audit",
+    "repo_analyzer": "repo_audit",
+    "repair_agent": "code_repair",
+    "test_runner": "qa_security_accessibility",
+    "github_pr_agent": "repo_audit",
+    "export_agent": "documentation",
+    "memory_curator": "documentation",
+    "advisor": "general",
+    "capability_truth": "general",
 }
 
 
@@ -190,8 +242,31 @@ def route_task(
 
 
 def get_router_status(available_models: list[str]) -> dict[str, Any]:
-    """Return routing decisions for all task types given the available models."""
+    """Return routing decisions for all task types and registered agent roles."""
+    task_routes = {task: route_task(task, available_models) for task in TASK_ROUTING}
+    agent_routes: dict[str, Any] = {}
+    for agent, task_type in AGENT_TASK_MAP.items():
+        spec = TASK_ROUTING.get(task_type, TASK_ROUTING["general"])
+        standard = route_task(task_type, available_models)
+        premium = route_task(task_type, available_models)
+        if available_models:
+            for preferred in spec.get("preferred_models", []):
+                if preferred in available_models:
+                    premium = {**premium, "selected_model": preferred, "fallback_used": False}
+                    break
+        agent_routes[agent] = {
+            "agent": agent,
+            "task_type": task_type,
+            "selected_standard_model": standard.get("selected_model"),
+            "selected_premium_model": premium.get("selected_model"),
+            "required_capabilities": spec.get("required_caps", []),
+            "preferred_capabilities": spec.get("preferred_caps", []),
+            "available": bool(standard.get("selected_model")),
+            "fallback_status": "fallback" if standard.get("fallback_used") else "preferred",
+            "reason": standard.get("reason"),
+        }
     return {
-        task: route_task(task, available_models)
-        for task in TASK_ROUTING
+        **task_routes,
+        "tasks": task_routes,
+        "agents": agent_routes,
     }

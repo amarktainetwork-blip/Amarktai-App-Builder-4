@@ -27,6 +27,7 @@ from .build_contract import (
     ensure_required_files,
     enforce_static_contract_files,
     extract_files_from_model_output,
+    filter_app_source_files,
     get_required_files,
     infer_build_mode,
     infer_project_type,
@@ -86,6 +87,7 @@ from app.services.motion_runtime_service import patch_motion_files, prompt_requi
 from app.services.voice_avatar_runtime_service import patch_voice_avatar_files, prompt_requires_voice_avatar
 from app.services.build_contract_service import final_gate_blockers
 from settings_store import safe_get_secret
+from app.services.tier_service import is_premium, normalize_quality_tier, repair_attempt_limit
 
 # Per-agent timeout in seconds
 AGENT_TIMEOUTS = {
@@ -573,7 +575,12 @@ def _parse_amarktai_blocks(text: str) -> dict:
 
 def _has_app_files(files: list[dict]) -> bool:
     """Return True if there are generated app files (not just metadata)."""
-    return any(f["path"] not in _META_FILES for f in files)
+    return bool(filter_app_source_files(files))
+
+
+def _agent_app_files(files: list[dict]) -> list[dict]:
+    """Filter internal reports/manifests out of model payloads."""
+    return filter_app_source_files(files or [])
 
 
 def _has_preview_entry(files: list[dict]) -> bool:
@@ -684,7 +691,7 @@ class Orchestrator:
             "project_id": self.project_id,
             "prompt": proj.get("prompt", ""),
             "mode": proj.get("mode", "web_app"),
-            "quality_tier": proj.get("quality_tier", "balanced"),
+            "quality_tier": normalize_quality_tier(proj.get("quality_tier", "standard")),
             "recommended_tier": proj.get("recommended_tier"),
             "stack_decision": proj.get("selected_stack", {}),
             "preview_strategy": proj.get("preview_strategy", "iframe"),
@@ -1071,13 +1078,11 @@ class Orchestrator:
 
     # ---------- repair limit by tier ----------
 
-    _REPAIR_LIMITS: dict[str, int] = {"cheap": 1, "balanced": 2, "premium": 3}
-
     async def _repair_limit(self) -> int:
         """Return the max allowed file-content repair attempts for the current quality tier."""
         proj = await self._load_project()
-        tier = proj.get("quality_tier", "balanced")
-        return self._REPAIR_LIMITS.get(tier, 2)
+        tier = normalize_quality_tier(proj.get("quality_tier", "standard"))
+        return repair_attempt_limit(tier)
 
     async def _emit_validation_event(self, event_type: str, detail: str, meta: dict | None = None) -> None:
         """Emit a validation lifecycle event to the WebSocket hub and record as agent_event."""
@@ -1319,7 +1324,7 @@ class Orchestrator:
         coverage: dict[str, Any],
         prompt: str = "",
         mode: str = "",
-        quality_tier: str = "balanced",
+        quality_tier: str = "standard",
         media_required: bool = False,
         motion_required: bool = False,
     ) -> dict[str, Any]:
@@ -1544,7 +1549,7 @@ class Orchestrator:
         project_meta = await self._load_project()
         project_name = project_meta.get("name", "")
         project_settings = {
-            "quality_tier": project_meta.get("quality_tier", "balanced"),
+            "quality_tier": normalize_quality_tier(project_meta.get("quality_tier", "standard")),
             "media_policy": project_meta.get("media_requirements", ""),
             "required_files": sd.get("required_files", []),
         }
@@ -1744,7 +1749,7 @@ class Orchestrator:
             prompt=user_prompt,
             project_type=project_type_for_design,
             audience=normalized_context.get("audience", DEFAULT_AUDIENCE),
-            tier=project_for_design.get("quality_tier", "balanced"),
+            tier=normalize_quality_tier(project_for_design.get("quality_tier", "standard")),
             recent_signatures=recent_signatures if recent_signatures else None,
         )
 
@@ -1754,7 +1759,7 @@ class Orchestrator:
             mode=mode,
             audience=normalized_context.get("audience", DEFAULT_AUDIENCE),
             industry=scout_data.get("industry", ""),
-            tier=project_for_design.get("quality_tier", "balanced"),
+            tier=normalize_quality_tier(project_for_design.get("quality_tier", "standard")),
             design_direction=design_direction,
             previous_signatures=recent_signatures if recent_signatures else [],
         )
@@ -1975,11 +1980,11 @@ class Orchestrator:
             await self._record_event("motion_3d", "started", "Motion/3D agent enhancing build.")
             try:
                 post_coder_files = await self.fs.list_full()
+                app_payload_files = _agent_app_files(post_coder_files)
                 motion_input = json.dumps({
                     "animation_requirements": user_prompt,
                     "design_direction": design_direction,
-                    "files": [{"path": f["path"], "content": f["content"]}
-                               for f in post_coder_files if f["path"] not in _META_FILES],
+                    "files": [{"path": f["path"], "content": f["content"]} for f in app_payload_files],
                 }, indent=2)
                 motion_res = await self._run_agent_blocks("motion_3d", MOTION_3D_PROMPT, motion_input)
                 motion_data = motion_res["data"]
@@ -2057,7 +2062,7 @@ class Orchestrator:
             current_files,
             prompt=user_prompt,
             context=normalized_context,
-            strict=project_meta.get("quality_tier", "balanced") == "premium",
+            strict=is_premium(project_meta.get("quality_tier", "standard")),
         )
         await self.fs.write("content_quality_report.json", json.dumps(content_report, indent=2), "json")
         await self.emit({"type": "content_quality_report", "data": content_report})
@@ -2079,8 +2084,7 @@ class Orchestrator:
             "mode": mode,
             "required_files": sd.get("required_files", []),
             "context": normalized_context,
-            "files": [{"path": f["path"], "content": f["content"]} for f in current_files
-                      if f["path"] not in _META_FILES],
+            "files": [{"path": f["path"], "content": f["content"]} for f in _agent_app_files(current_files)],
             "shared_context": shared_ctx,
         }, indent=2)
         review_issues: list[str] = []
@@ -2128,11 +2132,11 @@ class Orchestrator:
             await self._record_event("reviewer", "failed", err_detail,
                                      meta={"reviewer_error": str(reviewer_err)})
             await self._record_message("system", None, err_detail,
-                                       meta={"reviewer_nonfatal": project_meta.get("quality_tier", "balanced") != "premium"})
+                                       meta={"reviewer_nonfatal": not is_premium(project_meta.get("quality_tier", "standard"))})
             await self._ensure_contract_files(user_prompt, arch_data)
 
         if (
-            project_meta.get("quality_tier", "balanced") == "premium"
+            is_premium(project_meta.get("quality_tier", "standard"))
             and "requested regeneration" in reviewer_blocker.lower()
         ):
             regen_files = await self.fs.list_full()
@@ -2159,7 +2163,7 @@ class Orchestrator:
                 reviewer_passed = True
                 await self._ensure_contract_files(user_prompt, arch_data)
 
-        if project_meta.get("quality_tier", "balanced") == "premium" and reviewer_blocker:
+        if is_premium(project_meta.get("quality_tier", "standard")) and reviewer_blocker:
             err = reviewer_blocker or "Reviewer did not complete successfully for this premium build."
             await self._fail_project("reviewer", err)
             await self._record_message("system", None, err, meta={"error": err, "reviewer_required": True})
@@ -2244,8 +2248,7 @@ class Orchestrator:
                 "validation_errors": errors,
                 "repair_attempt": repair_pass + 1,
                 "context": normalized_context,
-                "files": [{"path": f["path"], "content": f["content"]} for f in repair_files
-                          if f["path"] not in _META_FILES],
+                "files": [{"path": f["path"], "content": f["content"]} for f in _agent_app_files(repair_files)],
                 "shared_context": shared_ctx,
             }, indent=2)
             repair_prompt = (
@@ -2279,7 +2282,7 @@ class Orchestrator:
         # Deterministic Motion / 3D execution before final validation. This
         # modifies real generated files and writes motion_manifest.json instead
         # of relying on a registry-only motion claim.
-        if prompt_requires_motion(user_prompt, mode) or project_meta.get("quality_tier", "balanced") == "premium":
+        if prompt_requires_motion(user_prompt, mode) or is_premium(project_meta.get("quality_tier", "standard")):
             await self._record_event("motion_3d", "started", "Motion/3D agent patching generated files.")
             motion_files_before = await self.fs.list_full()
             patched_files, motion_manifest = patch_motion_files(
@@ -2341,7 +2344,7 @@ class Orchestrator:
             final_files,
             project_after_validation.get("last_validation", {}) or {},
             mode=mode,
-            quality_tier=project_after_validation.get("quality_tier", "balanced"),
+            quality_tier=normalize_quality_tier(project_after_validation.get("quality_tier", "standard")),
         )
         await self.db.projects.update_one(
             {"id": self.project_id},
@@ -2405,22 +2408,22 @@ class Orchestrator:
 
         try:
             media_required = bool(
-                project_after.get("quality_tier", "balanced") == "premium"
+                is_premium(project_after.get("quality_tier", "standard"))
                 or re.search(r"\b(media|image|photo|video|cinematic|visual|gallery|background)\b", user_prompt, re.IGNORECASE)
             )
-            motion_required = project_after.get("quality_tier", "balanced") == "premium" or prompt_requires_motion(user_prompt, mode)
+            motion_required = is_premium(project_after.get("quality_tier", "standard")) or prompt_requires_motion(user_prompt, mode)
             await self._persist_generated_workspace(
                 final_files,
                 preview_strategy=preview_strategy,
                 coverage=coverage,
                 prompt=user_prompt,
                 mode=mode,
-                quality_tier=project_after.get("quality_tier", "balanced"),
+                quality_tier=normalize_quality_tier(project_after.get("quality_tier", "standard")),
                 media_required=media_required,
                 motion_required=motion_required,
             )
         except Exception as qa_err:
-            if project_after.get("quality_tier", "balanced") == "premium":
+            if is_premium(project_after.get("quality_tier", "standard")):
                 err = f"Premium runtime quality gate failed: {qa_err}"
                 failed_agent = "media_director" if isinstance(qa_err, MediaRuntimeBlocker) else "validator"
                 await self._fail_project(failed_agent, err)
@@ -2441,8 +2444,7 @@ class Orchestrator:
             try:
                 sec_files = final_files
                 security_input = json.dumps({
-                    "files": [{"path": f["path"], "content": f["content"]}
-                               for f in sec_files if f["path"] not in _META_FILES],
+                    "files": [{"path": f["path"], "content": f["content"]} for f in _agent_app_files(sec_files)],
                     "mode": mode,
                     "auth_required": sd.get("auth_required", False),
                 }, indent=2)
@@ -2649,7 +2651,7 @@ class Orchestrator:
             msg_parts.append(f"\n**Recommended stack:** {rd['recommended_stack']}")
         msg_parts.append(
             f"\n**Recommended mode:** {rd.get('recommended_mode', 'web_app')}"
-            f" · **Recommended tier:** {rd.get('recommended_tier', 'balanced')}"
+            f" · **Recommended tier:** {normalize_quality_tier(rd.get('recommended_tier', 'standard'))}"
         )
         if build_prompt:
             msg_parts.append(f"\n**Build prompt ready:**\n```\n{build_prompt}\n```")
@@ -2682,7 +2684,7 @@ class Orchestrator:
         # Defensive: current_files may be None if DB returns None
         if not isinstance(current_files, list):
             current_files = []
-        app_files = [f for f in current_files if isinstance(f, dict) and f.get("path") not in _META_FILES]
+        app_files = _agent_app_files(current_files)
         if not app_files:
             err = "No imported repo files found. Import a GitHub repo before requesting fixes."
             await self._fail_project("scout", err)
@@ -2872,7 +2874,7 @@ class Orchestrator:
                 return
 
             current_files = await self.fs.list_full()
-            app_files = [f for f in current_files if f["path"] not in _META_FILES]
+            app_files = _agent_app_files(current_files)
 
             # Guard: do not iterate when no app files exist
             if not app_files:
@@ -3079,7 +3081,7 @@ class Orchestrator:
             if target in ("reviewer", "repair"):
                 # "repair" is an alias for reviewer retry — re-runs Reviewer to patch/fix missing files
                 current_files = await self.fs.list_full()
-                app_files = [f for f in current_files if f["path"] not in _META_FILES]
+                app_files = _agent_app_files(current_files)
                 if not app_files:
                     raise ValueError(
                         "Cannot retry Reviewer/Repair: no app files exist. Retry Coder first."

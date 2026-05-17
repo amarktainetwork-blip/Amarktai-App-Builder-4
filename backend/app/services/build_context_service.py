@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from app.services.tier_service import normalize_quality_tier
 
 
 DEFAULT_AUDIENCE = "founders, agencies, product teams, startups, and businesses"
@@ -183,9 +184,9 @@ def normalize_build_context(
         or scout.get("required_files")
         or settings.get("required_files")
     )
-    quality_tier = _first_text(settings.get("quality_tier"), planner.get("quality_tier"), default="balanced").lower()
-    if quality_tier not in {"premium", "balanced", "cheap"}:
-        quality_tier = "balanced"
+    quality_tier = normalize_quality_tier(
+        _first_text(settings.get("quality_tier"), planner.get("quality_tier"), default="standard")
+    )
 
     media_policy = _first_text(settings.get("media_policy"), settings.get("media_requirements"), default="ai").lower()
     if "stock" in media_policy or "pixabay" in media_policy:
