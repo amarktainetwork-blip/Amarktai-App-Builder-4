@@ -93,7 +93,7 @@ export default function ProjectsPage() {
 }
 
 function StatusPill({ status = "queued" }) {
-  const color = { running: "#FFC107", ready: "#00E676", failed: "#FF5722", cancelled: "#FF5722", queued: "#A1A1AA" }[status] || "#A1A1AA";
+  const color = { running: "#FFC107", ready: "#00E676", ready_with_warnings: "#FFC107", failed: "#FF5722", cancelled: "#FF5722", queued: "#A1A1AA" }[status] || "#A1A1AA";
   return <span className="inline-flex border border-amk-line px-2 py-1 font-mono text-[10px] uppercase tracking-wider" style={{ color }}>{status}</span>;
 }
 

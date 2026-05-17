@@ -480,7 +480,7 @@ function ReadinessStrip({ readiness, onRefresh }) {
 }
 
 function StatusDot({ status }) {
-  const colors = { running: "#FFC107", ready: "#00E676", failed: "#FF5722", queued: "#A1A1AA" };
+  const colors = { running: "#FFC107", ready: "#00E676", ready_with_warnings: "#FFC107", failed: "#FF5722", queued: "#A1A1AA" };
   return <span title={status} className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: colors[status] || "#71717A" }} />;
 }
 

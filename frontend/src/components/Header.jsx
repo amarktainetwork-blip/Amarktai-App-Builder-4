@@ -108,6 +108,7 @@ function StatusPill({ status }) {
     queued:  { color: "#A1A1AA", label: "queued" },
     running: { color: "#FFC107", label: "running" },
     ready:   { color: "#00E676", label: "ready" },
+    ready_with_warnings: { color: "#FFC107", label: "ready with warnings" },
     failed:  { color: "#FF5722", label: "failed" },
   };
   const s = map[status] || map.queued;

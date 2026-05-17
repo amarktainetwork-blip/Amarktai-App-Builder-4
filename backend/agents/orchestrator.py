@@ -1420,7 +1420,12 @@ class Orchestrator:
                 meta=media_manifest,
             )
             asset_count = int(media_manifest.get("asset_count", 0) or 0)
-            if asset_count < 3:
+            media_relevance_fallback = (
+                media_manifest.get("status") == "fallback"
+                and media_manifest.get("reason") == "no_relevant_media_found"
+                and infer_project_type(mode) == "static-site"
+            )
+            if asset_count < 3 and not media_relevance_fallback:
                 attempts = media_manifest.get("attempts", [])
                 last_attempts = attempts[-8:] if isinstance(attempts, list) else []
                 detail = (
@@ -1430,6 +1435,13 @@ class Orchestrator:
                 )
                 raise MediaRuntimeBlocker(
                     f"{detail} Attempts: {json.dumps(last_attempts, default=str)[:1200]}"
+                )
+            if media_relevance_fallback:
+                await self._record_event(
+                    "media_director",
+                    "warn",
+                    "No relevant stock media was found; static preview will use the CSS/SVG visual system.",
+                    meta=media_manifest,
                 )
         avatar_manifest: dict[str, Any] | None = None
         if prompt_requires_voice_avatar(prompt, mode):
@@ -1483,6 +1495,8 @@ class Orchestrator:
             media_required=media_required,
             motion_required=motion_required,
             runtime_required=quality_tier == "premium",
+            allow_static_runtime_warnings=True,
+            allow_static_media_fallback_warnings=True,
         )
         if final_blockers:
             quality_report.setdefault("blockers", [])
@@ -2412,7 +2426,7 @@ class Orchestrator:
                 or re.search(r"\b(media|image|photo|video|cinematic|visual|gallery|background)\b", user_prompt, re.IGNORECASE)
             )
             motion_required = is_premium(project_after.get("quality_tier", "standard")) or prompt_requires_motion(user_prompt, mode)
-            await self._persist_generated_workspace(
+            workspace_result = await self._persist_generated_workspace(
                 final_files,
                 preview_strategy=preview_strategy,
                 coverage=coverage,
@@ -2527,11 +2541,23 @@ class Orchestrator:
                 meta={"error": str(deploy_err)},
             )
 
-        await self._set_status("ready", {
+        workspace_quality = (locals().get("workspace_result") or {}).get("quality_report", {})
+        workspace_checks = workspace_quality.get("checks", {}) if isinstance(workspace_quality, dict) else {}
+        warning_ready = bool(
+            infer_project_type(mode) == "static-site"
+            and isinstance(workspace_quality, dict)
+            and (
+                workspace_quality.get("warnings")
+                or workspace_checks.get("runtime_qa", {}).get("finalize_locked")
+                or workspace_checks.get("media_manifest", {}).get("finalize_locked")
+            )
+        )
+        ready_status = "ready_with_warnings" if warning_ready else "ready"
+        await self._set_status(ready_status, {
             "completed_at": _now(),
             "preview_strategy": preview_strategy,
         })
-        await self.emit({"type": "build_complete", "data": {"preview_strategy": preview_strategy}})
+        await self.emit({"type": "build_complete", "data": {"preview_strategy": preview_strategy, "status": ready_status}})
 
         # ── Phase 2B: Manager Agent Completion Gate ──────────────────────────
         # The Manager Agent runs a completion gate after the build pipeline.
