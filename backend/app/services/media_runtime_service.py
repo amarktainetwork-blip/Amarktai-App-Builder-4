@@ -73,6 +73,8 @@ async def _openai_image_endpoint(
 ) -> dict[str, Any] | None:
     if not api_key or not base_url or not model:
         return None
+    if provider.lower() == "qwen" and os.environ.get("QWEN_IMAGE_ENDPOINT_ENABLED", "true").strip().lower() in {"0", "false", "no", "off"}:
+        return {"ok": False, "provider": provider, "error": "Qwen image endpoint is disabled by QWEN_IMAGE_ENDPOINT_ENABLED"}
     url = f"{base_url.rstrip('/')}/images/generations"
     payload = {"model": model, "prompt": prompt, "n": 1, "size": "1792x1024"}
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -104,6 +106,10 @@ def _write_asset(
     remote_url: str = "",
     meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if media_type == "video":
+        max_video_mb = int(os.environ.get("MEDIA_MAX_VIDEO_MB", "18"))
+        if len(content) > max_video_mb * 1024 * 1024:
+            raise ValueError(f"Video exceeds maximum persisted video size of {max_video_mb} MB.")
     ext = _extension(content_type, ".jpg" if media_type == "image" else ".mp4")
     asset_id = uuid.uuid4().hex[:12]
     filename = safe_filename(f"{source}-{asset_id}{ext}")
@@ -305,17 +311,28 @@ async def execute_media_plan(
                 attempts.append({"provider": provider, "ok": False, "reason": "missing key or model"})
                 continue
         if provider == "genx":
-            result = await generate_genx_media_job(
-                api_key=key,
-                base_url=base,
-                model=model,
-                prompt=image_prompt,
-                category="image",
-                extra={"size": "1792x1024"},
-            )
+            result = None
+            for attempt_no in range(2):
+                result = await generate_genx_media_job(
+                    api_key=key,
+                    base_url=base,
+                    model=model,
+                    prompt=image_prompt,
+                    category="image",
+                    extra={"size": "1792x1024"},
+                )
+                attempts.append({
+                    k: v for k, v in (result or {}).items()
+                    if k not in {"bytes"}
+                } | {"attempt": attempt_no + 1})
+                if result and result.get("ok"):
+                    break
+                if (result or {}).get("status") not in {"timeout", "failed", "poll_failed"}:
+                    break
+                await asyncio.sleep(1.0 + attempt_no)
         else:
             result = await _openai_image_endpoint(provider=provider, api_key=key, base_url=base, model=model, prompt=image_prompt)
-        attempts.append({k: v for k, v in (result or {}).items() if k not in {"bytes"}} or {"provider": provider, "ok": False})
+            attempts.append({k: v for k, v in (result or {}).items() if k not in {"bytes"}} or {"provider": provider, "ok": False})
         if result and result.get("ok"):
             assets.append(_write_asset(
                 workspace,

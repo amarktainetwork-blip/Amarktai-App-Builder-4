@@ -234,52 +234,86 @@ def select_media_strategy(
     Returns a strategy dict with mode, honest_report, and fallback chain.
     """
     cap = capability_registry or {}
-    ai_image_available = cap.get("supports_image_generation", False)
+    ai_image_available = bool(
+        cap.get("supports_image_generation")
+        or cap.get("image_generation")
+        or cap.get("ai_image_available")
+        or cap.get("genx_image_generation")
+    )
+    stock_media_available = bool(
+        cap.get("supports_stock_media")
+        or cap.get("stock_media")
+        or cap.get("pixabay")
+        or cap.get("pixabay_available")
+    )
+    uploaded_media_available = bool(
+        cap.get("supports_media_library")
+        or cap.get("media_library")
+        or cap.get("uploaded_media")
+    )
+    requested_source = (media_source or "auto").strip().lower()
+    is_premium = (build_mode or "").strip().lower() in {
+        "premium",
+        "landing_page",
+        "landing-page",
+        "website",
+        "media_page",
+        "cinematic",
+    }
 
-    if media_source == "ai":
+    if requested_source == "ai":
         if ai_image_available:
             return {
                 "mode": "ai",
                 "source": "ai_generated",
                 "honest_report": "AI image generation is available and will be used.",
                 "fallback": "pixabay",
+                "stock_media_available": stock_media_available,
+                "uploaded_media_available": uploaded_media_available,
             }
         else:
-            stock_ok = cap.get("supports_stock_media", False)
             return {
-                "mode": "stock" if stock_ok else "media_required_unavailable",
-                "source": "pixabay" if stock_ok else "none",
+                "mode": "stock" if stock_media_available else "media_required_unavailable",
+                "source": "pixabay" if stock_media_available else "none",
                 "honest_report": (
                     "AI image generation is NOT available in this environment. "
-                    + ("Using persisted Pixabay stock assets as the premium fallback. " if stock_ok else "No persisted media provider is available. ")
+                    + ("Using persisted Pixabay stock assets as the premium fallback. " if stock_media_available else "No persisted media provider is available. ")
                     + "No fake AI images will be used."
                 ),
-                "fallback": "pixabay" if stock_ok else None,
+                "fallback": "pixabay" if stock_media_available else None,
                 "ai_unavailable": True,
+                "stock_media_available": stock_media_available,
+                "uploaded_media_available": uploaded_media_available,
             }
 
-    elif media_source == "pixabay":
+    elif requested_source == "pixabay":
         return {
-            "mode": "stock",
-            "source": "pixabay",
-            "honest_report": "Stock images from Pixabay will be used with relevance filtering.",
-            "fallback": "css_svg",
+            "mode": "stock" if stock_media_available else "media_required_unavailable",
+            "source": "pixabay" if stock_media_available else "none",
+            "honest_report": "Stock images from Pixabay will be used with relevance filtering." if stock_media_available else "Pixabay was requested but is not configured or not live-tested.",
+            "fallback": "local_runtime_fallback" if is_premium else "css_svg",
+            "stock_media_available": stock_media_available,
+            "uploaded_media_available": uploaded_media_available,
         }
 
-    elif media_source == "css_svg":
+    elif requested_source == "css_svg":
         return {
             "mode": "css_svg",
             "source": "css_svg",
             "honest_report": "CSS gradients and SVG-only mode selected. No external images.",
             "fallback": None,
+            "stock_media_available": stock_media_available,
+            "uploaded_media_available": uploaded_media_available,
         }
 
-    elif media_source == "uploaded":
+    elif requested_source == "uploaded":
         return {
-            "mode": "uploaded",
-            "source": "media_library",
-            "honest_report": "Using uploaded media from the media library.",
-            "fallback": "css_svg",
+            "mode": "uploaded" if uploaded_media_available else "media_required_unavailable",
+            "source": "media_library" if uploaded_media_available else "none",
+            "honest_report": "Using uploaded media from the media library." if uploaded_media_available else "Uploaded media was requested but no media library assets are available.",
+            "fallback": "pixabay" if stock_media_available else ("local_runtime_fallback" if is_premium else "css_svg"),
+            "stock_media_available": stock_media_available,
+            "uploaded_media_available": uploaded_media_available,
         }
 
     else:
@@ -290,17 +324,30 @@ def select_media_strategy(
                 "source": "ai_generated",
                 "honest_report": "Auto mode: AI image generation selected (available).",
                 "fallback": "pixabay",
+                "stock_media_available": stock_media_available,
+                "uploaded_media_available": uploaded_media_available,
+            }
+        elif uploaded_media_available:
+            return {
+                "mode": "uploaded",
+                "source": "media_library",
+                "honest_report": "Auto mode: uploaded media library selected.",
+                "fallback": "pixabay" if stock_media_available else ("local_runtime_fallback" if is_premium else "css_svg"),
+                "stock_media_available": stock_media_available,
+                "uploaded_media_available": uploaded_media_available,
             }
         else:
             return {
-                "mode": "stock" if cap.get("supports_stock_media", False) else "media_required_unavailable",
-                "source": "pixabay" if cap.get("supports_stock_media", False) else "none",
+                "mode": "stock" if stock_media_available else "media_required_unavailable",
+                "source": "pixabay" if stock_media_available else "none",
                 "honest_report": (
                     "Auto mode: AI image generation unavailable. "
-                    + ("Pixabay stock assets selected." if cap.get("supports_stock_media", False) else "No persisted media provider is available.")
+                    + ("Pixabay stock assets selected." if stock_media_available else "No persisted media provider is available.")
                 ),
-                "fallback": "pixabay" if cap.get("supports_stock_media", False) else None,
+                "fallback": "pixabay" if stock_media_available else ("local_runtime_fallback" if is_premium else None),
                 "ai_unavailable": True,
+                "stock_media_available": stock_media_available,
+                "uploaded_media_available": uploaded_media_available,
             }
 
 
@@ -388,6 +435,80 @@ def _get_section_aspect_ratio(section: str) -> str:
     return ratio_map.get(section, "16:9")
 
 
+def build_cinematic_scene_plan(
+    *,
+    industry: str = "",
+    style: str = "",
+    build_mode: str = "landing_page",
+    page_context: list[dict[str, Any]] | None = None,
+    strategy: dict[str, Any] | None = None,
+    design_tokens: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create an ordered cinematic scene plan for premium media orchestration.
+
+    The plan is deterministic and additive: callers can ignore it safely, while
+    Coder/Creative Director consumers can use it to enforce a narrative arc.
+    """
+    page_context = page_context or []
+    strategy = strategy or {}
+    design_tokens = design_tokens or {}
+    section_names = [str(ctx.get("section") or "").strip() for ctx in page_context if ctx.get("section")]
+    if not section_names:
+        section_names = [
+            "hero",
+            "transformation",
+            "capabilities",
+            "proof",
+            "immersive_media",
+            "conversion",
+        ]
+
+    archetypes = [
+        ("hero", "opening_shot", "Create tension and immediate aspiration", "wide cinematic establishing shot with oversized headline and controlled line width", "slow parallax reveal, soft glow sweep, no busy card grid", "one dominant focal plane, 16:9 or 21:9 media, CTA visible above fold"),
+        ("transformation", "vision", "Move from current pain to better future", "editorial split layout contrasting before and after states", "crossfade or vertical reveal as the user scrolls", "left narrative column, right evidence visual, generous negative space"),
+        ("capabilities", "capability_showcase", "Reveal concrete builder capabilities", "spotlight panels, rails, and metrics strips instead of repetitive cards", "staggered reveal tied to meaningful capability groups", "alternate split, rail, spotlight, and metrics layouts"),
+        ("proof", "runtime_proof", "Build trust with visible evidence", "screenshots, manifest excerpts, QA report cards, PR workflow proof", "subtle counter and timeline motion", "show artifacts, statuses, and verification paths"),
+        ("immersive_media", "media_sequence", "Make media feel real and integrated", "local image/video/audio assets embedded as product evidence", "media pans, masked reveals, reduced-motion fallback", "persisted media paths only; CSS/SVG decoration cannot count as media proof"),
+        ("conversion", "conversion_climax", "Turn confidence into action", "premium CTA band with compact form and strong outcome copy", "focus ring, button lift, background light movement", "single conversion goal, no competing CTAs"),
+    ]
+
+    scenes: list[dict[str, Any]] = []
+    for index, section in enumerate(section_names[:8]):
+        match = next((item for item in archetypes if item[0] in section.lower()), archetypes[min(index, len(archetypes) - 1)])
+        scenes.append({
+            "order": index + 1,
+            "section": section,
+            "role": match[1],
+            "emotional_goal": match[2],
+            "visual_direction": f"{match[3]}; industry={industry or 'software'}; style={style or 'cinematic premium'}",
+            "motion_direction": match[4],
+            "composition_rules": match[5],
+        })
+
+    return {
+        "narrative_flow": [
+            "tension",
+            "vision",
+            "capability_reveal",
+            "proof",
+            "outcome",
+            "conversion",
+        ],
+        "build_mode": build_mode,
+        "media_strategy": strategy.get("mode", "auto"),
+        "typography_rules": {
+            "headline_scale": "oversized H1 with controlled max-width",
+            "line_width": "body copy max 68-76 characters",
+            "layout_variety": "alternate split, spotlight, editorial, rail, metrics strip, and CTA band",
+        },
+        "color_notes": {
+            "accent": design_tokens.get("accent") or design_tokens.get("color_accent") or "",
+            "background": design_tokens.get("background") or design_tokens.get("color_bg") or "",
+        },
+        "scenes": scenes,
+    }
+
+
 # ── Main orchestration entry-point ─────────────────────────────────────────────
 
 def run_media_director(
@@ -415,6 +536,14 @@ def run_media_director(
 
     # 1. Determine honest media strategy
     strategy = select_media_strategy(media_source, capability_registry, build_mode)
+    cinematic_scene_plan = build_cinematic_scene_plan(
+        industry=industry,
+        style=style,
+        build_mode=build_mode,
+        page_context=page_context,
+        strategy=strategy,
+        design_tokens=design_tokens,
+    )
     if strategy.get("ai_unavailable"):
         warnings.append(strategy["honest_report"])
 
@@ -482,4 +611,5 @@ def run_media_director(
         "rejected_count": len(rejected),
         "honest_report": strategy["honest_report"],
         "ai_image_available": not strategy.get("ai_unavailable", False),
+        "cinematic_scene_plan": cinematic_scene_plan,
     }
