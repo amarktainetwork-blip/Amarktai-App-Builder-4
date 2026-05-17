@@ -1213,6 +1213,35 @@ class TestRuntimeMediaMotionServices:
         for asset in manifest["assets"]:
             assert asset["path"] in html
 
+    def test_video_assets_respect_18mb_limit(self, tmp_path):
+        from app.services import media_runtime_service as svc
+
+        oversized = b"\x00\x00\x00\x18ftypmp42" + (b"0" * (19 * 1024 * 1024))
+        with pytest.raises(ValueError, match="18 MB"):
+            svc._write_asset(
+                tmp_path,
+                content=oversized,
+                content_type="video/mp4",
+                source="pixabay",
+                prompt="cinematic video",
+                media_type="video",
+            )
+
+    @pytest.mark.asyncio
+    async def test_qwen_image_endpoint_can_be_disabled(self, monkeypatch):
+        from app.services import media_runtime_service as svc
+
+        monkeypatch.setenv("QWEN_IMAGE_ENDPOINT_ENABLED", "false")
+        result = await svc._openai_image_endpoint(
+            provider="qwen",
+            api_key="qwen-key",
+            base_url="https://dashscope.invalid/compatible-mode/v1",
+            model="qwen-image-plus",
+            prompt="cinematic image",
+        )
+        assert result["ok"] is False
+        assert "disabled" in result["error"].lower()
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # continue_build_service

@@ -253,9 +253,58 @@ class TestMediaDirector:
             page_context=[{"section": "hero"}, {"section": "features"}],
         )
         required_keys = ["media_strategy", "section_media", "warnings", "media_score",
-                         "honest_report", "ai_image_available"]
+                         "honest_report", "ai_image_available", "cinematic_scene_plan"]
         for key in required_keys:
             assert key in result, f"Missing key '{key}' in media_director result"
+
+    def test_run_media_director_returns_cinematic_scene_plan(self):
+        from agents.media_director import run_media_director
+
+        result = run_media_director(
+            industry="ai software",
+            style="cinematic dark luxury",
+            media_source="auto",
+            build_mode="landing_page",
+            page_context=[
+                {"section": "hero"},
+                {"section": "transformation"},
+                {"section": "capabilities"},
+                {"section": "proof"},
+                {"section": "immersive_media"},
+                {"section": "conversion"},
+            ],
+            capability_registry={"supports_image_generation": True, "supports_stock_media": True},
+        )
+
+        plan = result["cinematic_scene_plan"]
+        assert plan["narrative_flow"] == [
+            "tension",
+            "vision",
+            "capability_reveal",
+            "proof",
+            "outcome",
+            "conversion",
+        ]
+        assert len(plan["scenes"]) >= 6
+        for scene in plan["scenes"]:
+            assert {"section", "role", "emotional_goal", "visual_direction", "motion_direction", "composition_rules"} <= set(scene)
+        assert any(scene["role"] == "opening_shot" for scene in plan["scenes"])
+
+    def test_select_media_strategy_defines_availability_in_all_branches(self):
+        from agents.media_director import select_media_strategy
+
+        cases = [
+            ("ai", {}),
+            ("pixabay", {}),
+            ("css_svg", {}),
+            ("uploaded", {}),
+            ("auto", {"stock_media": True}),
+            ("auto", {"supports_image_generation": True}),
+        ]
+        for source, caps in cases:
+            strategy = select_media_strategy(source, caps, build_mode="landing_page")
+            assert "stock_media_available" in strategy
+            assert "uploaded_media_available" in strategy
 
     def test_media_score_in_range(self):
         """Media score must be 0-100."""

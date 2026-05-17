@@ -172,6 +172,13 @@ COMPOSITION RULES FOR SECTIONS:
 - Use CSS custom properties for all colours — never hardcode hex values inline
 - Every section must be responsive: test at 320px, 768px, 1280px breakpoints
 - Sections must have meaningful aria-labels or role="region" attributes
+
+CINEMATIC NARRATIVE FLOW FOR PREMIUM BUILDS:
+- The page must move through: tension -> vision -> capability reveal -> proof -> outcome -> conversion.
+- Required premium beats: cinematic hero, transformation/proof section, immersive media section, premium CTA band, and conversion climax.
+- Avoid generic repeated card grids. Alternate section layouts: split, spotlight, editorial, rail, metrics strip, immersive media panel, and CTA band.
+- Use rich typography: oversized headlines, controlled line widths, strong hierarchy, and intentional whitespace.
+- Media must feel staged like a scene sequence, not decorative filler.
 """
 
 # Visual composition hard rules — applied to Coder and Iteration agents.
@@ -213,6 +220,8 @@ STRUCTURE RULES:
 - NO single-column layout for desktop — use CSS grid or flexbox for 2+ columns
 - NO pages without a skip-to-main-content link (accessibility)
 - NO nav without aria-label="Primary navigation"
+- NO generic card-grid-only page structure. Premium builds must alternate split, spotlight, editorial, rail, metrics strip, immersive media, and CTA band layouts.
+- NO narrative-flat page. Premium pages must follow tension -> vision -> capability reveal -> proof -> outcome -> conversion.
 """
 
 CODER_PROMPT = """You are CODER, the implementation agent in Amarktai Coding Agents.
@@ -379,6 +388,10 @@ PREMIUM PRODUCTION RULES (MANDATORY — violations are build failures):
 - Every JS interaction referenced in HTML MUST be implemented.
 - Every manifest you output MUST list only files that exist in the response and match the selected build mode.
 - Static landing pages MUST NOT include package.json, src/App.jsx, src/main.jsx, src/App.css, React scaffold files, or Vite files unless the user explicitly requested an app/PWA/dashboard.
+- Premium narrative MUST follow tension -> vision -> capability reveal -> proof -> outcome -> conversion.
+- Premium builds MUST include a cinematic hero, transformation/proof section, immersive media section, premium CTA band, and conversion climax.
+- Avoid generic card grids as the dominant structure; alternate split, spotlight, editorial, rail, metrics strip, immersive media, and CTA band layouts.
+- Use rich typography: oversized headlines, controlled line widths, strong hierarchy, and intentional whitespace.
 - Premium landing pages MUST include at least 900 meaningful words, 8 complete sections, 3 CTA areas, a lead-capture form, responsive states, and an animation system.
 - Use emotionally persuasive, human-quality copywriting: problem → transformation → capability → proof → CTA.
 - Avoid robotic wording, repeated generic claims, and repetitive icon/title/text card grids.
@@ -607,6 +620,10 @@ PREMIUM PRODUCTION RULES (MANDATORY — violations are build failures):
 - Every JS interaction referenced in HTML MUST be implemented.
 - Every manifest you output MUST list only files that exist in the response and match the selected build mode.
 - Static landing pages MUST NOT include package.json, src/App.jsx, src/main.jsx, src/App.css, React scaffold files, or Vite files unless the user explicitly requested an app/PWA/dashboard.
+- Premium narrative MUST follow tension -> vision -> capability reveal -> proof -> outcome -> conversion.
+- Premium builds MUST include a cinematic hero, transformation/proof section, immersive media section, premium CTA band, and conversion climax.
+- Avoid generic card grids as the dominant structure; alternate split, spotlight, editorial, rail, metrics strip, immersive media, and CTA band layouts.
+- Use rich typography: oversized headlines, controlled line widths, strong hierarchy, and intentional whitespace.
 - Premium landing pages MUST include at least 900 meaningful words, 8 complete sections, 3 CTA areas, a lead-capture form, responsive states, and an animation system.
 - Use emotionally persuasive, human-quality copywriting: problem → transformation → capability → proof → CTA.
 - Avoid robotic wording, repeated generic claims, and repetitive icon/title/text card grids.

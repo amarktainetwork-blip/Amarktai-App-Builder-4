@@ -37,15 +37,15 @@ from .design_engine import create_design_direction
 
 _SECTION_ARCHETYPES: dict[str, list[str]] = {
     "landing_page": [
-        "fullbleed_hero",          # Immersive first impression
-        "social_proof_strip",      # Logos / trust signals
-        "feature_grid",            # 3-column features
-        "value_proposition",       # Single big statement + visual
-        "testimonial_carousel",    # Rotating quotes
-        "pricing_tiers",           # Pricing comparison
-        "faq_accordion",           # Q&A section
-        "final_cta_banner",        # Last call-to-action
-        "footer_rich",             # Rich footer with links
+        "cinematic_hero",          # Tension + vision above the fold
+        "transformation_proof",    # Before/after or pain-to-outcome proof
+        "capability_reveal_rail",  # Horizontal/vertical capability rail
+        "immersive_media_scene",   # Local media assets/video/visual proof
+        "runtime_evidence_strip",  # QA/media/PR metrics and artifacts
+        "outcome_spotlight",       # Business outcome and trust
+        "premium_cta_band",        # Focused conversion moment
+        "conversion_climax",       # Final decisive CTA/form
+        "footer_rich",            # Rich footer with links
     ],
     "website": [
         "split_hero",
@@ -216,6 +216,12 @@ Animation Tone: {self.animation_tone.get('description', '')}
 
 Image Direction: {self.image_direction}
 Component Consistency: {self.component_consistency}
+
+Cinematic Narrative:
+  Flow: tension -> vision -> capability reveal -> proof -> outcome -> conversion
+  Layout variety: alternate split, spotlight, editorial, rail, metrics strip, immersive media, and CTA band sections.
+  Typography: oversized headlines, controlled line widths, strong contrast, and intentional whitespace.
+  Required premium beats: cinematic hero, transformation/proof section, immersive media section, premium CTA band, conversion climax.
 
 This blueprint is NON-NEGOTIABLE. Every file you write must honour these decisions.
 """
