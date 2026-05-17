@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.tier_service import normalize_quality_tier
+
 # ── Mode families ──────────────────────────────────────────────────────────────
 
 RESEARCH_MODES = {"research"}
@@ -146,7 +148,7 @@ def decide_stack(
     *,
     prompt: str = "",
     mode: str = "web_app",
-    quality_tier: str = "balanced",
+    quality_tier: str = "standard",
     stack_preference: str | None = None,
     database_preference: str | None = None,
     auth_required: bool = False,
@@ -163,9 +165,7 @@ def decide_stack(
     if mode not in ALL_MODES:
         mode = "web_app"
 
-    quality_tier = quality_tier.lower().strip() if quality_tier else "balanced"
-    if quality_tier not in ("cheap", "balanced", "premium"):
-        quality_tier = "balanced"
+    quality_tier = normalize_quality_tier(quality_tier)
 
     prompt_lower = prompt.lower()
 
@@ -202,10 +202,10 @@ def decide_stack(
     upgrade_reason: str | None = None
 
     if complexity in ("simple", "standard"):
-        recommended_tier = "balanced"
+        recommended_tier = "standard"
     elif complexity == "advanced":
         recommended_tier = "premium"
-        if quality_tier in ("cheap", "balanced"):
+        if quality_tier == "standard":
             requires_upgrade_confirmation = True
             upgrade_reason = (
                 f"This {mode} involves advanced features. "
@@ -214,7 +214,7 @@ def decide_stack(
             )
     elif complexity == "high_risk":
         recommended_tier = "premium"
-        if quality_tier in ("cheap", "balanced"):
+        if quality_tier == "standard":
             requires_upgrade_confirmation = True
             upgrade_reason = (
                 "Trading bots and high-risk automation require thorough code generation. "
@@ -281,7 +281,7 @@ def decide_stack(
     if "payment" in prompt_lower or "stripe" in prompt_lower:
         safety_notes.append("Payment integrations require PCI compliance review and live key testing outside this tool.")
     if media_requirements and "generat" in (media_requirements or "").lower():
-        safety_notes.append("AI image generation is not included. Safe placeholder images or SVG are used instead.")
+        safety_notes.append("Media generation depends on live provider capability truth and persists manifest evidence when used.")
 
     # ── required_files by mode ────────────────────────────────
     required_files = list(REQUIRED_FILES.get(mode, []))
@@ -289,6 +289,7 @@ def decide_stack(
     return {
         "recommended_mode": mode,
         "complexity": complexity,
+        "quality_tier": quality_tier,
         "recommended_tier": recommended_tier,
         "requires_upgrade_confirmation": requires_upgrade_confirmation,
         "upgrade_reason": upgrade_reason,

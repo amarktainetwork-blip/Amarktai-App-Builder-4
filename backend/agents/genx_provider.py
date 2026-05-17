@@ -20,6 +20,7 @@ from typing import Optional
 
 import httpx
 from openai import OpenAI
+from app.services.tier_service import normalize_quality_tier
 
 logger = logging.getLogger("amarktai.genx")
 
@@ -56,10 +57,10 @@ class GenXProvider:
     """Single-key, multi-model provider with task-aware routing, backed by GenX Router."""
 
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None,
-                 quality_tier: str = "balanced"):
+                 quality_tier: str = "standard"):
         self.api_key = api_key or os.environ.get("GENX_API_KEY")
         self.base_url = (base_url or os.environ.get("GENX_BASE_URL", "https://query.genx.sh/v1")).rstrip("/")
-        self.quality_tier = quality_tier if quality_tier in ("cheap", "balanced", "premium") else "balanced"
+        self.quality_tier = normalize_quality_tier(quality_tier)
         if not self.api_key:
             raise RuntimeError("GENX_API_KEY is not configured. Add it in Settings or as an environment variable.")
 
@@ -71,14 +72,7 @@ class GenXProvider:
         # - Security agent always uses 'research' tier for reliable analysis.
         _ALWAYS_RESEARCH = {"creative_director", "coder", "visual_qa", "security", "motion_3d"}
 
-        if self.quality_tier == "cheap":
-            if agent in _ALWAYS_RESEARCH:
-                tier = "research"
-            elif agent == "scout":
-                tier = "research"
-            else:
-                tier = "edits"
-        elif self.quality_tier == "balanced":
+        if self.quality_tier == "standard":
             tier = "research" if agent in {"scout", "architect", "coder", "reviewer", "iteration", "repair"} else AGENT_TIER.get(agent, "research")
         else:
             tier = AGENT_TIER.get(agent, "reasoning")

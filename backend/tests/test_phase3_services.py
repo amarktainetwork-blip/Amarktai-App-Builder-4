@@ -1235,8 +1235,8 @@ class TestRuntimeMediaMotionServices:
         (tmp_path / "index.html").write_text("<html><body><main><section id='hero'>Amarktai</section></main></body></html>")
         (tmp_path / "styles.css").write_text("body{}")
         with patch.object(svc, "generate_genx_media_job", AsyncMock(side_effect=[
-            {"ok": True, "bytes": png_asset, "content_type": "image/png", "job_id": "img1", "status": "succeeded"},
-            {"ok": True, "bytes": audio_asset, "content_type": "audio/mpeg", "job_id": "aud1", "status": "succeeded"},
+            {"ok": True, "bytes": png_asset, "content_type": "image/png", "job_id": "img1", "status": "succeeded", "result_url": "https://genx.test/avatar.png"},
+            {"ok": True, "bytes": audio_asset, "content_type": "audio/mpeg", "job_id": "aud1", "status": "succeeded", "result_url": "https://genx.test/avatar.mp3"},
             {"ok": True, "bytes": video_asset, "content_type": "video/mp4", "job_id": "vid1", "status": "succeeded", "result_url": "https://genx.test/avatar.mp4"},
         ])):
             manifest = await svc.execute_avatar_pipeline(

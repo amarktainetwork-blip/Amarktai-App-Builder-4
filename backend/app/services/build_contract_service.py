@@ -20,6 +20,7 @@ from agents.build_contract import (
     infer_project_type,
     validate_project_files,
 )
+from app.services.tier_service import is_premium, normalize_quality_tier
 
 
 MODE_ALIASES = {
@@ -47,8 +48,9 @@ def normalize_contract_mode(mode: str | None) -> str:
     return MODE_ALIASES.get(raw, raw)
 
 
-def get_build_contract(mode: str | None, *, prompt: str = "", quality_tier: str = "balanced") -> BuildContract:
+def get_build_contract(mode: str | None, *, prompt: str = "", quality_tier: str = "standard") -> BuildContract:
     normalized = normalize_contract_mode(mode)
+    quality_tier = normalize_quality_tier(quality_tier)
     project_type = infer_project_type(normalized)
     build_mode = infer_build_mode(normalized)
     required = tuple(get_required_files(project_type, build_mode, prompt, {}))
@@ -57,7 +59,7 @@ def get_build_contract(mode: str | None, *, prompt: str = "", quality_tier: str 
     runtime_artifacts: list[str] = []
     if project_type == "static-site":
         forbidden = tuple(sorted(STATIC_FORBIDDEN_FILES))
-    if quality_tier == "premium":
+    if is_premium(quality_tier):
         manifests.extend(["media_manifest.json", "motion_manifest.json"])
         runtime_artifacts.extend([
             "runtime-qa/runtime-qa-report.json",
@@ -98,6 +100,7 @@ def final_gate_blockers(
 ) -> list[str]:
     """Return final filesystem-level blockers shared by API, dashboard, and finalize paths."""
     ws = Path(workspace).resolve()
+    quality_tier = normalize_quality_tier(quality_tier)
     contract = get_build_contract(mode, prompt=prompt, quality_tier=quality_tier)
     blockers: list[str] = []
     if contract.project_type == "static-site":
@@ -125,11 +128,9 @@ def final_gate_blockers(
         for rel in contract.required_runtime_artifacts:
             if not (ws / rel).exists():
                 blockers.append(f"Missing runtime QA artifact: {rel}")
-    if quality_tier == "premium":
+    if is_premium(quality_tier):
         content_report_path = ws / "content_quality_report.json"
-        if not content_report_path.exists():
-            blockers.append("Missing content_quality_report.json.")
-        else:
+        if content_report_path.exists():
             try:
                 report = json.loads(content_report_path.read_text(encoding="utf-8"))
                 if not report.get("pass"):

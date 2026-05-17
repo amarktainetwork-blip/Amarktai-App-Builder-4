@@ -14,6 +14,7 @@ from typing import Any
 
 from .quality_validator import score_project_quality
 from .template_policy import is_automotive_prompt, remove_legacy_template_contamination
+from app.services.tier_service import PUBLIC_TIERS, normalize_quality_tier
 
 
 def safe_dict(value: Any) -> dict:
@@ -44,7 +45,7 @@ BUILD_MODES = (
     "trading-bot-scaffold", "custom",
 )
 
-QUALITY_TIERS = ("cheap", "balanced", "premium")
+QUALITY_TIERS = PUBLIC_TIERS
 
 MODE_PROJECT_TYPE = {
     "landing_page": ("static-site", "landing-page"),
@@ -80,6 +81,56 @@ STATIC_FORBIDDEN_FILES = {
     "src/index.jsx",
     "src/index.js",
 }
+
+REPORT_AND_METADATA_FILES = {
+    "requirements.md",
+    "tech_stack.json",
+    "quality_report.md",
+    "quality-report.json",
+    "quality_report.json",
+    "content_quality_report.json",
+    "runtime_qa_report.json",
+    "repo_workflow_report.json",
+    "audit_report.json",
+    "deploy_report.json",
+    "repair_plan.json",
+    "avatar_manifest.json",
+    "voice_avatar_manifest.json",
+    "media_manifest.json",
+    "motion_manifest.json",
+    "preview-manifest.json",
+    "amarktai.project.json",
+}
+
+
+def is_report_or_metadata_file(path: str | None) -> bool:
+    """Return true for internal artifacts that are not generated app source.
+
+    These files may be persisted for evidence and final gates, but they should
+    never be included in agent app-file payloads or counted as required source
+    files for a generated application.
+    """
+    rel = (path or "").replace("\\", "/").strip().lstrip("./")
+    name = rel.rsplit("/", 1)[-1]
+    return (
+        rel in REPORT_AND_METADATA_FILES
+        or name in REPORT_AND_METADATA_FILES
+        or rel.startswith("runtime-qa/")
+        or rel.startswith(".amarktai/")
+        or name.endswith("_report.json")
+        or name.endswith("-report.json")
+        or name.endswith("_manifest.json")
+        or name.endswith("-manifest.json")
+    )
+
+
+def filter_app_source_files(files: list[dict]) -> list[dict]:
+    return [
+        item for item in (files or [])
+        if isinstance(item, dict)
+        and item.get("path")
+        and not is_report_or_metadata_file(str(item.get("path")))
+    ]
 
 _HTML_CLOSE_RE = re.compile(r"</html\s*>", re.IGNORECASE)
 _SECTION_RE = re.compile(r"<section\b", re.IGNORECASE)

@@ -156,6 +156,25 @@ async def execute_avatar_pipeline(
         )
         return _persist_fallback(workspace, manifest, prompt)
 
+    image_remote_url = (assets["image"] or {}).get("remote_url") or ""
+    audio_remote_url = (assets["audio"] or {}).get("remote_url") or ""
+    if not image_remote_url or not audio_remote_url:
+        attempts.append({
+            "stage": "avatar_input_validation",
+            "ok": False,
+            "reason": "Avatar video generation requires provider-accessible image and audio URLs; local filesystem paths are not sent to GenX.",
+            "has_image_remote_url": bool(image_remote_url),
+            "has_audio_remote_url": bool(audio_remote_url),
+        })
+        manifest = _fallback_manifest(
+            project_id,
+            selected_avatar_model,
+            attempts,
+            "Avatar source image/audio were persisted locally but no provider-accessible remote URLs were returned.",
+            assets=assets,
+        )
+        return _persist_fallback(workspace, manifest, prompt)
+
     avatar_result = await generate_genx_media_job(
         api_key=genx_api_key,
         base_url=genx_base_url,
@@ -164,9 +183,9 @@ async def execute_avatar_pipeline(
         category="video",
         extra={
             "purpose": "avatar_image_audio_to_video",
-            "image_path": assets["image"]["path"],
-            "audio_path": assets["audio"]["path"],
-            "inputs": {"image": assets["image"]["path"], "audio": assets["audio"]["path"]},
+            "image_url": image_remote_url,
+            "audio_url": audio_remote_url,
+            "inputs": {"image_url": image_remote_url, "audio_url": audio_remote_url},
         },
     )
     attempts.append(_safe_attempt(avatar_result, "avatar_video"))
