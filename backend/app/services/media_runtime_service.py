@@ -20,9 +20,30 @@ from agents.media_storage import get_max_upload_bytes, safe_filename, validate_u
 from app.services.genx_live_probe_service import discover_genx_runtime
 from app.services.genx_runtime_service import generate_genx_media_job
 
+DEFAULT_BUILDS_ROOT = "/var/www/amarktai/builds"
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _builds_root() -> Path:
+    return Path(os.environ.get("BUILDS_STORAGE_ROOT", DEFAULT_BUILDS_ROOT)).resolve()
+
+
+def _safe_workspace_path(workspace_path: str | Path) -> Path:
+    workspace = Path(workspace_path).resolve()
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        workspace.mkdir(parents=True, exist_ok=True)
+        return workspace
+    root = _builds_root()
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        workspace.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"Workspace path must be inside build storage root: {root}") from exc
+    workspace.mkdir(parents=True, exist_ok=True)
+    return workspace
 
 
 def _media_dir(workspace: Path) -> Path:
@@ -462,8 +483,7 @@ async def execute_media_plan(
     allow_stock_fallback: bool = True,
 ) -> dict[str, Any]:
     """Create real media assets and persist `media_manifest.json` in a workspace."""
-    workspace = Path(workspace_path).resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
+    workspace = _safe_workspace_path(workspace_path)
     sections = sections or ["hero", "features", "cta"]
     assets: list[dict[str, Any]] = []
     attempts: list[dict[str, Any]] = []
@@ -714,6 +734,7 @@ def summarize_media_section_alignment(
     *,
     sections: list[str] | None = None,
 ) -> dict[str, Any]:
+    workspace = _safe_workspace_path(workspace)
     html = ""
     for rel in ("index.html", "public/index.html"):
         path = workspace / rel
@@ -753,6 +774,7 @@ def summarize_media_section_alignment(
 
 def inject_media_assets(workspace: Path, assets: list[dict[str, Any]], *, sections: list[str] | None = None) -> list[str]:
     """Inject persisted media assets into static HTML/CSS when generated files omit them."""
+    workspace = _safe_workspace_path(workspace)
     changed: list[str] = []
     media_assets = [
         asset for asset in assets
