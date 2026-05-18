@@ -295,6 +295,7 @@ test("capability center shows runtime and optional setup-needed capabilities", (
     "Runtime QA",
     "Playwright",
     "Lighthouse",
+    "Add Integrations",
     "Whisper",
     "FAISS",
     "Stable Diffusion",
@@ -536,4 +537,3 @@ test("AgentTimeline shows failed and skipped states", () => {
   expect(content).toMatch(/isSkipped/);
   expect(content).toMatch(/latestDetail/);
 });
-

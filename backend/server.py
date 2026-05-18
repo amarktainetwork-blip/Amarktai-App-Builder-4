@@ -3959,6 +3959,13 @@ class GitPushBody(BaseModel):
     force: bool = False
 
 
+class GitDiffBody(BaseModel):
+    owner: str = Field(min_length=1, max_length=100)
+    repo: str = Field(min_length=1, max_length=100)
+    branch: str = Field(min_length=1, max_length=200)
+    base_branch: str = "main"
+
+
 class GitPRBody(BaseModel):
     owner: str = Field(min_length=1, max_length=100)
     repo: str = Field(min_length=1, max_length=100)
@@ -4031,6 +4038,20 @@ async def builds_git_commit(project_id: str, body: GitCommitBody, claims: dict =
             message=body.message,
             author_name=body.author_name,
             author_email=body.author_email,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@secured.post("/builds/{project_id}/git/diff")
+async def builds_git_diff(project_id: str, body: GitDiffBody, claims: dict = Depends(require_user)) -> dict:
+    """Get branch diff preview for review before commit/PR."""
+    try:
+        return _git_svc.get_branch_diff(
+            owner=body.owner,
+            repo=body.repo,
+            branch=body.branch,
+            base_branch=body.base_branch,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))

@@ -163,6 +163,42 @@ class TestModeClassifier:
         assert _mode_from_mc(result)
 
 
+class TestPhase2RequestedBuildModes:
+    """Smoke prompts for Phase 2 requested build modes."""
+
+    @pytest.mark.parametrize("mode_hint,expected_any", [
+        ("landing_page", {"landing_page", "landing-page", "website", "media_page"}),
+        ("website", {"website", "landing_page", "multi-page-website", "web_app"}),
+        ("pwa", {"pwa", "website", "web_app"}),
+        ("web_app", {"web_app", "dashboard", "full_stack", "custom"}),
+        ("dashboard", {"dashboard", "web_app", "admin_panel"}),
+        ("full_stack", {"full_stack", "web_app", "api_service", "fullstack-saas"}),
+        ("api_service", {"api_service", "api-service", "api_backend", "full_stack"}),
+        ("repo_fix", {"repo_fix", "repo-upgrade", "web_app"}),
+        ("ai_chat_rag_app", {"ai_chat_rag_app", "ai-chat-rag-app", "web_app", "api_service"}),
+        ("crm_dashboard", {"crm_dashboard", "crm-dashboard", "dashboard", "web_app"}),
+    ])
+    def test_infer_build_mode_smoke_modes(self, mode_hint: str, expected_any: set[str]):
+        inferred = infer_build_mode(mode_hint)
+        assert inferred in expected_any
+
+    @pytest.mark.parametrize("prompt,expected_any", [
+        ("Build a landing page for a bakery launch.", {"landing_page", "website", "media_page"}),
+        ("Build a 5-page marketing website.", {"website", "landing_page", "web_app"}),
+        ("Build a progressive web app with offline support.", {"pwa", "web_app", "website"}),
+        ("Build an interactive web app for customer onboarding.", {"web_app", "dashboard", "full_stack"}),
+        ("Build an analytics dashboard with charts and auth.", {"dashboard", "web_app", "admin_panel", "saas_dashboard"}),
+        ("Build a full-stack SaaS app with frontend and backend.", {"full_stack", "web_app", "api_service", "saas_dashboard"}),
+        ("Build an API service for order processing.", {"api_service", "api_backend", "full_stack"}),
+        ("Fix my repo: tests and build are broken.", {"repo_fix", "repo_upgrade", "web_app"}),
+        ("Build an AI chat app with RAG over docs.", {"ai_chat_rag_app", "web_app", "api_service"}),
+        ("Build a CRM/dashboard for sales leads and deals.", {"crm_dashboard", "dashboard", "web_app", "admin_panel"}),
+    ])
+    def test_classify_build_mode_smoke_prompts(self, prompt: str, expected_any: set[str]):
+        result = classify_build_mode(prompt)
+        assert _mode_from_mc(result) in expected_any
+
+
 # ── Report file filtering ──────────────────────────────────────────────────────
 
 class TestReportFileFiltering:

@@ -347,6 +347,9 @@ def commit_changes(
     # Sanitise commit message
     safe_message = message[:500].replace("\x00", "")
 
+    rc0, so0, se0 = _run_git(["diff", "--name-status"], cwd=ws)
+    review_diff = [line.strip() for line in (so0 or "").splitlines() if line.strip()] if rc0 == 0 else []
+
     env = {
         "GIT_AUTHOR_NAME": author_name,
         "GIT_AUTHOR_EMAIL": author_email,
@@ -361,7 +364,12 @@ def commit_changes(
         ["commit", "-m", safe_message], cwd=ws, env=env
     )
     if rc2 != 0 and "nothing to commit" in se2 + so2:
-        return {"ok": True, "skipped": True, "reason": "nothing to commit"}
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": "nothing to commit",
+            "review_diff": review_diff,
+        }
 
     rc3, so3, _ = _run_git(["rev-parse", "HEAD"], cwd=ws)
     commit_sha = so3.strip() if rc3 == 0 else ""
@@ -371,6 +379,7 @@ def commit_changes(
         "error": se2[:200] if rc2 != 0 else None,
         "commit_sha": commit_sha,
         "message": safe_message,
+        "review_diff": review_diff,
     }
 
 
