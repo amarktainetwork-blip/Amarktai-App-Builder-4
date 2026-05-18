@@ -51,7 +51,7 @@ def test_ensure_contract_files_skips_non_ensured_changes_without_keyerror(monkey
 
 
 def test_truncated_html_recovery_repairs_anchor_targets_for_bakery_prompt():
-    prompt = "premium cinematic luxury artisan bakery landing page ember and crumb"
+    prompt = "premium cinematic luxury artisan bakery landing page fixture bakery"
     broken = [
         {
             "path": "index.html",

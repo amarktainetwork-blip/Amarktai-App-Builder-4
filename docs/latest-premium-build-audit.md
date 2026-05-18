@@ -1,8 +1,8 @@
-# Latest Premium Build Audit: Ember & Crumb
+# Latest Premium Build Audit: Premium Bakery Fixture
 
 Project: `284c4875-a5bd-4224-9fc8-a99263b7e2b4`
 
-This audit records why the Ember & Crumb build was not a truthful premium/cinematic pass.
+This audit records why the audited premium bakery build was not a truthful premium/cinematic pass.
 
 ## Provider Execution
 
@@ -45,4 +45,4 @@ Those issues were not reflected strongly enough in final premium status.
 
 ## Retest Requirement
 
-After merge/deploy, rerun the Ember & Crumb prompt. The build must show provider attempts clearly, truthful manifest status, gallery/story/menu alignment, hero cinematic media treatment when available, realistic premium score, and final status that reflects runtime QA issues.
+After merge/deploy, rerun the audited premium bakery prompt. The build must show provider attempts clearly, truthful manifest status, gallery/story/menu alignment, hero cinematic media treatment when available, realistic premium score, and final status that reflects runtime QA issues.

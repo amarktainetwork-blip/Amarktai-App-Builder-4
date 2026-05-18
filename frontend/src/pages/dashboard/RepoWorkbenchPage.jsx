@@ -127,7 +127,7 @@ export default function RepoWorkbenchPage() {
         </div>
 
         <div className="mt-6 grid gap-3 md:grid-cols-8">
-          {["Connect", "Import", "Ask Aiva", "Analyze", "Plan", "Diff", "Commit", "Open PR"].map((step, index) => (
+          {["Connect", "Import", "Describe change", "Analyze", "Plan", "Diff", "Commit", "Open PR"].map((step, index) => (
             <div key={step} className="rounded-2xl border border-amk-line bg-amk-base/70 p-3">
               <div className="font-mono text-[9px] uppercase tracking-wider text-amk-fg3">0{index + 1}</div>
               <div className="mt-2 font-display text-sm text-white">{step}</div>

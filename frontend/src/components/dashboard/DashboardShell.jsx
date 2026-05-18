@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Activity, Boxes, Database, Github, Image, LayoutDashboard, Lightbulb, LogOut, Plus, Settings, Sparkles } from "lucide-react";
+import { Activity, Boxes, Database, Github, Image, LayoutDashboard, Lightbulb, LogOut, Plus, Settings, ShieldCheck, Sparkles } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
 const GROUPS = [
@@ -15,9 +15,11 @@ const GROUPS = [
   ]],
   ["Engineering", [
     { to: "/dashboard/repo", label: "Repo Workbench", icon: Github },
-    { to: "/system", label: "System", icon: Activity },
+    { to: "/system", label: "Runtime QA", icon: Activity },
+    { to: "/system", label: "Final Gate", icon: ShieldCheck },
   ]],
   ["Control", [
+    { to: "/dashboard/settings", label: "Capability Center", icon: ShieldCheck },
     { to: "/dashboard/settings", label: "Settings", icon: Settings },
   ]],
 ];
@@ -28,10 +30,10 @@ export default function DashboardShell() {
   const flatNav = GROUPS.flatMap(([, items]) => items);
 
   return (
-    <div className="aiva-shell min-h-screen text-amk-fg">
+    <div className="command-shell min-h-screen text-amk-fg">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 border-r border-amk-line bg-[#030712]/88 p-4 backdrop-blur-2xl lg:flex lg:flex-col">
         <Link to="/dashboard" className="glass-panel rounded-3xl p-4">
-          <div className="font-display text-lg font-semibold text-white">Aiva Command Center</div>
+          <div className="font-display text-lg font-semibold text-white">Amarktai Command Center</div>
           <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.22em] text-amk-accent">Amarktai App Builder</div>
         </Link>
         <div className="mt-5 flex-1 space-y-5 overflow-y-auto pr-1">
@@ -53,7 +55,7 @@ export default function DashboardShell() {
         <header className="sticky top-0 z-30 border-b border-amk-line bg-[#030712]/78 backdrop-blur-2xl">
           <div className="flex min-h-16 items-center justify-between gap-3 px-4 lg:px-8">
             <div className="min-w-0">
-              <div className="font-display text-lg font-semibold tracking-tight text-white">Aiva Command Center</div>
+              <div className="font-display text-lg font-semibold tracking-tight text-white">Amarktai Command Center</div>
               <div className="hidden font-mono text-[9px] uppercase tracking-[0.2em] text-amk-fg3 sm:block">Truth-gated AI software factory</div>
             </div>
             <div className="flex items-center gap-2">

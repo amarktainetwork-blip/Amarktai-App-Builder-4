@@ -1,0 +1,132 @@
+{
+  "audit_timestamp": "2026-05-18",
+  "current_branch_before_cleanup": "production-launch-recovery-remove-retired-persona-perfect-website-dashboard-agents",
+  "current_commit_before_cleanup": "39650481b3e712504bb61f723df40de023224ea9",
+  "base_commit_subject": "Merge pull request #33 from the premium cinematic redesign branch",
+  "routes_found": [
+    "/",
+    "/features",
+    "/pipeline",
+    "/access",
+    "/login",
+    "/contact",
+    "/privacy",
+    "/terms",
+    "/dashboard",
+    "/dashboard/idea-builder",
+    "/dashboard/new",
+    "/dashboard/projects",
+    "/dashboard/repo",
+    "/dashboard/builds",
+    "/dashboard/media",
+    "/dashboard/settings",
+    "/app -> /dashboard",
+    "/system",
+    "/admin/users",
+    "/workspace/:projectId"
+  ],
+  "dashboard_pages_found": [
+    "frontend/src/pages/dashboard/DashboardHome.jsx",
+    "frontend/src/pages/dashboard/NewBuildPage.jsx",
+    "frontend/src/pages/dashboard/ProjectsPage.jsx",
+    "frontend/src/pages/dashboard/RepoWorkbenchPage.jsx",
+    "frontend/src/pages/dashboard/BuildStoragePage.jsx",
+    "frontend/src/pages/dashboard/MediaPage.jsx",
+    "frontend/src/pages/dashboard/SettingsPage.jsx",
+    "frontend/src/pages/SystemHealth.jsx"
+  ],
+  "public_pages_found": [
+    "frontend/src/pages/Landing.jsx",
+    "frontend/src/pages/Features.jsx",
+    "frontend/src/pages/Pipeline.jsx",
+    "frontend/src/pages/Access.jsx",
+    "frontend/src/pages/Login.jsx",
+    "frontend/src/pages/Contact.jsx",
+    "frontend/src/pages/Privacy.jsx",
+    "frontend/src/pages/Terms.jsx"
+  ],
+  "agent_files_found": [
+    "backend/agents/orchestrator.py",
+    "backend/agents/agent_registry.py",
+    "backend/agents/agent_contracts.py",
+    "backend/agents/creative_director.py",
+    "backend/agents/design_engine.py",
+    "backend/agents/media_director.py",
+    "backend/agents/quality_validator.py",
+    "backend/app/orchestrator/execution_graph.py"
+  ],
+  "provider_capability_files_found": [
+    "backend/app/services/capability_truth_service.py",
+    "backend/app/core/capability_registry.py",
+    "backend/app/services/genx_runtime_service.py",
+    "backend/app/services/genx_live_probe_service.py",
+    "backend/app/services/genx_model_sync.py",
+    "backend/app/services/live_probe_service.py",
+    "backend/app/services/model_router.py"
+  ],
+  "runtime_qa_files_found": [
+    "backend/app/services/runtime_qa_service.py",
+    "backend/app/services/quality_gate_service.py",
+    "backend/app/services/content_quality_service.py",
+    "backend/tests/test_premium_quality_gate.py",
+    "backend/tests/test_phase3_services.py"
+  ],
+  "repo_workbench_files_found": [
+    "frontend/src/pages/dashboard/RepoWorkbenchPage.jsx",
+    "frontend/src/pages/dashboard/BuildStoragePage.jsx",
+    "frontend/src/components/RepoWorkbenchPanel.jsx",
+    "backend/app/services/github_repo_service.py",
+    "backend/app/services/repo_workflow_guard_service.py",
+    "backend/server.py"
+  ],
+  "duplicate_or_stale_systems_found": [
+    {
+      "area": "capability truth",
+      "evidence": "backend/app/core/capability_registry.py exists alongside backend/app/services/capability_truth_service.py",
+      "risk": "legacy registry summaries must not override CapabilityTruthService status labels"
+    },
+    {
+      "area": "public persona branding",
+      "evidence": "PR #33 introduced retired-assistant copy and a persona-named shell CSS class",
+      "risk": "public product identity drift"
+    },
+    {
+      "area": "fixture naming",
+      "evidence": "older audit docs/tests used a fixture-specific bakery brand name",
+      "risk": "fixture-specific copy can look like product hardcoding if left uncleaned"
+    }
+  ],
+  "broken_or_risky_areas_before_cleanup": [
+    "Retired persona branding appeared in public website copy, dashboard labels, placeholders, terminal mock text, and CSS class names.",
+    "Dashboard navigation did not explicitly expose Runtime QA, Final Gate, and Capability Center labels after the redesign.",
+    "System health page used older flat styling and did not present go-live/model-router evidence in the same production cockpit language.",
+    "Old premium bakery fixture name appeared in docs/tests and needed neutralization."
+  ],
+  "tests_available": [
+    "python -m compileall backend",
+    "python -m pytest -q",
+    "python -m pytest -q backend/tests/test_capability_truth_labels.py",
+    "python -m pytest -q backend/tests/test_premium_quality_gate.py",
+    "python -m pytest -q backend/tests/test_agent_audit.py",
+    "python -m pytest -q backend/tests/test_firecrawl_go_live_status.py",
+    "cd frontend && corepack yarn test --watchAll=false",
+    "cd frontend && corepack yarn build"
+  ],
+  "production_blockers_found_before_cleanup": [
+    "Retired persona branding in user-facing UI and CSS after PR #33.",
+    "Old fixture-specific bakery naming in audit docs/tests.",
+    "Dashboard production evidence surfaces needed clearer Runtime QA, Capability Center, and Final Gate labels."
+  ],
+  "exact_retired_branding_matches_found_before_cleanup": [
+    "frontend/src/pages/Landing.jsx: retired persona command-intelligence copy, prompt copy, repo terminal command, and command-center label",
+    "frontend/src/pages/Features.jsx: retired persona production-loop copy",
+    "frontend/src/pages/Pipeline.jsx: retired persona clarify and routing copy",
+    "frontend/src/pages/Access.jsx: retired persona command-center label",
+    "frontend/src/components/dashboard/DashboardShell.jsx: persona-named shell CSS class and command-center label",
+    "frontend/src/pages/dashboard/DashboardHome.jsx: retired persona control-room copy and repo-routing copy",
+    "frontend/src/pages/dashboard/NewBuildPage.jsx: retired persona routing headline, placeholder, and build-sequence label",
+    "frontend/src/pages/dashboard/RepoWorkbenchPage.jsx: retired persona ask step",
+    "frontend/src/App.css: persona-named shell selector",
+    "docs/latest-premium-build-audit.md and several backend tests: fixture-specific bakery naming"
+  ]
+}

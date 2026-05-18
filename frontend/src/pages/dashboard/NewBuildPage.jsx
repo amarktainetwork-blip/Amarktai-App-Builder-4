@@ -138,13 +138,13 @@ export default function NewBuildPage() {
       <section className="premium-card overflow-hidden rounded-3xl">
         <div className="border-b border-amk-line p-6">
           <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-amk-accent">New build</div>
-          <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight text-white md:text-5xl">Describe the product. Aiva routes the build.</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-amk-fg2">Aiva plans it, designs it, builds it, tests it, repairs it, and prepares it for launch. Provider-backed media stays truth-gated.</p>
+          <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight text-white md:text-5xl">Describe the product. The Builder Engine routes the build.</h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-amk-fg2">Amarktai Builder plans it, designs it, builds it, tests it, repairs it, and prepares it for launch. Provider-backed media stays truth-gated.</p>
         </div>
 
         <form onSubmit={create} className="space-y-6 p-6" data-testid="create-project-form">
           <Field label="Project name">
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Aiva Revenue Ops" className="field-input rounded-2xl" data-testid="project-name-input" />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Revenue Ops Command Center" className="field-input rounded-2xl" data-testid="project-name-input" />
           </Field>
 
           <Field label="Build prompt">
@@ -219,7 +219,7 @@ export default function NewBuildPage() {
           {readiness?.blockers?.length > 0 && <p className="mt-2 text-xs leading-5 text-agent-scout">{readiness.blockers[0]}</p>}
         </div>
         <div className="glass-panel rounded-3xl p-5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3">Aiva build sequence</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3">Builder Engine sequence</div>
           <div className="mt-4 space-y-2">
             {["Clarify intent", "Plan product architecture", "Design interface", "Generate files", "Apply media policy", "Preview and QA", "Repair and gate"].map((item, index) => (
               <div key={item} className="flex items-center gap-3 rounded-2xl bg-amk-base/70 p-3">

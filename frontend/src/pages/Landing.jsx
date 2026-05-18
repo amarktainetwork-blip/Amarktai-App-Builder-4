@@ -71,16 +71,16 @@ export default function LandingPage() {
         <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55 }}>
           <div className="status-pill inline-flex items-center gap-2 text-amk-accent">
             <span className="h-2 w-2 rounded-full bg-amk-accent shadow-[0_0_24px_rgba(34,211,238,.8)]" />
-            Aiva command intelligence
+            Amarktai Builder command intelligence
           </div>
           <h1 className="mt-7 max-w-4xl font-display text-5xl font-semibold leading-[0.95] tracking-tight text-white md:text-7xl">
             Build production software with an AI team that can <span className="gradient-text">design, code, test, repair, and launch.</span>
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-amk-fg2">
-            Aiva turns a prompt into a working product workspace - with specialist agents for UI, code, media, QA, repo work, runtime checks, and launch gates.
+            Amarktai Builder turns a prompt into a working product workspace - with specialist agents for UI, code, media, QA, repo work, runtime checks, and launch gates.
           </p>
           <p className="mt-4 max-w-xl text-sm leading-6 text-amk-fg3">
-            Describe what you want. Aiva plans it, designs it, builds it, tests it, repairs it, and prepares it for launch.
+            Describe what you want. The Builder Engine plans it, designs it, builds it, tests it, repairs it, and prepares it for launch.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link to="/access" className="cta-primary inline-flex h-12 items-center gap-2 rounded-2xl px-6 font-mono text-xs uppercase tracking-wider">
@@ -113,7 +113,7 @@ export default function LandingPage() {
         </div>
       </SectionShell>
 
-      <SectionShell eyebrow="Agent orchestra" title="Aiva routes the work to the right specialist agents.">
+      <SectionShell eyebrow="Agent orchestra" title="The orchestration engine routes work to the right specialist agents.">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           {agents.map(([name, copy], index) => (
             <motion.div
@@ -169,7 +169,7 @@ export default function LandingPage() {
             ))}
           </div>
           <div className="mt-5 rounded-2xl bg-black/30 p-4 font-mono text-xs leading-6 text-amk-fg2">
-            <div className="text-amk-accent">$ aiva repo plan --truth-gated</div>
+            <div className="text-amk-accent">$ amarktai repo plan --truth-gated</div>
             <div>imported repo -> stack analyzed -> files changed -> diff reviewed -> PR ready when configured</div>
           </div>
         </div>
@@ -236,7 +236,7 @@ function CommandCenterMockup() {
     <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.65, delay: 0.1 }} className="glass-panel rounded-3xl p-4">
       <div className="rounded-2xl border border-amk-line bg-amk-base/80">
         <div className="flex items-center justify-between border-b border-amk-line px-4 py-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3">Aiva Command Center</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3">Amarktai Command Center</div>
           <div className="flex gap-1.5"><span className="h-2 w-2 rounded-full bg-amk-red" /><span className="h-2 w-2 rounded-full bg-amk-amber" /><span className="h-2 w-2 rounded-full bg-amk-green" /></div>
         </div>
         <div className="grid gap-px bg-amk-line md:grid-cols-[0.88fr_1.12fr]">

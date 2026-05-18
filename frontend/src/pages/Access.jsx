@@ -44,7 +44,7 @@ export default function AccessPage() {
           </p>
 
           <div className="mt-8 grid gap-4 md:grid-cols-2">
-            <Info title="Access includes" icon={Sparkles} items={["Aiva Command Center", "New builds and workspaces", "Repo Workbench", "Media Studio", "Runtime QA and final gates"]} />
+            <Info title="Access includes" icon={Sparkles} items={["Amarktai Command Center", "New builds and workspaces", "Repo Workbench", "Media Studio", "Runtime QA and final gates"]} />
             <Info title="Approval checks" icon={ShieldCheck} items={["Use case clarity", "Responsible build intent", "Provider setup needs", "Team fit", "Beta capacity"]} />
           </div>
           <div className="mt-6 rounded-3xl border border-amk-amber/30 bg-amk-amber/10 p-5 text-sm leading-6 text-amber-100">

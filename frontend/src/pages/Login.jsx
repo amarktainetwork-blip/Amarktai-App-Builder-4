@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { ArrowRight, Lock, Mail, AlertCircle } from "lucide-react";
+import { AlertCircle, ArrowRight, Lock, Mail } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 
@@ -37,11 +37,12 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen grid lg:grid-cols-2 bg-amk-base">
-      {/* Left visual */}
-      <div className="hidden lg:flex relative hero-glow hero-grain border-r border-amk-line p-12 flex-col justify-between overflow-hidden">
-        <Link to="/" className="flex items-center gap-2.5 relative z-10 w-fit">
-          <div className="w-7 h-7 grid place-items-center border border-amk-line bg-amk-panel">
+    <div className="cinematic-bg grid min-h-screen text-amk-fg lg:grid-cols-2">
+      <div className="relative hidden flex-col justify-between overflow-hidden border-r border-amk-line p-12 lg:flex">
+        <div className="premium-orb orb-cyan left-[-12rem] top-16" />
+        <div className="premium-orb orb-violet right-[-10rem] bottom-24" />
+        <Link to="/" className="relative z-10 flex w-fit items-center gap-2.5">
+          <div className="grid h-8 w-8 place-items-center rounded-2xl border border-amk-line bg-amk-panel/80">
             <span className="font-mono text-[13px] font-bold">A</span>
           </div>
           <span className="font-display font-semibold tracking-tight">
@@ -49,41 +50,40 @@ export default function LoginPage() {
           </span>
         </Link>
         <div className="relative z-10 max-w-md">
-          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3 mb-4">[ approved users only ]</div>
-          <h1 className="font-display font-semibold text-4xl tracking-tight leading-[1.05] mb-6">
-            Single-tenant.<br />
-            Single-key.<br />
-            <span className="text-amk-accent">Single-admin.</span>
+          <div className="mb-4 font-mono text-[10px] uppercase tracking-[0.22em] text-amk-accent">Private command center</div>
+          <h1 className="mb-6 font-display text-4xl font-semibold leading-[1.05] tracking-tight">
+            Approved access for<br />
+            the Amarktai<br />
+            <span className="gradient-text">Software Factory.</span>
           </h1>
-          <p className="text-sm text-amk-fg2 leading-relaxed">
+          <p className="text-sm leading-relaxed text-amk-fg2">
             Private beta users can start builds, import repos, preview work, and configure provider keys from the dashboard.
           </p>
         </div>
-        <div className="relative z-10 font-mono text-[10px] text-amk-fg3 uppercase tracking-wider">
-          <span className="blink">// jwt · bcrypt · tls</span>
+        <div className="relative z-10 font-mono text-[10px] uppercase tracking-wider text-amk-fg3">
+          <span>// jwt / bcrypt / tls</span>
         </div>
       </div>
 
-      {/* Right form */}
       <div className="grid place-items-center p-6 sm:p-12">
-        <div className="w-full max-w-sm" data-testid="login-card">
-          <Link to="/" className="lg:hidden flex items-center gap-2 mb-10">
-            <div className="w-7 h-7 grid place-items-center border border-amk-line bg-amk-panel">
+        <div className="glass-panel w-full max-w-md rounded-3xl p-6 sm:p-8" data-testid="login-card">
+          <Link to="/" className="mb-10 flex items-center gap-2 lg:hidden">
+            <div className="grid h-8 w-8 place-items-center rounded-2xl border border-amk-line bg-amk-panel">
               <span className="font-mono text-[13px] font-bold">A</span>
             </div>
             <span className="font-display font-semibold tracking-tight">
               Amarktai <span className="text-amk-accent">App Builder</span>
             </span>
           </Link>
-          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3 mb-3">[ approved users only ]</div>
-          <h2 className="font-display font-semibold text-3xl tracking-tight mb-2">Login to the private beta</h2>
-          <p className="text-sm text-amk-fg2 mb-8">Use the credentials issued after approval. Not approved yet? Request access below.</p>
+          <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.22em] text-amk-accent">Approved users only</div>
+          <h2 className="mb-2 font-display text-3xl font-semibold tracking-tight">Login to the private beta</h2>
+          <p className="mb-8 text-sm text-amk-fg2">Use the credentials issued after approval. Not approved yet? Request access below.</p>
 
           <form onSubmit={submit} className="space-y-4" data-testid="login-form">
             <div>
-              <label className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3 block mb-1.5">Email</label>
+              <label className="mb-1.5 block font-mono text-[10px] uppercase tracking-wider text-amk-fg3">Email</label>
               <div className="relative">
-                <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-amk-fg3" strokeWidth={1.5} />
+                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amk-fg3" strokeWidth={1.5} />
                 <input
                   data-testid="login-email-input"
                   type="email"
@@ -93,14 +93,14 @@ export default function LoginPage() {
                   autoFocus
                   autoComplete="email"
                   placeholder="admin@amarktai.io"
-                  className="w-full bg-amk-panel border border-amk-line h-11 pl-10 pr-3 font-mono text-sm focus:outline-none focus:border-white text-amk-fg placeholder:text-amk-fg3"
+                  className="h-11 w-full rounded-2xl border border-amk-line bg-amk-panel pl-10 pr-3 font-mono text-sm text-amk-fg placeholder:text-amk-fg3 focus:border-amk-accent focus:outline-none"
                 />
               </div>
             </div>
             <div>
-              <label className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3 block mb-1.5">Password</label>
+              <label className="mb-1.5 block font-mono text-[10px] uppercase tracking-wider text-amk-fg3">Password</label>
               <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-amk-fg3" strokeWidth={1.5} />
+                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amk-fg3" strokeWidth={1.5} />
                 <input
                   data-testid="login-password-input"
                   type="password"
@@ -108,14 +108,14 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   autoComplete="current-password"
-                  placeholder="••••••••••••"
-                  className="w-full bg-amk-panel border border-amk-line h-11 pl-10 pr-3 font-mono text-sm focus:outline-none focus:border-white text-amk-fg placeholder:text-amk-fg3"
+                  placeholder="password"
+                  className="h-11 w-full rounded-2xl border border-amk-line bg-amk-panel pl-10 pr-3 font-mono text-sm text-amk-fg placeholder:text-amk-fg3 focus:border-amk-accent focus:outline-none"
                 />
               </div>
             </div>
             {err && (
-              <div data-testid="login-error" className="flex items-start gap-2 px-3 py-2 border border-red-900/60 bg-red-950/40 text-red-300 font-mono text-[11px]">
-                <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" strokeWidth={1.5} />
+              <div data-testid="login-error" className="flex items-start gap-2 rounded-2xl border border-red-900/60 bg-red-950/40 px-3 py-2 font-mono text-[11px] text-red-300">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
                 <span>{err}</span>
               </div>
             )}
@@ -123,12 +123,12 @@ export default function LoginPage() {
               data-testid="login-submit-btn"
               type="submit"
               disabled={busy}
-              className="w-full h-11 bg-white text-black hover:bg-zinc-200 disabled:opacity-50 font-mono text-xs uppercase tracking-wider inline-flex items-center justify-center gap-2"
+              className="cta-primary inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl font-mono text-xs uppercase tracking-wider disabled:opacity-50"
             >
-              {busy ? "Signing in..." : (<>Sign in <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} /></>)}
+              {busy ? "Signing in..." : (<>Sign in <ArrowRight className="h-3.5 w-3.5" strokeWidth={2} /></>)}
             </button>
           </form>
-          <p className="font-mono text-[10px] text-amk-fg3 mt-8 leading-relaxed">
+          <p className="mt-8 font-mono text-[10px] leading-relaxed text-amk-fg3">
             Need access? <Link to="/access" className="text-amk-accent hover:text-white">Request Access</Link>.
           </p>
         </div>
