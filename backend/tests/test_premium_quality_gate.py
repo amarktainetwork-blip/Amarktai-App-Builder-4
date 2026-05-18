@@ -8,17 +8,27 @@ def _premium_workspace(ws: Path, *, fallback: bool = False, broken_media: bool =
         (ws / "media" / name).write_bytes(b"asset")
     missing_src = "media/missing.jpg" if broken_media else "media/gallery.jpg"
     (ws / "index.html").write_text(
-        "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head>"
+        "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'><link rel='stylesheet' href='https://fonts.bunny.net/css?family=playfair-display:700|inter:400,600'></head>"
         "<body><main>"
-        "<section id='hero'><div class='amarktai-hero-media-layer'><video data-amarktai-media-asset data-amarktai-hero-background src='media/hero.mp4'></video></div><h1>Fixture Bakery</h1></section>"
-        "<section id='menu'><h2>Wood-fired pastries and sourdough menu</h2><p>Seasonal loaves, laminated pastries, espresso, and tasting boxes.</p><img data-amarktai-media-asset src='media/menu.jpg' alt='Menu'></section>"
-        "<section id='story'><h2>Our bakery story</h2><p>Small-batch doughs, cultured butter, and neighborhood hospitality shape every morning.</p><img data-amarktai-media-asset src='media/story.jpg' alt='Story'></section>"
-        f"<section id='gallery'><h2>Gallery</h2><p>See the crust, pastry layers, and warm counter moments.</p><img data-amarktai-media-asset src='{missing_src}' alt='Gallery'></section>"
-        "<section id='contact'><h2>Visit Fixture Bakery</h2><p>Reserve a tasting, plan a catering box, or ask about weekly specials.</p><img data-amarktai-media-asset src='media/contact.jpg' alt='Contact'><a href='#hero'>Book a tasting</a></section>"
+        "<section id='hero' class='cinematic scene media_scene split'><div class='amarktai-hero-media-layer'><video data-amarktai-media-asset data-amarktai-hero-background src='media/hero.mp4'></video></div><p class='eyebrow'>Warm craft chapter</p><h1>Fixture Bakery</h1><p>A cinematic story of fire, grain, and morning ritual.</p></section>"
+        "<section id='menu' class='editorial split product-rail'><h2>Wood-fired pastries and sourdough menu</h2><p>Seasonal loaves, laminated pastries, espresso, and tasting boxes.</p><img data-amarktai-media-asset src='media/menu.jpg' alt='Menu'></section>"
+        "<section id='story' class='story chapter editorial'><h2>Our bakery story</h2><p>Small-batch doughs, cultured butter, and neighborhood hospitality shape every morning.</p><img data-amarktai-media-asset src='media/story.jpg' alt='Story'></section>"
+        f"<section id='gallery' class='gallery immersive media_scene'><h2>Gallery</h2><p>See the crust, pastry layers, and warm counter moments.</p><img data-amarktai-media-asset src='{missing_src}' alt='Gallery'></section>"
+        "<section id='proof' class='metrics proof'><h2>Daily proof</h2><p>48-hour ferments, 6am bake cycles, and neighborhood pickup rituals.</p></section>"
+        "<section id='contact' class='cta conversion finale'><h2>Visit Fixture Bakery</h2><p>Reserve a tasting, plan a catering box, or ask about weekly specials.</p><img data-amarktai-media-asset src='media/contact.jpg' alt='Contact'><a href='#hero'>Book a tasting</a></section>"
         "</main></body></html>",
         encoding="utf-8",
     )
-    (ws / "styles.css").write_text("@media (max-width:700px){section{display:block}}", encoding="utf-8")
+    (ws / "styles.css").write_text(
+        ":root{--color-bg:#170f0a;--color-accent:#d6a15f;--font-heading:'Playfair Display';--font-body:'Inter'}"
+        "body{font-family:var(--font-body);background:radial-gradient(circle,#5b341a,transparent),#170f0a;color:#fff}"
+        "h1,h2{font-family:var(--font-heading);font-size:clamp(2.5rem,7vw,7rem)}"
+        "section{padding:clamp(3rem,7vw,8rem);display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(1.5rem,4vw,4rem);box-shadow:0 30px 90px rgba(0,0,0,.35)}"
+        ".gallery{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}.proof{display:flex}.cta{text-align:center}"
+        "@keyframes emberDrift{to{transform:translate3d(0,-12px,0)}}.scene{animation:emberDrift 6s ease-in-out infinite alternate}"
+        "@media (max-width:700px){section{display:block}}@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}",
+        encoding="utf-8",
+    )
     (ws / "README.md").write_text("# Fixture Bakery\n", encoding="utf-8")
     (ws / "preview-manifest.json").write_text('{"entry":"index.html"}', encoding="utf-8")
     assets = [

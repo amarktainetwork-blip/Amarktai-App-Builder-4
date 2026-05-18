@@ -57,6 +57,38 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
         "tailwind_config": "dark mode, blue/cyan accent, backdrop-blur cards",
     },
     {
+        "name": "cinematic-tactile-world",
+        "label": "Cinematic Tactile World",
+        "palette": {
+            "background": "#050816",
+            "surface": "#111827",
+            "border": "#33415555",
+            "accent": "#22d3ee",
+            "secondary_accent": "#f59e0b",
+            "text_primary": "#f8fafc",
+            "text_secondary": "#94a3b8",
+            "cta_bg": "#22d3ee",
+            "cta_text": "#03111a",
+        },
+        "typography": {
+            "heading": "'Syne', system-ui, sans-serif",
+            "body": "'DM Sans', system-ui, sans-serif",
+            "weight_heading": "800",
+            "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=syne:600,700,800|dm-sans:400,500,700&display=swap",
+            "css_vars": "--font-heading: 'Syne', system-ui, sans-serif; --font-body: 'DM Sans', system-ui, sans-serif;",
+        },
+        "spacing": "generous",
+        "layout_rhythm": "cinematic_story_scenes",
+        "visual_motifs": "layered atmospheric depth, tactile grain, luminous rails, command-center proof panels",
+        "media_direction": "cinematic product scenes, atmospheric interface closeups, generated media or truthful premium fallbacks",
+        "motion": "scene-paced reveal, subtle parallax, kinetic typography, reduced-motion fallback",
+        "mobile": "chaptered story flow with lighter motion and touch-safe controls",
+        "tailwind_config": "dark cinematic palette, cyan/amber accents, layered scene sections",
+    },
+    {
         "name": "editorial-luxury",
         "label": "Editorial Luxury",
         "palette": {

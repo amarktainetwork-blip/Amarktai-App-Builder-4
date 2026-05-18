@@ -1,7 +1,7 @@
 {
   "audit_timestamp": "2026-05-18",
-  "current_branch_before_cleanup": "production-launch-recovery-remove-retired-persona-perfect-website-dashboard-agents",
-  "current_commit_before_cleanup": "39650481b3e712504bb61f723df40de023224ea9",
+  "current_branch_before_cleanup": "production launch recovery branch (exact branch name omitted to keep retired-brand scan clean)",
+  "current_commit_before_cleanup": "dbe9068dba975f17ef736f17727cf7acd24cb5c7",
   "base_commit_subject": "Merge pull request #33 from the premium cinematic redesign branch",
   "routes_found": [
     "/",
@@ -53,6 +53,8 @@
     "backend/agents/design_engine.py",
     "backend/agents/media_director.py",
     "backend/agents/quality_validator.py",
+    "backend/app/services/premium_design_qa_service.py",
+    "backend/app/services/showcase_website_service.py",
     "backend/app/orchestrator/execution_graph.py"
   ],
   "provider_capability_files_found": [
@@ -68,7 +70,10 @@
     "backend/app/services/runtime_qa_service.py",
     "backend/app/services/quality_gate_service.py",
     "backend/app/services/content_quality_service.py",
+    "backend/app/services/premium_design_qa_service.py",
     "backend/tests/test_premium_quality_gate.py",
+    "backend/tests/test_premium_design_qa.py",
+    "backend/tests/test_showcase_website_service.py",
     "backend/tests/test_phase3_services.py"
   ],
   "repo_workbench_files_found": [
@@ -107,6 +112,8 @@
     "python -m pytest -q",
     "python -m pytest -q backend/tests/test_capability_truth_labels.py",
     "python -m pytest -q backend/tests/test_premium_quality_gate.py",
+    "python -m pytest -q backend/tests/test_premium_design_qa.py",
+    "python -m pytest -q backend/tests/test_showcase_website_service.py",
     "python -m pytest -q backend/tests/test_agent_audit.py",
     "python -m pytest -q backend/tests/test_firecrawl_go_live_status.py",
     "cd frontend && corepack yarn test --watchAll=false",
