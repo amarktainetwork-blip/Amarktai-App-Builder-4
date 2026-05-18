@@ -114,26 +114,35 @@ export default function RepoWorkbenchPage() {
 
   return (
     <div className="space-y-6">
-      <section className="border border-amk-line bg-amk-panel">
-        <div className="border-b border-amk-line p-5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-amk-fg3">Repo Workbench</div>
-          <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight text-white">
-            Import, analyze, repair, and route a repository.
+      <section className="premium-card rounded-3xl p-6">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-amk-accent">Repo Workbench</div>
+          <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight text-white md:text-5xl">
+            From GitHub repo to reviewed pull request.
           </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-amk-fg2">
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-amk-fg2">
             Browse repos through the dashboard-managed GitHub PAT, pick a branch, clone it into Build Storage,
             or paste a public repo URL directly.
           </p>
         </div>
 
-        <div className="grid gap-3 p-5 md:grid-cols-2">
+        <div className="mt-6 grid gap-3 md:grid-cols-8">
+          {["Connect", "Import", "Ask Aiva", "Analyze", "Plan", "Diff", "Commit", "Open PR"].map((step, index) => (
+            <div key={step} className="rounded-2xl border border-amk-line bg-amk-base/70 p-3">
+              <div className="font-mono text-[9px] uppercase tracking-wider text-amk-fg3">0{index + 1}</div>
+              <div className="mt-2 font-display text-sm text-white">{step}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
           <TruthBox title="Public import" value="Available" ok copy="Imports public repos and creates a workspace for analysis." />
           <TruthBox title="Private repo / PR" value={githubLabel} ok={githubConfigured} copy={githubCap?.reason || "Needs GITHUB_PAT in Settings before private operations can run."} />
         </div>
       </section>
 
       <section className="grid gap-6 lg:grid-cols-[1fr_360px]">
-        <div className="border border-amk-line bg-amk-panel">
+        <div className="glass-panel overflow-hidden rounded-3xl">
           <div className="flex flex-wrap items-center gap-3 border-b border-amk-line p-5">
             <div>
               <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3">Connected GitHub</div>
@@ -198,7 +207,7 @@ export default function RepoWorkbenchPage() {
               <div className="p-4">
                 <div className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3">Selected workspace</div>
                 {selectedRepo ? (
-                  <div className="mt-3 space-y-3">
+                <div className="mt-3 space-y-3">
                     <div className="font-mono text-sm text-white">{selectedRepo.full_name}</div>
                     <label className="block">
                       <span className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-amk-fg3">Branch</span>
@@ -213,7 +222,7 @@ export default function RepoWorkbenchPage() {
                         ))}
                       </select>
                     </label>
-                    <div className="border border-amk-line/70 p-3 font-mono text-[10px] text-amk-fg3">
+                    <div className="rounded-2xl border border-amk-line/70 p-3 font-mono text-[10px] text-amk-fg3">
                       Clone runs in Build Storage only. It does not edit production files.
                       {loadingBranches && <span className="block pt-1 text-amk-accent">Loading branches...</span>}
                     </div>
@@ -237,7 +246,7 @@ export default function RepoWorkbenchPage() {
         </div>
 
         <aside className="space-y-4">
-          <div className="border border-amk-line bg-amk-panel p-4">
+          <div className="glass-panel rounded-3xl p-5">
             <LockKeyhole className="h-5 w-5 text-amk-accent" />
             <h2 className="mt-3 font-display text-xl text-white">GitHub PAT state</h2>
             <div className="mt-2 font-mono text-xs uppercase tracking-wider" style={{ color: githubConfigured ? "#00E676" : "#FFC107" }}>
@@ -247,7 +256,7 @@ export default function RepoWorkbenchPage() {
               Missing PAT is not treated as success. Private repo browsing, push, and PR actions remain setup-dependent.
             </p>
           </div>
-          <div className="border border-amk-line bg-amk-panel p-4">
+          <div className="glass-panel rounded-3xl p-5">
             <Sparkles className="h-5 w-5 text-amk-accent" />
             <h2 className="mt-3 font-display text-xl text-white">After clone</h2>
             <p className="mt-2 text-xs leading-5 text-amk-fg3">
@@ -257,7 +266,7 @@ export default function RepoWorkbenchPage() {
         </aside>
       </section>
 
-      <section className="border border-amk-line bg-amk-panel">
+      <section className="glass-panel rounded-3xl">
         <div className="border-b border-amk-line p-5">
           <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3">Manual public import</div>
           <h2 className="mt-1 font-display text-xl font-semibold text-white">Paste a GitHub URL</h2>
@@ -265,13 +274,13 @@ export default function RepoWorkbenchPage() {
         <form onSubmit={importRepo} className="space-y-5 p-5" data-testid="import-repo-form">
           <div>
             <label className="mb-1.5 block font-mono text-[10px] uppercase tracking-wider text-amk-fg3">GitHub repo URL</label>
-            <input data-testid="repo-url-input" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/owner/repo" className="field-input" />
+            <input data-testid="repo-url-input" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/owner/repo" className="field-input rounded-2xl" />
           </div>
           <div>
             <label className="mb-1.5 block font-mono text-[10px] uppercase tracking-wider text-amk-fg3">Branch optional</label>
-            <input data-testid="repo-branch-input" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" className="field-input" />
+            <input data-testid="repo-branch-input" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" className="field-input rounded-2xl" />
           </div>
-          <Button type="submit" disabled={busy} data-testid="import-repo-btn" className="h-11 w-full bg-white font-mono text-xs uppercase tracking-wider text-black hover:bg-zinc-200">
+          <Button type="submit" disabled={busy} data-testid="import-repo-btn" className="h-11 w-full rounded-2xl bg-white font-mono text-xs uppercase tracking-wider text-black hover:bg-amk-accent">
             {busy ? "Importing..." : "Import repo"} <Github className="ml-2 h-4 w-4" />
           </Button>
         </form>
@@ -282,7 +291,7 @@ export default function RepoWorkbenchPage() {
 
 function TruthBox({ title, value, ok, copy }) {
   return (
-    <div className="border border-amk-line bg-amk-base p-3">
+    <div className="rounded-3xl border border-amk-line bg-amk-base/70 p-4">
       <div className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3">{title}</div>
       <div className="mt-1 font-mono text-xs uppercase tracking-wider" style={{ color: ok ? "#00E676" : "#FFC107" }}>{value}</div>
       <p className="mt-2 text-xs leading-5 text-amk-fg3">{copy}</p>
