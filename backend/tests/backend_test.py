@@ -2529,8 +2529,10 @@ async def test_build_pipeline_missing_audience_reaches_architect_and_coder(monke
 
     assert "architect" in calls
     assert "coder" in calls
-    assert _project["status"] in {"ready", "ready_with_warnings"}
-    assert not _project.get("failed_agent")
+    assert _project["status"] == "failed"
+    assert _project.get("failed_agent") in {"media_director", "validator"}
+    assert "pipeline" != _project.get("failed_agent")
+    assert _project.get("error")
     assert _project["build_context"]["audience"]
     assert _project["build_context"]["target_audience"] == _project["build_context"]["audience"]
     assert any(item["path"] == "index.html" for item in written)

@@ -888,18 +888,23 @@ def _ensure_customer_sections(html: str, prompt: str) -> tuple[str, list[str]]:
     return html, changed
 
 
-def _ensure_linked_anchor_sections(html: str) -> tuple[str, list[str]]:
-    changed: list[str] = []
-    ids = _html_ids(html)
-    href_ids: list[str] = []
+def _linked_anchor_ids(html: str) -> list[str]:
+    out: list[str] = []
     for href in re.findall(r'href=["\']#([^"\']+)["\']', html or "", re.IGNORECASE):
         section_id = (href or "").strip().lower()
         if not section_id or section_id in {"top", "home"}:
             continue
         if not re.match(r"^[a-z][a-z0-9_-]{1,80}$", section_id):
             continue
-        if section_id not in href_ids:
-            href_ids.append(section_id)
+        if section_id not in out:
+            out.append(section_id)
+    return out
+
+
+def _ensure_linked_anchor_sections(html: str, required_ids: list[str] | None = None) -> tuple[str, list[str]]:
+    changed: list[str] = []
+    ids = _html_ids(html)
+    href_ids: list[str] = required_ids[:] if required_ids else _linked_anchor_ids(html)
     additions: list[str] = []
     for section_id in href_ids:
         if section_id in ids:
@@ -927,12 +932,21 @@ def _ensure_linked_anchor_sections(html: str) -> tuple[str, list[str]]:
 def _ensure_footer(html: str) -> tuple[str, bool]:
     if re.search(r"<footer\b", html or "", re.IGNORECASE):
         return html, False
-    footer = '\n  <footer class="site-footer">Built with Amarktai App Builder.</footer>\n'
+    footer = '\n  <footer class="site-footer">Built for launch-ready delivery.</footer>\n'
     if "</body>" in html:
         return html.replace("</body>", footer + "</body>", 1), True
     if "</html>" in html:
         return html.replace("</html>", "<body>" + footer + "</body>\n</html>", 1), True
     return html + footer, True
+
+
+def _looks_truncated_mid_tag(html: str) -> bool:
+    stripped = (html or "").rstrip()
+    if not stripped:
+        return False
+    last_lt = stripped.rfind("<")
+    last_gt = stripped.rfind(">")
+    return last_lt > last_gt
 
 
 def _ensure_motion_and_asset_hooks(html: str) -> tuple[str, bool]:
@@ -1345,7 +1359,7 @@ def _static_file_issues(files_by_path: dict[str, dict], prompt: str = "") -> lis
         issues.append("index.html is truncated or missing </body>.")
     if html and not re.search(r"</main\s*>", html, re.IGNORECASE):
         issues.append("index.html is truncated or missing </main>.")
-    if html and re.search(r"<[^>]*$", html.strip()):
+    if html and _looks_truncated_mid_tag(html):
         issues.append("index.html appears truncated mid-tag or mid-attribute.")
     if html and _requires_deep_static_sections(prompt) and len(_SECTION_RE.findall(html)) < 8:
         issues.append("index.html has fewer than 8 sections.")
@@ -1406,7 +1420,7 @@ def _static_source_is_catastrophic(files_by_path: dict[str, dict]) -> bool:
         return True
     if html and not re.search(r"</body\s*>", html, re.IGNORECASE):
         return True
-    if html and re.search(r"<[^>]*$", html.strip()):
+    if html and _looks_truncated_mid_tag(html):
         return True
     if _STATIC_SECRET_RE.search(html):
         return True
@@ -1462,7 +1476,15 @@ def repair_static_design_family(project: dict, prompt: str, plan: dict | None, g
             changed.append(forbidden)
     catastrophic = _static_source_is_catastrophic(files_by_path)
     if catastrophic:
+        source_anchor_ids = _linked_anchor_ids(str(files_by_path.get("index.html", {}).get("content", "")))
         fallback = {f["path"]: f for f in premium_static_fallback_files(prompt)}
+        if fallback.get("index.html", {}).get("content"):
+            patched_html, _ = _ensure_linked_anchor_sections(
+                str(fallback["index.html"].get("content", "")),
+                required_ids=source_anchor_ids,
+            )
+            patched_html, _footer_changed = _ensure_footer(patched_html)
+            fallback["index.html"] = {**fallback["index.html"], "content": patched_html, "language": "html"}
         fallback_issues = _static_file_issues(fallback, prompt)
         if fallback_issues:
             raise RuntimeError(

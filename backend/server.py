@@ -1063,7 +1063,7 @@ def _go_live_self_tests() -> list[dict]:
             "Canonical app-source filtering excludes report/manifest artifacts.",
         )
     except Exception as exc:
-        add("source/report split self-test", False, f"{type(exc).__name__}: {exc}")
+        add("source/report split self-test", False, f"{type(exc).__name__} during source/report split self-test.")
 
     try:
         ensured, changed = ensure_required_files({"mode": "landing_page"}, "premium bakery landing page", {}, [{"path": "index.html", "content": "<html><body><main><section id='hero'>Hero</section></main></body></html>"}])
@@ -1075,7 +1075,7 @@ def _go_live_self_tests() -> list[dict]:
             "Required-file repair returns writable paths and fills deterministic static contract files.",
         )
     except Exception as exc:
-        add("required-file repair self-test", False, f"{type(exc).__name__}: {exc}")
+        add("required-file repair self-test", False, f"{type(exc).__name__} during required-file repair self-test.")
 
     try:
         repaired, _ = enforce_static_contract_files(
@@ -1098,8 +1098,8 @@ def _go_live_self_tests() -> list[dict]:
             "Static fallback/repair guarantees complete HTML shell and footer.",
         )
     except Exception as exc:
-        add("static anchor repair self-test", False, f"{type(exc).__name__}: {exc}")
-        add("truncated HTML recovery self-test", False, f"{type(exc).__name__}: {exc}")
+        add("static anchor repair self-test", False, f"{type(exc).__name__} during static anchor repair self-test.")
+        add("truncated HTML recovery self-test", False, f"{type(exc).__name__} during truncated HTML recovery self-test.")
 
     try:
         add(
@@ -1109,7 +1109,7 @@ def _go_live_self_tests() -> list[dict]:
             severity="warning",
         )
     except Exception as exc:
-        add("media fallback self-test", False, f"{type(exc).__name__}: {exc}")
+        add("media fallback self-test", False, f"{type(exc).__name__} during media fallback self-test.")
     return checks
 
 
@@ -1123,7 +1123,7 @@ async def go_live_status() -> dict:
     try:
         truth = await _capability_truth()
     except Exception as exc:
-        truth = {"providers": {}, "summary": {}, "warnings": [str(exc)]}
+        truth = {"providers": {}, "summary": {}, "warnings": []}
         await add("capability truth", "FAIL", f"Capability truth failed: {type(exc).__name__}", "blocker")
 
     providers = truth.get("providers", {})
