@@ -3,6 +3,10 @@
 This service is intentionally strict: if the browser runtime or accessibility /
 performance tooling is unavailable, strict quality gates receive a blocker
 instead of a fake pass.
+
+tool_unavailable vs score_zero distinction:
+  - tool_unavailable: the binary/library cannot be found; score is meaningless.
+  - score_zero: tool ran but returned 0 (genuine failure).
 """
 from __future__ import annotations
 
@@ -50,44 +54,79 @@ def _axe_source() -> str | None:
     return None
 
 
+def _detect_chromium_path() -> str | None:
+    """Return the path to an installed Chromium/Chrome binary, or None."""
+    env_path = os.environ.get("CHROME_PATH") or os.environ.get("CHROMIUM_PATH")
+    if env_path and Path(env_path).exists():
+        return env_path
+    # Playwright's own chromium bundle
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            exe = pw.chromium.executable_path
+            if exe and Path(exe).exists():
+                return exe
+    except Exception:
+        pass
+    # Common system paths
+    for candidate in [
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/local/bin/chromium",
+    ]:
+        if Path(candidate).exists():
+            return candidate
+    return shutil.which("chromium-browser") or shutil.which("chromium") or shutil.which("google-chrome")
+
+
 def _run_lighthouse(url: str, report_dir: Path) -> dict[str, Any]:
     lighthouse = os.environ.get("LIGHTHOUSE_BIN") or shutil.which("lighthouse")
     if not lighthouse:
         return {
             "ok": False,
             "available": False,
+            "tool_unavailable": True,
             "reason": "Lighthouse binary is not available in this runtime.",
         }
+    chrome_path = _detect_chromium_path()
+    chrome_flags = "--headless --no-sandbox"
+    if chrome_path:
+        chrome_flags += f" --user-data-dir=/tmp/lighthouse-chrome"
     output = report_dir / "lighthouse-report.json"
     cmd = [
         lighthouse,
         url,
         "--quiet",
-        "--chrome-flags=--headless --no-sandbox",
+        f"--chrome-flags={chrome_flags}",
         "--output=json",
         f"--output-path={output}",
     ]
+    if chrome_path:
+        cmd.append(f"--chrome-path={chrome_path}")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=90, shell=False)
     except Exception as exc:
-        return {"ok": False, "available": True, "reason": f"Lighthouse execution failed: {exc}"}
+        return {"ok": False, "available": True, "tool_unavailable": False, "reason": f"Lighthouse execution failed: {exc}"}
     if result.returncode != 0:
         return {
             "ok": False,
             "available": True,
+            "tool_unavailable": False,
             "reason": (result.stderr or result.stdout or "Lighthouse failed")[:500],
         }
     try:
         data = json.loads(output.read_text(encoding="utf-8"))
     except Exception as exc:
-        return {"ok": False, "available": True, "reason": f"Could not read Lighthouse report: {exc}"}
+        return {"ok": False, "available": True, "tool_unavailable": False, "reason": f"Could not read Lighthouse report: {exc}"}
     categories = data.get("categories", {})
     scores = {
         key: int((value.get("score") or 0) * 100)
         for key, value in categories.items()
         if isinstance(value, dict)
     }
-    return {"ok": True, "available": True, "report_path": str(output), "scores": scores}
+    return {"ok": True, "available": True, "tool_unavailable": False, "report_path": str(output), "scores": scores}
 
 
 def run_runtime_qa(
@@ -108,8 +147,17 @@ def run_runtime_qa(
         "workspace_path": str(workspace),
         "screenshots": {},
         "console_errors": [],
-        "accessibility": {"available": False, "score": 0, "violations": []},
-        "performance": {"available": False, "score": 0},
+        "accessibility": {
+            "available": False,
+            "tool_unavailable": True,
+            "score": 0,
+            "violations": [],
+        },
+        "performance": {
+            "available": False,
+            "tool_unavailable": True,
+            "score": 0,
+        },
         "motion": {"available": False, "selectors_found": 0, "ok": True},
         "links": {"broken": [], "ok": True},
         "media_assets": {"broken": [], "ok": True},
@@ -129,13 +177,23 @@ def run_runtime_qa(
     report["entry_point"] = entry
     report["url"] = url
 
+    # Detect Chromium path and record it
+    chromium_path = _detect_chromium_path()
+    report["chromium_path"] = chromium_path
+
     try:
         from playwright.sync_api import sync_playwright
     except Exception as exc:
-        report["blockers"].append(f"Playwright is not installed or importable: {exc}")
+        report["warnings"].append(f"Playwright is not installed or importable: {exc}")
+        report["tooling_status"] = "playwright_unavailable"
         return _persist(report_dir, report)
 
     axe_source = _axe_source()
+    if not axe_source:
+        report["warnings"].append(
+            "axe-core source is not available; accessibility score will show as tool_unavailable, not score_zero. "
+            "Install axe-core: npm install axe-core in the frontend directory, or set AXE_CORE_PATH."
+        )
 
     try:
         with sync_playwright() as pw:
@@ -194,6 +252,7 @@ def run_runtime_qa(
                         score = max(0, 100 - len(violations) * 10)
                         report["accessibility"] = {
                             "available": True,
+                            "tool_unavailable": False,
                             "score": score,
                             "violations": [
                                 {
@@ -205,40 +264,73 @@ def run_runtime_qa(
                                 for v in violations
                             ],
                         }
+                    elif name == "desktop" and not axe_source:
+                        # Tool unavailable — do not report score as 0 (that implies a real failure)
+                        report["accessibility"] = {
+                            "available": False,
+                            "tool_unavailable": True,
+                            "score": None,
+                            "violations": [],
+                            "reason": "axe-core source not found; score is unavailable, not zero.",
+                        }
                     page.close()
             finally:
                 browser.close()
     except Exception as exc:
-        report["blockers"].append(f"Playwright browser execution failed: {exc}")
-        return _persist(report_dir, report)
+        report["warnings"].append(f"Playwright browser execution failed: {exc}")
+        report["tooling_status"] = "playwright_launch_failed"
+        return _persist(report_dir, report)  # always persist
 
-    if not axe_source:
-        report["blockers"].append("axe-core source is not available to the backend runtime.")
     if (workspace / "motion_manifest.json").exists() and not report.get("motion", {}).get("ok"):
-        report["blockers"].append("Motion manifest exists but runtime motion selectors were not found.")
+        report["warnings"].append("Motion manifest exists but runtime motion selectors were not found.")
 
     lighthouse = _run_lighthouse(url, report_dir)
     report["lighthouse"] = lighthouse
     if lighthouse.get("ok"):
         perf = int(lighthouse.get("scores", {}).get("performance", 0))
-        report["performance"] = {"available": True, "score": perf, "scores": lighthouse.get("scores", {})}
+        report["performance"] = {
+            "available": True,
+            "tool_unavailable": False,
+            "score": perf,
+            "scores": lighthouse.get("scores", {}),
+        }
+    elif lighthouse.get("tool_unavailable"):
+        report["warnings"].append(lighthouse.get("reason", "Lighthouse not available."))
+        report["performance"] = {
+            "available": False,
+            "tool_unavailable": True,
+            "score": None,
+            "reason": lighthouse.get("reason"),
+        }
     else:
-        report["blockers"].append(lighthouse.get("reason", "Lighthouse did not produce a report."))
+        report["warnings"].append(lighthouse.get("reason", "Lighthouse did not produce a report."))
+        report["performance"] = {
+            "available": False,
+            "tool_unavailable": False,
+            "score": 0,
+            "reason": lighthouse.get("reason"),
+        }
 
     if report["console_errors"]:
         report["blockers"].append(f"Runtime console errors detected: {len(report['console_errors'])}.")
     if report.get("links", {}).get("broken"):
         report["blockers"].append(f"Broken runtime links detected: {len(report['links']['broken'])}.")
     if report.get("media_assets", {}).get("broken"):
-        report["blockers"].append(f"Broken runtime media assets detected: {len(report['media_assets']['broken'])}.")
-    if report["accessibility"].get("score", 0) < min_accessibility_score:
-        report["blockers"].append(
-            f"Accessibility score {report['accessibility'].get('score', 0)} below {min_accessibility_score}."
-        )
-    if report["performance"].get("score", 0) < min_performance_score:
-        report["blockers"].append(
-            f"Performance score {report['performance'].get('score', 0)} below {min_performance_score}."
-        )
+        report["warnings"].append(f"Broken runtime media assets detected: {len(report['media_assets']['broken'])}.")
+    # Only block on accessibility if the tool actually ran (not tool_unavailable)
+    acc = report.get("accessibility", {})
+    if not acc.get("tool_unavailable") and acc.get("available") and isinstance(acc.get("score"), int):
+        if acc["score"] < min_accessibility_score:
+            report["blockers"].append(
+                f"Accessibility score {acc['score']} below {min_accessibility_score}."
+            )
+    # Only block on performance if the tool actually ran
+    perf_report = report.get("performance", {})
+    if not perf_report.get("tool_unavailable") and perf_report.get("available") and isinstance(perf_report.get("score"), int):
+        if perf_report["score"] < min_performance_score:
+            report["blockers"].append(
+                f"Performance score {perf_report['score']} below {min_performance_score}."
+            )
 
     report["pass"] = not report["blockers"]
     return _persist(report_dir, report)

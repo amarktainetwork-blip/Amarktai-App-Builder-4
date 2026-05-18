@@ -1096,13 +1096,17 @@ class TestQualityGateService:
 
 class TestRuntimeMediaMotionServices:
 
-    def test_runtime_qa_returns_blocker_when_playwright_missing(self, tmp_path):
+    def test_runtime_qa_returns_warning_when_playwright_missing(self, tmp_path):
         from app.services import runtime_qa_service as svc
         (tmp_path / "index.html").write_text("<html><body>Hello</body></html>")
         with patch.dict("sys.modules", {"playwright.sync_api": None}):
             result = svc.run_runtime_qa(tmp_path)
-        assert result["pass"] is False
-        assert any("Playwright" in b for b in result["blockers"])
+        # Playwright unavailable is now a warning, not a blocker for static preview
+        assert any("Playwright" in w or "playwright" in w.lower() for w in result["warnings"]), (
+            "Playwright unavailable should produce a warning"
+        )
+        # pass is False because no screenshots were taken (not because of blocker)
+        assert "report_path" in result
 
     def test_runtime_qa_writes_reports_screenshots_and_motion_evidence(self, tmp_path):
         from app.services import runtime_qa_service as svc

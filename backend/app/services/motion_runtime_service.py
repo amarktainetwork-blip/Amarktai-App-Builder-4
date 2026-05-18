@@ -8,6 +8,29 @@ from pathlib import Path
 from typing import Any
 
 
+# Allowed app-source file targets for motion patches
+_ALLOWED_MOTION_TARGETS = {"index.html", "styles.css", "script.js", "motion_manifest.json"}
+
+# AMARKTAI_FILE block pattern (fenced and unfenced variants)
+_AMARKTAI_FILE_PAT = re.compile(
+    r"===AMARKTAI_FILE\[(?P<path>[^\]]+)\]===\n(?P<content>.*?)===END_AMARKTAI_FILE\[(?P=path)\]===",
+    re.DOTALL,
+)
+# Fallback: markdown fenced code block with filename comment
+_FENCED_FILE_PAT = re.compile(
+    r"```[a-z]*\s*\n#\s*(?P<path>[^\n]+)\n(?P<content>.*?)```",
+    re.DOTALL,
+)
+
+# Media section mapping keywords
+_SECTION_KEYWORDS: dict[str, list[str]] = {
+    "hero": ["hero", "cinematic", "banner", "header", "cover", "full-width"],
+    "product": ["product", "sourdough", "pastry", "pastries", "bread", "cake", "menu", "item"],
+    "gallery": ["gallery", "photos", "grid", "showcase", "portfolio"],
+    "events": ["event", "catering", "special", "occasion", "wedding", "corporate"],
+}
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -15,6 +38,117 @@ def _now() -> str:
 def prompt_requires_motion(prompt: str, mode: str = "") -> bool:
     haystack = f"{prompt} {mode}".lower()
     return bool(re.search(r"\b(3d|three\.js|threejs|motion|animation|animated|gsap|parallax|cinematic|particles|video background)\b", haystack))
+
+
+def parse_motion_agent_output(agent_output: str) -> tuple[dict[str, str], list[str]]:
+    """Parse AMARKTAI_FILE blocks from Motion_3D agent output.
+
+    Returns:
+        (files_dict, warnings) where files_dict maps path → content for allowed targets only.
+        Non-allowed paths (report/metadata files) are excluded and recorded as warnings.
+    """
+    files: dict[str, str] = {}
+    warnings: list[str] = []
+
+    if not agent_output or not agent_output.strip():
+        warnings.append("Motion_3D agent returned empty output; no motion patches applied.")
+        return files, warnings
+
+    # Try AMARKTAI_FILE blocks first
+    for match in _AMARKTAI_FILE_PAT.finditer(agent_output):
+        path = match.group("path").strip()
+        content = match.group("content")
+        if path in _ALLOWED_MOTION_TARGETS:
+            files[path] = content
+        else:
+            warnings.append(
+                f"Motion_3D output contained path '{path}' which is not an allowed motion target "
+                f"({', '.join(sorted(_ALLOWED_MOTION_TARGETS))}); skipped."
+            )
+
+    # If no AMARKTAI_FILE blocks found, try fenced code blocks
+    if not files:
+        for match in _FENCED_FILE_PAT.finditer(agent_output):
+            path = match.group("path").strip()
+            content = match.group("content")
+            if path in _ALLOWED_MOTION_TARGETS:
+                files[path] = content
+            else:
+                warnings.append(
+                    f"Motion_3D fenced block path '{path}' is not an allowed motion target; skipped."
+                )
+
+    if not files:
+        warnings.append(
+            "Motion_3D output could not be parsed into AMARKTAI_FILE or fenced code blocks. "
+            "Existing working files will be preserved."
+        )
+
+    return files, warnings
+
+
+def map_asset_to_section(asset_prompt: str, asset_url: str = "") -> str:
+    """Map a media asset to its intended page section based on keywords."""
+    combined = f"{asset_prompt} {asset_url}".lower()
+    for section, keywords in _SECTION_KEYWORDS.items():
+        if any(kw in combined for kw in keywords):
+            return section
+    return "general"
+
+
+def build_media_section_manifest(
+    assets: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Group media assets by their intended page section."""
+    sections: dict[str, list[dict[str, Any]]] = {
+        "hero": [],
+        "product": [],
+        "gallery": [],
+        "events": [],
+        "general": [],
+    }
+    for asset in assets:
+        prompt = asset.get("prompt", "") or asset.get("description", "") or ""
+        url = asset.get("url", "") or asset.get("path", "") or ""
+        section = asset.get("section") or map_asset_to_section(prompt, url)
+        if section not in sections:
+            section = "general"
+        sections[section].append({
+            **asset,
+            "section": section,
+            "fallback": not bool(asset.get("url") or asset.get("path")),
+        })
+    return sections
+
+
+def apply_motion_agent_output(
+    files: list[dict[str, Any]],
+    agent_output: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Apply parsed Motion_3D agent output to a file list.
+
+    Merges allowed motion patches into the existing file list.
+    Returns the updated file list and any warnings.
+    """
+    parsed, warnings = parse_motion_agent_output(agent_output)
+    if not parsed:
+        return files, warnings
+
+    by_path = {f.get("path", ""): {**f} for f in files if f.get("path")}
+    for path, content in parsed.items():
+        if path in by_path:
+            # Merge: append motion CSS/JS to existing file content
+            existing = by_path[path].get("content", "")
+            by_path[path]["content"] = (existing.rstrip() + "\n\n" + content.strip() + "\n").strip() + "\n"
+        else:
+            ext = path.rsplit(".", 1)[-1] if "." in path else "text"
+            lang_map = {"css": "css", "js": "javascript", "html": "html", "json": "json"}
+            by_path[path] = {
+                "path": path,
+                "content": content,
+                "language": lang_map.get(ext, "text"),
+            }
+    return list(by_path.values()), warnings
 
 
 def patch_motion_files(files: list[dict[str, Any]], prompt: str = "", mode: str = "") -> tuple[list[dict[str, Any]], dict[str, Any]]:
