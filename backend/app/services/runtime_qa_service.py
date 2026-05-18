@@ -30,6 +30,15 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _is_within(child: Path, parent: Path) -> bool:
+    try:
+        child_abs = os.path.abspath(str(child))
+        parent_abs = os.path.abspath(str(parent))
+        return os.path.commonpath([child_abs, parent_abs]) == parent_abs
+    except Exception:
+        return False
+
+
 def _entry_url(workspace: Path) -> tuple[str | None, str | None]:
     for rel in ("index.html", "public/index.html", "dist/index.html", "build/index.html"):
         candidate = workspace / rel
@@ -79,6 +88,16 @@ def _detect_chromium_path() -> str | None:
         if Path(candidate).exists():
             return candidate
     return shutil.which("chromium-browser") or shutil.which("chromium") or shutil.which("google-chrome")
+
+
+def _browser_launch_options(chromium_path: str | None) -> dict[str, Any]:
+    options: dict[str, Any] = {
+        "headless": True,
+        "args": ["--no-sandbox"],
+    }
+    if chromium_path and Path(chromium_path).exists():
+        options["executable_path"] = chromium_path
+    return options
 
 
 def _run_lighthouse(url: str, report_dir: Path) -> dict[str, Any]:
@@ -146,6 +165,7 @@ def run_runtime_qa(
         "tooling": "playwright_chromium_axe_lighthouse",
         "workspace_path": str(workspace),
         "screenshots": {},
+        "screenshot_status": {},
         "console_errors": [],
         "accessibility": {
             "available": False,
@@ -169,6 +189,12 @@ def run_runtime_qa(
     if not workspace.exists():
         report["blockers"].append("Workspace does not exist.")
         return _persist(report_dir, report)
+    builds_root = os.environ.get("BUILDS_STORAGE_ROOT", "").strip()
+    if builds_root:
+        root_path = Path(builds_root).resolve()
+        if not _is_within(workspace, root_path):
+            report["blockers"].append("Workspace path is outside BUILDS_STORAGE_ROOT; runtime QA aborted.")
+            return _persist(report_dir, report)
 
     url, entry = _entry_url(workspace)
     if not url:
@@ -197,7 +223,7 @@ def run_runtime_qa(
 
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
+            browser = pw.chromium.launch(**_browser_launch_options(chromium_path))
             try:
                 for name, viewport in VIEWPORTS.items():
                     page = browser.new_page(viewport=viewport)
@@ -206,6 +232,11 @@ def run_runtime_qa(
                     screenshot = screenshots_dir / f"{name}.png"
                     page.screenshot(path=str(screenshot), full_page=True)
                     report["screenshots"][name] = str(screenshot)
+                    report["screenshot_status"][name] = {
+                        "path": str(screenshot),
+                        "persisted": True,
+                        "viewport": viewport,
+                    }
                     if name == "desktop":
                         selectors_found = page.locator("[data-amarktai-motion-scene], [data-motion-runtime]").count()
                         report["motion"] = {
@@ -283,7 +314,11 @@ def run_runtime_qa(
 
     if (workspace / "motion_manifest.json").exists() and not report.get("motion", {}).get("ok"):
         report["warnings"].append("Motion manifest exists but runtime motion selectors were not found.")
-
+    missing_viewports = [vp for vp in VIEWPORTS if vp not in report.get("screenshots", {})]
+    if missing_viewports:
+        report["blockers"].append(
+            f"Runtime screenshots missing for viewports: {', '.join(missing_viewports)}."
+        )
     lighthouse = _run_lighthouse(url, report_dir)
     report["lighthouse"] = lighthouse
     if lighthouse.get("ok"):

@@ -9,7 +9,7 @@ to verify that each mode:
 
 Modes covered:
   landing_page, website, pwa, web_app, dashboard, full_stack,
-  api_service, repo_fix, research, automation_bot, media_page
+  api_service, repo_fix, ai_chat_rag_app, crm_dashboard, research, automation_bot, media_page
 """
 from __future__ import annotations
 
@@ -90,11 +90,19 @@ class TestModeInference:
         mode = infer_build_mode("dashboard")
         assert mode in {"dashboard", "web_app", "admin_panel"}
 
+    def test_ai_chat_rag_mode_passthrough(self):
+        mode = infer_build_mode("ai_chat_rag_app")
+        assert mode in {"ai_chat_rag_app", "ai-chat-rag-app", "custom", "web_app"}
+
+    def test_crm_dashboard_mode_passthrough(self):
+        mode = infer_build_mode("crm_dashboard")
+        assert mode in {"crm_dashboard", "crm-dashboard", "dashboard", "web_app"}
+
     def test_infer_build_mode_from_known_values(self):
         """infer_build_mode must return a valid string for all known modes."""
         known_modes = [
             "landing_page", "website", "pwa", "web_app", "dashboard",
-            "full_stack", "api_service", "repo_fix", "research",
+            "full_stack", "api_service", "repo_fix", "ai_chat_rag_app", "crm_dashboard", "research",
         ]
         for m in known_modes:
             result = infer_build_mode(m)
@@ -135,6 +143,16 @@ class TestModeClassifier:
         mode = _mode_from_mc(result)
         assert mode in {"research", "api_service", "web_app"}
 
+    def test_classify_ai_chat_rag(self):
+        result = classify_build_mode("Build an AI chat assistant with RAG over product documentation.")
+        mode = _mode_from_mc(result)
+        assert mode in {"ai_chat_rag_app", "web_app", "api_service"}
+
+    def test_classify_crm_dashboard(self):
+        result = classify_build_mode("Build a CRM dashboard with lead pipeline and deal stages.")
+        mode = _mode_from_mc(result)
+        assert mode in {"crm_dashboard", "dashboard", "web_app", "admin_panel"}
+
     def test_classify_returns_mode_classification(self):
         result = classify_build_mode("Build a SaaS dashboard.")
         assert hasattr(result, "mode"), "classify_build_mode must return a ModeClassification with .mode"
@@ -152,7 +170,7 @@ class TestReportFileFiltering:
 
     ALL_MODES = [
         "landing_page", "website", "pwa", "web_app", "dashboard",
-        "full_stack", "api_service", "repo_fix", "research",
+        "full_stack", "api_service", "repo_fix", "ai_chat_rag_app", "crm_dashboard", "research",
     ]
 
     def _mixed_files(self) -> list[dict]:
@@ -223,6 +241,11 @@ class TestRequiredFilesPerMode:
         # They should both be non-empty lists
         assert len(static_req) > 0
         assert len(api_req) > 0
+
+    def test_ai_chat_rag_mode_requires_frontend_and_backend(self):
+        required = get_required_files("ai-chat-rag-app", "ai_chat_rag_app")
+        assert "src/App.jsx" in required
+        assert "backend/main.py" in required
 
 
 # ── Preview evidence logic ─────────────────────────────────────────────────────
@@ -350,5 +373,3 @@ class TestFailureMessages:
     def test_empty_file_list_does_not_crash(self):
         filtered = filter_app_source_files([])
         assert isinstance(filtered, list)
-
-

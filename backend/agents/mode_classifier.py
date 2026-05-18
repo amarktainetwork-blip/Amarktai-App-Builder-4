@@ -43,6 +43,8 @@ SUPPORTED_MODES = (
     "ecommerce",
     "portfolio",
     "admin_system",
+    "ai_chat_rag_app",
+    "crm_dashboard",
     "web_app",
 )
 
@@ -99,6 +101,16 @@ _SIGNALS: list[tuple[re.Pattern, str, float]] = [
     (re.compile(r"\bback[- ]?office\b|\bcms\s+dashboard\b|\bcontent\s+management\b", re.I), "admin_system", 0.85),
     (re.compile(r"\bmanage\s+(?:users?|orders?|inventory|content)\b.*\bdashboard\b", re.I), "admin_system", 0.80),
     (re.compile(r"\binternal\s+tool\b|\bops\s+dashboard\b", re.I), "admin_system", 0.78),
+
+    # ai chat / rag
+    (re.compile(r"\b(ai\s+chat|chatbot|assistant)\b.*\b(rag|retrieval|vector|knowledge\s+base)\b", re.I), "ai_chat_rag_app", 0.96),
+    (re.compile(r"\brag\b|\bretrieval[- ]augmented\b|\bvector\s+db\b|\bsemantic\s+search\b", re.I), "ai_chat_rag_app", 0.90),
+    (re.compile(r"\bllm\s+chat\b|\bchat\s+with\s+docs\b|\bdocument\s+qa\b", re.I), "ai_chat_rag_app", 0.86),
+
+    # crm dashboard
+    (re.compile(r"\bcrm\b|\bcustomer\s+relationship\s+management\b", re.I), "crm_dashboard", 0.95),
+    (re.compile(r"\b(sales|pipeline|lead|deal)\b.*\bdashboard\b", re.I), "crm_dashboard", 0.88),
+    (re.compile(r"\bcontacts?\b.*\b(opportunity|pipeline|account)\b", re.I), "crm_dashboard", 0.84),
 ]
 
 # Vagueness signals — prompt lacks enough specificity
@@ -155,6 +167,16 @@ _CLARIFICATION_QUESTIONS: dict[str, list[str]] = {
         "What entities will administrators manage? (users, orders, content…)",
         "Does it need role-based access control?",
         "What data visualisations or charts are needed?",
+    ],
+    "ai_chat_rag_app": [
+        "What knowledge sources should the assistant use? (docs, website pages, PDFs, DB records)",
+        "Do you need ingestion/indexing workflows and where should embeddings be stored?",
+        "What guardrails are required? (auth, moderation, citation requirements)",
+    ],
+    "crm_dashboard": [
+        "Which CRM entities are required? (leads, contacts, accounts, deals, activities)",
+        "What sales stages and pipeline views should be included?",
+        "Do you need role-based views for sales reps, managers, and admins?",
     ],
     "web_app": [
         "What is the main function of this app?",
@@ -298,6 +320,13 @@ def _normalise_mode(mode: str) -> str:
         "repo_fix": "repo_upgrade",
         "repo-upgrade": "repo_upgrade",
         "repo-fix": "repo_upgrade",
+        "ai_chat_rag_app": "ai_chat_rag_app",
+        "ai-chat-rag-app": "ai_chat_rag_app",
+        "ai_chat_rag": "ai_chat_rag_app",
+        "ai-chat-rag": "ai_chat_rag_app",
+        "crm_dashboard": "crm_dashboard",
+        "crm-dashboard": "crm_dashboard",
+        "crm/dashboard": "crm_dashboard",
         "full_stack": "saas_dashboard",
         "fullstack-saas": "saas_dashboard",
         "web_app": "web_app",
@@ -336,6 +365,8 @@ def normalise_mode_for_orchestrator(mode: str) -> str:
         "ecommerce": "landing_page",    # closest supported mode
         "portfolio": "landing_page",    # closest supported mode
         "admin_system": "dashboard",
+        "ai_chat_rag_app": "ai_chat_rag_app",
+        "crm_dashboard": "crm_dashboard",
         "web_app": "web_app",
     }
     return bridge.get(mode, "web_app")
