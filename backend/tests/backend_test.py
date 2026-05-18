@@ -1145,8 +1145,8 @@ async def test_reviewer_invalid_json_is_non_fatal_if_files_present():
 
 
 @pytest.mark.asyncio
-async def test_premium_reviewer_invalid_json_blocks_ready_state():
-    """Premium builds must fail closed when Reviewer cannot produce valid audit JSON."""
+async def test_premium_reviewer_invalid_json_defers_to_deterministic_validation():
+    """Premium reviewer parse failures are warning-only when static validation can decide the build."""
     db, proj, files, events, messages = _make_db()
     proj["quality_tier"] = "premium"
     call_count = [0]
@@ -1195,8 +1195,14 @@ async def test_premium_reviewer_invalid_json_blocks_ready_state():
     await orch.run_full_build("Build a premium landing page", mode="landing_page", stack_decision=decide_stack(mode="landing_page"))
 
     assert proj.get("status") == "failed"
-    assert proj.get("failed_agent") == "reviewer"
-    assert "Reviewer returned invalid output" in proj.get("error", "")
+    assert proj.get("failed_agent") == "validator"
+    assert "Reviewer returned invalid output" not in proj.get("error", "")
+    assert any(
+        event.get("agent") == "reviewer"
+        and event.get("status") == "warn"
+        and "continuing with deterministic static validation" in event.get("detail", "")
+        for event in events
+    )
 
 
 # ---------- PART 5: Stop Build ----------
