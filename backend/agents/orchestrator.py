@@ -24,6 +24,7 @@ from typing import Any, Awaitable, Callable
 
 from .genx_provider import GenXProvider
 from .build_contract import (
+    classify_generated_file,
     ensure_required_files,
     enforce_static_contract_files,
     extract_files_from_model_output,
@@ -1374,7 +1375,18 @@ class Orchestrator:
         if changed:
             by_path = {f["path"]: f for f in ensured}
             for path in changed:
-                f = by_path[path]
+                f = by_path.get(path)
+                if not f:
+                    await self._emit_validation_event(
+                        "required_files_change_skipped",
+                        "Required file repair returned a path that was not present in ensured files; skipping write.",
+                        {
+                            "path": path,
+                            "classification": classify_generated_file(path),
+                            "changed": changed,
+                        },
+                    )
+                    continue
                 await self.fs.write(f["path"], f["content"], f.get("language", "text"))
                 await self.emit({"type": "file_written", "data": {"path": f["path"]}})
             await self._emit_validation_event(
@@ -1651,6 +1663,16 @@ class Orchestrator:
             prompt=prompt,
             mode=mode,
         )
+        await self.emit({
+            "type": "final_gate_started",
+            "data": {
+                "workspace": str(workspace),
+                "quality_tier": quality_tier,
+                "media_required": media_required,
+                "motion_required": motion_required,
+                "runtime_required": quality_tier == "premium",
+            },
+        })
         final_blockers = final_gate_blockers(
             workspace,
             mode=mode,
@@ -1662,6 +1684,21 @@ class Orchestrator:
             allow_static_runtime_warnings=True,
             allow_static_media_fallback_warnings=True,
         )
+        final_gate_payload = {
+            "blockers": list(final_blockers),
+            "missing_source": [b.replace("Missing required file: ", "") for b in final_blockers if b.startswith("Missing required file: ")],
+            "missing_evidence": [b for b in final_blockers if ("manifest" in b.lower() or "runtime qa artifact" in b.lower() or "content_quality_report" in b.lower())],
+            "broken_anchors": [b for b in final_blockers if "broken anchor" in b.lower()],
+            "media_status": (media_manifest or {}).get("status"),
+            "media_asset_count": (media_manifest or {}).get("asset_count", 0),
+            "runtime_qa_status": (
+                "passed"
+                if (quality_report.get("runtime_qa") or {}).get("pass")
+                else "blocked"
+                if quality_report.get("runtime_qa")
+                else "missing"
+            ),
+        }
         if final_blockers:
             quality_report.setdefault("blockers", [])
             for reason in final_blockers:
@@ -1671,6 +1708,9 @@ class Orchestrator:
                     "blocker": True,
                 })
             quality_report["pass"] = False
+            await self.emit({"type": "final_gate_blocked", "data": final_gate_payload})
+        else:
+            await self.emit({"type": "final_gate_passed", "data": final_gate_payload})
         update_workspace_metadata(
             workspace,
             {
@@ -2644,6 +2684,17 @@ class Orchestrator:
                 motion_required=motion_required,
             )
         except Exception as qa_err:
+            await self.emit({
+                "type": "final_gate_failed",
+                "data": {
+                    "blockers": [str(qa_err)],
+                    "missing_evidence": [],
+                    "missing_source": [],
+                    "broken_anchors": [],
+                    "media_status": None,
+                    "runtime_qa_status": "failed",
+                },
+            })
             if is_premium(project_after.get("quality_tier", "standard")):
                 err = f"Premium runtime quality gate failed: {qa_err}"
                 failed_agent = "media_director" if isinstance(qa_err, MediaRuntimeBlocker) else "validator"

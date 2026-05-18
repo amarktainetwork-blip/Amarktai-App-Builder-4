@@ -10,7 +10,7 @@ Source: `agent_forensic_audit.json`
 - No agent is marked dead or planned-only in the audit.
 - The audit identifies real-world wiring/tooling gaps, not missing registry entries.
 - Gaps requiring hardening:
-  - Product Strategist / Scout declares web research, but Brave Search remains capability-gated.
+  - Product Strategist / Scout declares web research, but Firecrawl remains capability-gated.
   - Frontend Coder and Motion/3D declared Framer Motion and Three.js; the builder UI now has Framer Motion installed, while generated projects must still use local/package or CDN-safe instructions depending on output format.
   - Media Director existed but needed explicit active-pipeline invocation and truthful fallback state.
   - Visual QA, Accessibility, and SEO/Performance are static validators today; full screenshot, axe-core, and Lighthouse browser execution require a later browser runtime container.

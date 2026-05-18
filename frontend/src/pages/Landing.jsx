@@ -48,7 +48,7 @@ export default function LandingPage() {
 
       <section className="border-b border-amk-line py-14">
         <div className="mx-auto grid max-w-7xl gap-px border border-amk-line bg-amk-line px-0 md:grid-cols-3">
-          <Signal icon={Network} title="Capability-aware" copy="GenX, Qwen, GitHub, Brave, and Pixabay states are read from real configuration." />
+          <Signal icon={Network} title="Capability-aware" copy="GenX, Qwen, GitHub, Firecrawl, and Pixabay states are read from real configuration." />
           <Signal icon={Cpu} title="Scoped preview" copy="Live preview uses a short-lived scoped token, not the normal auth JWT in the iframe URL." />
           <Signal icon={GitPullRequest} title="Repo workbench" copy="Public import is available; private repo and PR operations require a configured GitHub PAT." />
         </div>

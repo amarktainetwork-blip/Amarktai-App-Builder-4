@@ -240,7 +240,7 @@ def capabilities_summary() -> dict:
     """
     genx_key = os.environ.get("GENX_API_KEY", "")
     qwen_key = os.environ.get("QWEN_API_KEY", "")
-    brave_key = os.environ.get("BRAVE_SEARCH_API_KEY", "")
+    firecrawl_key = os.environ.get("FIRECRAWL_API_KEY", "")
     pixabay_key = os.environ.get("PIXABAY_API_KEY", "")
 
     genx_available = bool(genx_key)
@@ -334,11 +334,11 @@ def capabilities_summary() -> dict:
             "fallback": "File export only — no GitHub push/PR without a PAT.",
         },
         "web_research": {
-            "available": bool(brave_key),
-            "configured": bool(brave_key),
-            "provider": "brave" if brave_key else None,
-            "live_status": "key_present_not_tested" if brave_key else "key_missing",
-            "reason": None if brave_key else "Brave Search unavailable: BRAVE_SEARCH_API_KEY not configured.",
+            "available": bool(firecrawl_key),
+            "configured": bool(firecrawl_key),
+            "provider": "firecrawl" if firecrawl_key else None,
+            "live_status": "key_present_not_tested" if firecrawl_key else "setup_needed",
+            "reason": None if firecrawl_key else "Firecrawl unavailable: FIRECRAWL_API_KEY not configured.",
             "fallback": "Scout continues without live web research.",
         },
         "stock_media": {
@@ -469,7 +469,7 @@ async def async_capabilities_summary(get_secret_fn) -> dict:
     genx_key = await get_secret_fn("GENX_API_KEY") or os.environ.get("GENX_API_KEY", "")
     qwen_key = await get_secret_fn("QWEN_API_KEY") or os.environ.get("QWEN_API_KEY", "")
     github_pat = await get_secret_fn("GITHUB_PAT") or os.environ.get("GITHUB_PAT", "")
-    brave_key = await get_secret_fn("BRAVE_SEARCH_API_KEY") or os.environ.get("BRAVE_SEARCH_API_KEY", "")
+    firecrawl_key = await get_secret_fn("FIRECRAWL_API_KEY") or os.environ.get("FIRECRAWL_API_KEY", "")
     pixabay_key = await get_secret_fn("PIXABAY_API_KEY") or os.environ.get("PIXABAY_API_KEY", "")
 
     qwen_base_url = (
@@ -590,11 +590,11 @@ async def async_capabilities_summary(get_secret_fn) -> dict:
             "fallback": "File export only — no GitHub push/PR without a PAT.",
         },
         "web_research": {
-            "available": bool(brave_key),
-            "configured": bool(brave_key),
-            "provider": "brave" if brave_key else None,
-            "live_status": "key_present_not_tested" if brave_key else "key_missing",
-            "reason": None if brave_key else "Brave Search unavailable: BRAVE_SEARCH_API_KEY not configured.",
+            "available": bool(firecrawl_key),
+            "configured": bool(firecrawl_key),
+            "provider": "firecrawl" if firecrawl_key else None,
+            "live_status": "key_present_not_tested" if firecrawl_key else "setup_needed",
+            "reason": None if firecrawl_key else "Firecrawl unavailable: FIRECRAWL_API_KEY not configured.",
             "fallback": "Scout continues without live web research.",
         },
         "stock_media": {

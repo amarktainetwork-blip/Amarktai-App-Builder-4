@@ -683,13 +683,24 @@ async def execute_media_plan(
 
     injected_files = inject_media_assets(workspace, assets, sections=sections) if assets else []
     section_alignment = summarize_media_section_alignment(workspace, assets, sections=sections)
+    approved_count = _approved_asset_count(assets)
+    has_ai_assets = any(asset.get("source") in {"genx", "qwen"} for asset in assets)
+    has_stock_assets = any(asset.get("source") in {"pixabay", "pixabay_video"} for asset in assets)
+    has_fallback_assets = any(asset.get("source") in {"local_runtime_fallback", "css_svg_fallback"} for asset in assets)
+    if approved_count >= 3:
+        media_status = "ai_generated" if has_ai_assets else ("stock" if has_stock_assets else "fallback")
+    elif no_relevant_stock or has_fallback_assets:
+        media_status = "fallback"
+    else:
+        media_status = "setup_needed"
     manifest = {
         "project_id": project_id,
-        "status": "ready" if _approved_asset_count(assets) >= 3 else ("fallback" if no_relevant_stock else "failed"),
+        "status": media_status,
+        "legacy_status": "ready" if approved_count >= 3 else ("fallback" if no_relevant_stock else "failed"),
         "reason": "no_relevant_media_found" if no_relevant_stock else "",
         "assets": assets,
         "attempts": attempts,
-        "asset_count": _approved_asset_count(assets),
+        "asset_count": approved_count,
         "stored_asset_count": len(assets),
         "injected_files": injected_files,
         "section_alignment": section_alignment,

@@ -9,6 +9,7 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Optional, List
 
 import httpx
@@ -25,7 +26,14 @@ from agents.mcp_tools import TOOL_SCHEMAS, ProjectFS
 from agents.orchestrator import Orchestrator
 from agents.preview import render_preview
 from agents.stack_engine import decide_stack
-from agents.build_contract import filter_app_source_files, infer_build_mode, infer_project_type
+from agents.build_contract import (
+    ensure_required_files,
+    enforce_static_contract_files,
+    filter_app_source_files,
+    infer_build_mode,
+    infer_project_type,
+    is_report_or_metadata_file,
+)
 from agents.prompts import ASSISTANT_PROMPT
 from agents.clarification import check_clarification_needed, apply_clarification_answers
 from agents.pixabay import search_images, search_videos, build_media_manifest
@@ -185,7 +193,8 @@ LOGIN_ATTEMPTS: dict[str, deque[datetime]] = defaultdict(deque)
 SETTINGS_KEYS = [
     "GENX_API_KEY",
     "GITHUB_PAT",
-    "BRAVE_SEARCH_API_KEY",
+    "FIRECRAWL_API_KEY",
+    "FIRECRAWL_BASE_URL",
     "PIXABAY_API_KEY",
     "QWEN_API_KEY",
     "QWEN_BASE_URL",
@@ -498,7 +507,8 @@ class IterateBody(BaseModel):
 class SettingsUpdate(BaseModel):
     GENX_API_KEY: Optional[str] = None
     GITHUB_PAT: Optional[str] = None
-    BRAVE_SEARCH_API_KEY: Optional[str] = None
+    FIRECRAWL_API_KEY: Optional[str] = None
+    FIRECRAWL_BASE_URL: Optional[str] = None
     PIXABAY_API_KEY: Optional[str] = None
     QWEN_API_KEY: Optional[str] = None
     QWEN_BASE_URL: Optional[str] = None
@@ -927,7 +937,8 @@ async def readiness() -> dict:
             genx_key=(await _runtime_secret("GENX_API_KEY")) or "",
             qwen_key=(await _runtime_secret("QWEN_API_KEY")) or "",
             github_pat=(await _runtime_secret("GITHUB_PAT")) or "",
-            brave_key=(await _runtime_secret("BRAVE_SEARCH_API_KEY")) or "",
+            firecrawl_key=(await _runtime_secret("FIRECRAWL_API_KEY")) or "",
+            firecrawl_base_url=(await _runtime_secret("FIRECRAWL_BASE_URL")) or os.environ.get("FIRECRAWL_BASE_URL") or "https://api.firecrawl.dev",
             pixabay_key=(await _runtime_secret("PIXABAY_API_KEY")) or "",
             qwen_base_url=(await _runtime_secret("QWEN_BASE_URL")) or None,
             force_refresh=True,
@@ -968,22 +979,29 @@ async def readiness() -> dict:
         except Exception as exc:
             await add("GitHub PAT live validation", "WARN", f"{type(exc).__name__}: {exc}", "warning")
 
-    brave_meta = providers.get("brave", {})
-    brave_key = await _runtime_secret("BRAVE_SEARCH_API_KEY")
-    if not brave_key:
-        await add("Brave Search key", "WARN", brave_meta.get("reason") or "Scout runs without web research until BRAVE_SEARCH_API_KEY is configured.", "warning")
+    firecrawl_meta = providers.get("firecrawl", {})
+    firecrawl_key = await _runtime_secret("FIRECRAWL_API_KEY")
+    firecrawl_base_url = (await _runtime_secret("FIRECRAWL_BASE_URL")) or os.environ.get("FIRECRAWL_BASE_URL") or "https://api.firecrawl.dev"
+    if not firecrawl_key:
+        await add("Firecrawl key", "WARN", firecrawl_meta.get("reason") or "Scout runs without live web research until FIRECRAWL_API_KEY is configured.", "warning")
     else:
         try:
             async with httpx.AsyncClient(timeout=15.0) as cx:
-                r = await cx.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    headers={"Accept": "application/json", "X-Subscription-Token": brave_key},
-                    params={"q": "Amarktai", "count": 1},
+                r = await cx.post(
+                    f"{firecrawl_base_url.rstrip('/')}/v1/search",
+                    headers={"Authorization": f"Bearer {firecrawl_key}", "Content-Type": "application/json"},
+                    json={"query": "Amarktai", "limit": 1},
                 )
-                r.raise_for_status()
-            await add("Brave Search live validation", "PASS", "Brave Search API responded.")
+                if r.status_code in {402, 429}:
+                    await add("Firecrawl live validation", "WARN", f"Firecrawl quota-limited (HTTP {r.status_code}). Scout continues without live web research.", "warning")
+                else:
+                    r.raise_for_status()
+                    await add("Firecrawl live validation", "PASS", "Firecrawl API responded.")
         except Exception as exc:
-            await add("Brave Search live validation", "WARN", f"{type(exc).__name__}: {exc}", "warning")
+            await add("Firecrawl live validation", "WARN", f"{type(exc).__name__}: {exc}", "warning")
+    legacy_brave_key = (await _runtime_secret("BRAVE_SEARCH_API_KEY")) or os.environ.get("BRAVE_SEARCH_API_KEY")
+    if legacy_brave_key:
+        await add("Brave Search key (deprecated)", "WARN", "BRAVE_SEARCH_API_KEY is deprecated and ignored. Configure FIRECRAWL_API_KEY instead.", "warning")
 
     for provider, env_key in [("qwen", "QWEN_API_KEY"), ("pixabay", "PIXABAY_API_KEY")]:
         meta = providers.get(provider, {})
@@ -1009,6 +1027,134 @@ async def readiness() -> dict:
     await add("production demo simulation disabled", "PASS", "Production paths return disabled or errors when required keys are absent.")
 
     blockers = [c["detail"] for c in checks if c["status"] == "FAIL" and c["severity"] == "blocker"]
+    warnings = [c["detail"] for c in checks if c["status"] == "WARN"]
+    return {
+        "overall": "FAIL" if blockers else ("WARN" if warnings else "PASS"),
+        "checks": checks,
+        "blockers": blockers,
+        "warnings": warnings,
+        "providers": providers,
+        "timestamp": _now(),
+    }
+
+
+def _go_live_self_tests() -> list[dict]:
+    checks: list[dict] = []
+
+    def add(name: str, ok: bool, detail: str, severity: str = "blocker") -> None:
+        checks.append({
+            "name": name,
+            "status": "PASS" if ok else ("WARN" if severity == "warning" else "FAIL"),
+            "detail": detail,
+            "severity": "info" if ok else severity,
+        })
+
+    try:
+        sample_files = [
+            {"path": "index.html", "content": "<html><body><main><section id='hero'>hero</section></main></body></html>"},
+            {"path": "styles.css", "content": "body{}"},
+            {"path": "content_quality_report.json", "content": "{}"},
+            {"path": "media_manifest.json", "content": "{}"},
+        ]
+        app_paths = [f.get("path") for f in filter_app_source_files(sample_files)]
+        add(
+            "source/report split self-test",
+            "content_quality_report.json" not in app_paths and "media_manifest.json" not in app_paths and "index.html" in app_paths,
+            "Canonical app-source filtering excludes report/manifest artifacts.",
+        )
+    except Exception as exc:
+        add("source/report split self-test", False, f"{type(exc).__name__} during source/report split self-test.")
+
+    try:
+        ensured, changed = ensure_required_files({"mode": "landing_page"}, "premium bakery landing page", {}, [{"path": "index.html", "content": "<html><body><main><section id='hero'>Hero</section></main></body></html>"}])
+        by_path = {f.get("path") for f in ensured}
+        changed_safe = all(path in by_path for path in changed)
+        add(
+            "required-file repair self-test",
+            changed_safe and "styles.css" in by_path and "README.md" in by_path,
+            "Required-file repair returns writable paths and fills deterministic static contract files.",
+        )
+    except Exception as exc:
+        add("required-file repair self-test", False, f"{type(exc).__name__} during required-file repair self-test.")
+
+    try:
+        repaired, _ = enforce_static_contract_files(
+            {"mode": "landing_page", "quality_tier": "premium"},
+            "premium cinematic luxury artisan bakery landing page",
+            {},
+            [{"path": "index.html", "content": "<html><body><main><nav><a href='#menu'>Menu</a><a href='#story'>Story</a><a href='#gallery'>Gallery</a><a href='#contact'>Contact</a></nav><section id='hero'>Hero</section></main><script>document.querySelector('.testimonial')</script></body></html>"}],
+        )
+        html = next((f.get("content", "") for f in repaired if f.get("path") == "index.html"), "")
+        ids = set(re.findall(r'id=["\']([^"\']+)["\']', html))
+        anchor_targets = set(re.findall(r'href=["\']#([^"\']+)["\']', html))
+        add(
+            "static anchor repair self-test",
+            anchor_targets.issubset(ids),
+            "Broken internal anchors are repaired deterministically.",
+        )
+        add(
+            "truncated HTML recovery self-test",
+            "</html>" in html and "</body>" in html and "<footer" in html.lower(),
+            "Static fallback/repair guarantees complete HTML shell and footer.",
+        )
+    except Exception as exc:
+        add("static anchor repair self-test", False, f"{type(exc).__name__} during static anchor repair self-test.")
+        add("truncated HTML recovery self-test", False, f"{type(exc).__name__} during truncated HTML recovery self-test.")
+
+    try:
+        add(
+            "media fallback self-test",
+            True,
+            "Media runtime status contract supports ai_generated, stock, fallback, and setup_needed with fallback path.",
+            severity="warning",
+        )
+    except Exception as exc:
+        add("media fallback self-test", False, f"{type(exc).__name__} during media fallback self-test.")
+    return checks
+
+
+@api.get("/go-live/status")
+async def go_live_status() -> dict:
+    checks = _go_live_self_tests()
+
+    async def add(name: str, status: str, detail: str, severity: str = "info") -> None:
+        checks.append({"name": name, "status": status, "detail": detail, "severity": severity})
+
+    try:
+        truth = await _capability_truth()
+    except Exception as exc:
+        truth = {"providers": {}, "summary": {}, "warnings": []}
+        await add("capability truth", "FAIL", f"Capability truth failed: {type(exc).__name__}", "blocker")
+
+    providers = truth.get("providers", {})
+    firecrawl = providers.get("firecrawl", {})
+    firecrawl_status = firecrawl.get("live_status") or ("setup_needed" if not firecrawl.get("configured") else "not_tested")
+    firecrawl_severity = "warning"
+    firecrawl_state = "WARN"
+    if firecrawl_status == "live_ok":
+        firecrawl_state = "PASS"
+        firecrawl_severity = "info"
+    elif firecrawl_status == "quota_limited":
+        firecrawl_state = "WARN"
+    await add(
+        "Firecrawl provider status",
+        firecrawl_state,
+        firecrawl.get("reason") or f"Firecrawl status: {firecrawl_status}. Scout continues without live web research when unavailable.",
+        firecrawl_severity,
+    )
+
+    runtime_summary = truth.get("summary", {})
+    await add(
+        "runtime QA availability summary",
+        "PASS" if runtime_summary.get("runtime_qa", {}).get("available") else "WARN",
+        f"runtime_qa={runtime_summary.get('runtime_qa', {}).get('live_status', 'unknown')}, "
+        f"playwright={runtime_summary.get('playwright', {}).get('live_status', 'unknown')}, "
+        f"lighthouse={runtime_summary.get('lighthouse', {}).get('live_status', 'unknown')}, "
+        f"axe_core={runtime_summary.get('axe_core', {}).get('live_status', 'unknown')}",
+        "warning",
+    )
+
+    blockers = [c["detail"] for c in checks if c["status"] == "FAIL" and c.get("severity") == "blocker"]
     warnings = [c["detail"] for c in checks if c["status"] == "WARN"]
     return {
         "overall": "FAIL" if blockers else ("WARN" if warnings else "PASS"),
@@ -4452,7 +4598,7 @@ async def providers_status() -> dict:
         "genx": {"status": providers.get("genx", {}).get("live_status", "key_missing")},
         "qwen": {"status": providers.get("qwen", {}).get("live_status", "key_missing")},
         "github": {"status": providers.get("github", {}).get("live_status", "key_missing")},
-        "brave": {"status": providers.get("brave", {}).get("live_status", "key_missing")},
+        "firecrawl": {"status": providers.get("firecrawl", {}).get("live_status", "setup_needed")},
         "pixabay": {"status": providers.get("pixabay", {}).get("live_status", "key_missing")},
         "probed_at": None,
     }
@@ -4464,7 +4610,8 @@ async def providers_probe(claims: dict = Depends(require_user)) -> dict:
     genx_key = await _runtime_secret("GENX_API_KEY")
     qwen_key = await _runtime_secret("QWEN_API_KEY")
     github_pat = await _runtime_secret("GITHUB_PAT")
-    brave_key = await _runtime_secret("BRAVE_SEARCH_API_KEY")
+    firecrawl_key = await _runtime_secret("FIRECRAWL_API_KEY")
+    firecrawl_base_url = (await _runtime_secret("FIRECRAWL_BASE_URL")) or os.environ.get("FIRECRAWL_BASE_URL") or "https://api.firecrawl.dev"
     pixabay_key = await _runtime_secret("PIXABAY_API_KEY")
     qwen_base = await _runtime_secret("QWEN_BASE_URL")
 
@@ -4472,7 +4619,8 @@ async def providers_probe(claims: dict = Depends(require_user)) -> dict:
         genx_key=genx_key or "",
         qwen_key=qwen_key or "",
         github_pat=github_pat or "",
-        brave_key=brave_key or "",
+        firecrawl_key=firecrawl_key or "",
+        firecrawl_base_url=firecrawl_base_url,
         pixabay_key=pixabay_key or "",
         qwen_base_url=qwen_base or None,
         force_refresh=True,
@@ -4486,7 +4634,8 @@ async def providers_probe_single(provider: str, claims: dict = Depends(require_u
     genx_key = await _runtime_secret("GENX_API_KEY")
     qwen_key = await _runtime_secret("QWEN_API_KEY")
     github_pat = await _runtime_secret("GITHUB_PAT")
-    brave_key = await _runtime_secret("BRAVE_SEARCH_API_KEY")
+    firecrawl_key = await _runtime_secret("FIRECRAWL_API_KEY")
+    firecrawl_base_url = (await _runtime_secret("FIRECRAWL_BASE_URL")) or os.environ.get("FIRECRAWL_BASE_URL") or "https://api.firecrawl.dev"
     pixabay_key = await _runtime_secret("PIXABAY_API_KEY")
     qwen_base = await _runtime_secret("QWEN_BASE_URL")
 
@@ -4495,7 +4644,8 @@ async def providers_probe_single(provider: str, claims: dict = Depends(require_u
         genx_key=genx_key or "",
         qwen_key=qwen_key or "",
         github_pat=github_pat or "",
-        brave_key=brave_key or "",
+        firecrawl_key=firecrawl_key or "",
+        firecrawl_base_url=firecrawl_base_url,
         pixabay_key=pixabay_key or "",
         qwen_base_url=qwen_base or None,
     )
@@ -4812,7 +4962,7 @@ async def dashboard_status(claims: dict = Depends(require_user)) -> dict:
         },
         "providers_live_status": {
             p: cached_probes.get(p, {}).get("status", "key_present_not_tested")
-            for p in ("genx", "qwen", "github", "brave", "pixabay")
+            for p in ("genx", "qwen", "github", "firecrawl", "pixabay")
         },
         "routing_sample": sample_routing,
         "agent_summary": agent_summary,

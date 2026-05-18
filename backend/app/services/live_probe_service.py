@@ -202,41 +202,49 @@ async def probe_github(pat: str) -> dict[str, Any]:
         }
 
 
-async def probe_brave(api_key: str) -> dict[str, Any]:
-    """Probe Brave Search API with a minimal search call."""
+async def probe_firecrawl(api_key: str, base_url: str | None = None) -> dict[str, Any]:
+    """Probe Firecrawl API with a minimal search call."""
     if not api_key:
-        return {"provider": "brave", "status": KEY_MISSING, "probed_at": _now()}
+        return {"provider": "firecrawl", "status": KEY_MISSING, "probed_at": _now()}
+    endpoint = (base_url or os.environ.get("FIRECRAWL_BASE_URL") or "https://api.firecrawl.dev").rstrip("/")
 
     try:
         async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as cx:
-            r = await cx.get(
-                "https://api.search.brave.com/res/v1/web/search",
-                params={"q": "test", "count": "1"},
+            r = await cx.post(
+                f"{endpoint}/v1/search",
+                json={"query": "Amarktai", "limit": 1},
                 headers={
-                    "Accept": "application/json",
-                    "Accept-Encoding": "gzip",
-                    "X-Subscription-Token": api_key,
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
                 },
             )
         if r.status_code in (200, 202):
             return {
-                "provider": "brave",
+                "provider": "firecrawl",
                 "status": KEY_PRESENT_LIVE_OK,
                 "key_prefix": _mask(api_key),
                 "probed_at": _now(),
             }
+        if r.status_code in (402, 429):
+            return {
+                "provider": "firecrawl",
+                "status": "quota_limited",
+                "http_status": r.status_code,
+                "error": _sanitise_error(r.text[:200]),
+                "probed_at": _now(),
+            }
         return {
-            "provider": "brave",
+            "provider": "firecrawl",
             "status": KEY_PRESENT_LIVE_FAIL,
             "http_status": r.status_code,
             "error": _sanitise_error(r.text[:200]),
             "probed_at": _now(),
         }
     except httpx.TimeoutException:
-        return {"provider": "brave", "status": PROVIDER_TIMEOUT, "probed_at": _now()}
+        return {"provider": "firecrawl", "status": PROVIDER_TIMEOUT, "probed_at": _now()}
     except Exception as exc:
         return {
-            "provider": "brave",
+            "provider": "firecrawl",
             "status": KEY_PRESENT_LIVE_FAIL,
             "error": _sanitise_error(str(exc)),
             "probed_at": _now(),
@@ -285,7 +293,8 @@ async def probe_all_providers(
     genx_key: str = "",
     qwen_key: str = "",
     github_pat: str = "",
-    brave_key: str = "",
+    firecrawl_key: str = "",
+    firecrawl_base_url: str | None = None,
     pixabay_key: str = "",
     qwen_base_url: str | None = None,
     force_refresh: bool = False,
@@ -307,13 +316,13 @@ async def probe_all_providers(
         probe_genx(genx_key),
         probe_qwen(qwen_key, qwen_base_url),
         probe_github(github_pat),
-        probe_brave(brave_key),
+        probe_firecrawl(firecrawl_key, firecrawl_base_url),
         probe_pixabay(pixabay_key),
         return_exceptions=True,
     )
 
     combined: dict[str, Any] = {}
-    providers = ["genx", "qwen", "github", "brave", "pixabay"]
+    providers = ["genx", "qwen", "github", "firecrawl", "pixabay"]
     for i, (prov, res) in enumerate(zip(providers, results)):
         if isinstance(res, Exception):
             combined[prov] = {
@@ -337,7 +346,8 @@ async def probe_single_provider(
     genx_key: str = "",
     qwen_key: str = "",
     github_pat: str = "",
-    brave_key: str = "",
+    firecrawl_key: str = "",
+    firecrawl_base_url: str | None = None,
     pixabay_key: str = "",
     qwen_base_url: str | None = None,
 ) -> dict[str, Any]:
@@ -346,7 +356,7 @@ async def probe_single_provider(
         "genx":    lambda: probe_genx(genx_key),
         "qwen":    lambda: probe_qwen(qwen_key, qwen_base_url),
         "github":  lambda: probe_github(github_pat),
-        "brave":   lambda: probe_brave(brave_key),
+        "firecrawl": lambda: probe_firecrawl(firecrawl_key, firecrawl_base_url),
         "pixabay": lambda: probe_pixabay(pixabay_key),
     }
     if provider not in probes:

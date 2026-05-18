@@ -34,12 +34,11 @@ def _probe_status(provider: str, configured: bool, source: str, cached_probes: d
             return "live_fail", probe.get("error") or f"{provider} live validation failed", probe.get("probed_at")
         if raw == "key_missing":
             return "key_missing", f"{provider.upper()} key not configured", probe.get("probed_at")
-        # Map HTTP 402 to payment_required instead of vague live_fail
-        if raw == "payment_required" or probe.get("http_status") == 402:
-            return "payment_required", f"{provider} returned HTTP 402 Payment Required — check subscription.", probe.get("probed_at")
+        if raw == "quota_limited" or probe.get("http_status") in {402, 429}:
+            return "quota_limited", f"{provider} is quota-limited or billing-limited.", probe.get("probed_at")
         # If readiness has already live-tested this provider, reflect that status
         live_status = probe.get("live_status")
-        if live_status in {"live_ok", "live_fail", "payment_required"}:
+        if live_status in {"live_ok", "live_fail", "quota_limited"}:
             reason = probe.get("error") or probe.get("reason") or None
             return live_status, reason, probe.get("probed_at")
     return "not_tested", "Configured but not live tested", None
@@ -119,7 +118,8 @@ class CapabilityTruthService:
         resolved = {key: await self._resolve(key) for key in [
             "GENX_API_KEY",
             "GITHUB_PAT",
-            "BRAVE_SEARCH_API_KEY",
+            "FIRECRAWL_API_KEY",
+            "FIRECRAWL_BASE_URL",
             "PIXABAY_API_KEY",
             "QWEN_API_KEY",
             "QWEN_BASE_URL",
@@ -133,7 +133,7 @@ class CapabilityTruthService:
         providers = {
             "genx": self._provider("genx", resolved["GENX_API_KEY"], "GENX_API_KEY"),
             "github": self._provider("github", resolved["GITHUB_PAT"], "GITHUB_PAT"),
-            "brave": self._provider("brave", resolved["BRAVE_SEARCH_API_KEY"], "BRAVE_SEARCH_API_KEY"),
+            "firecrawl": self._provider("firecrawl", resolved["FIRECRAWL_API_KEY"], "FIRECRAWL_API_KEY"),
             "pixabay": self._provider("pixabay", resolved["PIXABAY_API_KEY"], "PIXABAY_API_KEY"),
             "qwen": self._provider("qwen", resolved["QWEN_API_KEY"], "QWEN_API_KEY"),
         }
@@ -207,7 +207,7 @@ class CapabilityTruthService:
     def _capabilities(self, providers: dict[str, dict[str, Any]], qwen_models: dict[str, str]) -> dict[str, Any]:
         genx_ok = _availability(providers["genx"])
         github_ok = _availability(providers["github"])
-        brave_ok = _availability(providers["brave"])
+        firecrawl_ok = _availability(providers["firecrawl"])
         pixabay_ok = _availability(providers["pixabay"])
         qwen_ok = _availability(providers["qwen"])
         genx_image_ok = _genx_capability(providers["genx"], "image")
@@ -235,11 +235,10 @@ class CapabilityTruthService:
                 "model_count": len(model_ids or []),
             }
 
-        # Brave 402 → payment_required label for UI
-        brave_live_status = providers["brave"].get("live_status", "")
-        brave_reason = providers["brave"]["reason"] or "BRAVE_SEARCH_API_KEY not configured"
-        if brave_live_status == "payment_required":
-            brave_reason = "Brave Search returned HTTP 402 Payment Required — subscription needed for this search tier."
+        firecrawl_live_status = providers["firecrawl"].get("live_status", "")
+        firecrawl_reason = providers["firecrawl"]["reason"] or "FIRECRAWL_API_KEY not configured"
+        if firecrawl_live_status == "quota_limited":
+            firecrawl_reason = "Firecrawl is quota-limited. Scout will continue without live web research."
 
         # Pixabay live validation fallback state
         pixabay_live_status = providers["pixabay"].get("live_status", "")
@@ -302,9 +301,14 @@ class CapabilityTruthService:
             ),
             "github_integration": cap(github_ok, "github", providers["github"]["reason"] or "GITHUB_PAT not configured", "File export remains available."),
             "web_research": {
-                **cap(brave_ok, "brave", brave_reason, "Scout continues without live web research."),
-                "payment_required": brave_live_status == "payment_required",
-                "live_status": brave_live_status or (providers["brave"].get("live_status") if providers["brave"].get("configured") else "key_missing"),
+                **cap(firecrawl_ok, "firecrawl", firecrawl_reason, "Scout continues without live web research."),
+                "live_status": (
+                    "setup_needed"
+                    if not providers["firecrawl"].get("configured")
+                    else (firecrawl_live_status or "not_tested")
+                ),
+                "quota_limited": firecrawl_live_status == "quota_limited",
+                "base_url": os.environ.get("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev"),
             },
             "stock_media": {
                 **cap(pixabay_ok, "pixabay", providers["pixabay"]["reason"] or "PIXABAY_API_KEY not configured", pixabay_fallback),

@@ -454,7 +454,7 @@ function ReadinessStrip({ readiness, onRefresh }) {
   const overall = readiness?.overall || "FAIL";
   const genx = readiness?.checks?.find((c) => c.name.toLowerCase().includes("genx"));
   const github = readiness?.checks?.find((c) => c.name === "GitHub PAT");
-  const brave = readiness?.checks?.find((c) => c.name === "Brave Search key");
+  const firecrawl = readiness?.checks?.find((c) => c.name === "Firecrawl key");
   const color = overall === "PASS" ? "#00E676" : "#FF5722";
   return (
     <div className="border border-amk-line bg-amk-panel p-3 mb-5">
@@ -468,7 +468,7 @@ function ReadinessStrip({ readiness, onRefresh }) {
       <div className="mt-2 grid grid-cols-3 gap-2 font-mono text-[10px] text-amk-fg3">
         <span>GenX: {genx?.status || "unknown"}</span>
         <span>GitHub: {github?.status === "WARN" ? "optional" : github?.status || "unknown"}</span>
-        <span>Brave: {brave?.status === "WARN" ? "optional" : brave?.status || "unknown"}</span>
+        <span>Firecrawl: {firecrawl?.status === "WARN" ? "optional" : firecrawl?.status || "unknown"}</span>
       </div>
       {readiness?.blockers?.length > 0 && (
         <p className="mt-2 font-mono text-[10px] text-agent-scout">

@@ -112,6 +112,59 @@ REPORT_AND_METADATA_FILES = {
     "amarktai.project.json",
 }
 
+STATIC_REQUIRED_FILES = {
+    "index.html",
+    "styles.css",
+    "script.js",
+    "README.md",
+}
+
+RUNTIME_QA_PATH_PREFIXES = ("runtime-qa/",)
+MEDIA_ARTIFACT_FILES = {
+    "media_manifest.json",
+    "motion_manifest.json",
+    "avatar_manifest.json",
+    "voice_avatar_manifest.json",
+}
+DEPLOY_REPO_ARTIFACT_FILES = {
+    "preview-manifest.json",
+    "amarktai.project.json",
+    "stack_detection.json",
+    "repo_workflow_report.json",
+}
+INTERNAL_EVIDENCE_FILES = REPORT_AND_METADATA_FILES | {
+    "content_quality_report.json",
+    "quality-report.json",
+    "quality_report.json",
+    "repair_plan.json",
+}
+
+
+def classify_generated_file(path: str | None) -> dict[str, str | bool]:
+    """Canonical generated-file classifier used across build pipeline gates."""
+    rel = (path or "").replace("\\", "/").strip().lstrip("./")
+    name = rel.rsplit("/", 1)[-1]
+    lower_rel = rel.lower()
+    lower_name = name.lower()
+    if not rel:
+        return {"category": "unknown", "app_source": False, "evidence": False}
+    if lower_rel.startswith(RUNTIME_QA_PATH_PREFIXES):
+        return {"category": "runtime_qa_artifact", "app_source": False, "evidence": True}
+    if lower_rel.startswith("media/") or lower_name in MEDIA_ARTIFACT_FILES or lower_name.endswith("_manifest.json"):
+        return {"category": "media_artifact", "app_source": False, "evidence": True}
+    if lower_name in DEPLOY_REPO_ARTIFACT_FILES:
+        return {"category": "deploy_repo_artifact", "app_source": False, "evidence": True}
+    if (
+        lower_rel in INTERNAL_EVIDENCE_FILES
+        or lower_name in INTERNAL_EVIDENCE_FILES
+        or lower_name.endswith("_report.json")
+        or lower_name.endswith("-report.json")
+    ):
+        return {"category": "internal_evidence", "app_source": False, "evidence": True}
+    if lower_name in {name.lower() for name in STATIC_REQUIRED_FILES}:
+        return {"category": "static_required_file", "app_source": True, "evidence": False}
+    return {"category": "app_source_file", "app_source": True, "evidence": False}
+
 
 def is_report_or_metadata_file(path: str | None) -> bool:
     """Return true for internal artifacts that are not generated app source.
@@ -121,17 +174,9 @@ def is_report_or_metadata_file(path: str | None) -> bool:
     files for a generated application.
     """
     rel = (path or "").replace("\\", "/").strip().lstrip("./")
-    name = rel.rsplit("/", 1)[-1]
-    return (
-        rel in REPORT_AND_METADATA_FILES
-        or name in REPORT_AND_METADATA_FILES
-        or rel.startswith("runtime-qa/")
-        or rel.startswith(".amarktai/")
-        or name.endswith("_report.json")
-        or name.endswith("-report.json")
-        or name.endswith("_manifest.json")
-        or name.endswith("-manifest.json")
-    )
+    if rel.startswith(".amarktai/"):
+        return True
+    return not bool(classify_generated_file(rel).get("app_source"))
 
 
 def filter_app_source_files(files: list[dict]) -> list[dict]:
@@ -139,7 +184,7 @@ def filter_app_source_files(files: list[dict]) -> list[dict]:
         item for item in (files or [])
         if isinstance(item, dict)
         and item.get("path")
-        and not is_report_or_metadata_file(str(item.get("path")))
+        and bool(classify_generated_file(str(item.get("path"))).get("app_source"))
     ]
 
 _HTML_CLOSE_RE = re.compile(r"</html\s*>", re.IGNORECASE)
@@ -469,7 +514,7 @@ def _premium_static_index(prompt: str) -> str:
     <section id="production-readiness" class="story-section cards" data-amarktai-motion-scene>
       <p class="eyebrow">Deployment and production readiness</p>
       <h2>Release decisions use the same gate in API, database, dashboard, and finalize flow.</h2>
-      <article><h3>Provider truth</h3><p>GenX, Qwen, GitHub, Brave, Pixabay, and runtime tools are shown as live, missing, or untested without optimistic labels.</p></article>
+      <article><h3>Provider truth</h3><p>GenX, Qwen, GitHub, Firecrawl, Pixabay, and runtime tools are shown as live, missing, or untested without optimistic labels.</p></article>
       <article><h3>Finalize gate</h3><p>Quality, media, motion, runtime QA, content, security, and file contract checks must pass before push.</p></article>
       <article><h3>Deploy notes</h3><p>README and manifests describe the exact files produced and the safe path to publish them.</p></article>
     </section>
@@ -841,6 +886,67 @@ def _ensure_customer_sections(html: str, prompt: str) -> tuple[str, list[str]]:
     else:
         html += "\n<main>\n" + insertion + "</main>\n</body></html>"
     return html, changed
+
+
+def _linked_anchor_ids(html: str) -> list[str]:
+    out: list[str] = []
+    for href in re.findall(r'href=["\']#([^"\']+)["\']', html or "", re.IGNORECASE):
+        section_id = (href or "").strip().lower()
+        if not section_id or section_id in {"top", "home"}:
+            continue
+        if not re.match(r"^[a-z][a-z0-9_-]{1,80}$", section_id):
+            continue
+        if section_id not in out:
+            out.append(section_id)
+    return out
+
+
+def _ensure_linked_anchor_sections(html: str, required_ids: list[str] | None = None) -> tuple[str, list[str]]:
+    changed: list[str] = []
+    ids = _html_ids(html)
+    href_ids: list[str] = required_ids[:] if required_ids else _linked_anchor_ids(html)
+    additions: list[str] = []
+    for section_id in href_ids:
+        if section_id in ids:
+            continue
+        title = " ".join(word.capitalize() for word in section_id.replace("_", "-").split("-"))
+        additions.append(
+            f"""    <section id="{section_id}" class="story-section {section_id}-section" data-amarktai-motion-scene data-reveal>
+      <p class="eyebrow">{escape(title)}</p>
+      <h2>{escape(title)}</h2>
+      <p>This section was restored automatically to satisfy linked navigation and CTA anchors.</p>
+    </section>"""
+        )
+        changed.append(section_id)
+    if additions:
+        insertion = "\n\n".join(additions) + "\n"
+        if "</main>" in html:
+            html = html.replace("</main>", insertion + "  </main>", 1)
+        elif "</body>" in html:
+            html = html.replace("</body>", f"<main>\n{insertion}</main>\n</body>", 1)
+        else:
+            html += "\n<main>\n" + insertion + "</main>\n</body></html>"
+    return html, changed
+
+
+def _ensure_footer(html: str) -> tuple[str, bool]:
+    if re.search(r"<footer\b", html or "", re.IGNORECASE):
+        return html, False
+    footer = '\n  <footer class="site-footer">Built for launch-ready delivery.</footer>\n'
+    if "</body>" in html:
+        return html.replace("</body>", footer + "</body>", 1), True
+    if "</html>" in html:
+        return html.replace("</html>", "<body>" + footer + "</body>\n</html>", 1), True
+    return html + footer, True
+
+
+def _looks_truncated_mid_tag(html: str) -> bool:
+    stripped = (html or "").rstrip()
+    if not stripped:
+        return False
+    last_lt = stripped.rfind("<")
+    last_gt = stripped.rfind(">")
+    return last_lt > last_gt
 
 
 def _ensure_motion_and_asset_hooks(html: str) -> tuple[str, bool]:
@@ -1249,6 +1355,14 @@ def _static_file_issues(files_by_path: dict[str, dict], prompt: str = "") -> lis
     script = str(files_by_path.get("script.js", {}).get("content", "") or files_by_path.get("motion.js", {}).get("content", ""))
     if html and not _HTML_CLOSE_RE.search(html):
         issues.append("index.html is truncated or missing </html>.")
+    if html and not re.search(r"</body\s*>", html, re.IGNORECASE):
+        issues.append("index.html is truncated or missing </body>.")
+    # Only flag </main> missing when there's an opening <main> tag — pages without <main>
+    # are valid minimal HTML and should not be penalised here.
+    if html and re.search(r"<main[\s>]", html, re.IGNORECASE) and not re.search(r"</main\s*>", html, re.IGNORECASE):
+        issues.append("index.html is truncated or missing </main>.")
+    if html and _looks_truncated_mid_tag(html):
+        issues.append("index.html appears truncated mid-tag or mid-attribute.")
     if html and _requires_deep_static_sections(prompt) and len(_SECTION_RE.findall(html)) < 8:
         issues.append("index.html has fewer than 8 sections.")
     if css and (len(css) < 1200 or ":root" not in css or "--color" not in css or "@media" not in css):
@@ -1306,6 +1420,10 @@ def _static_source_is_catastrophic(files_by_path: dict[str, dict]) -> bool:
         return True
     if html and not _HTML_CLOSE_RE.search(html):
         return True
+    if html and not re.search(r"</body\s*>", html, re.IGNORECASE):
+        return True
+    if html and _looks_truncated_mid_tag(html):
+        return True
     if _STATIC_SECRET_RE.search(html):
         return True
     return False
@@ -1360,7 +1478,15 @@ def repair_static_design_family(project: dict, prompt: str, plan: dict | None, g
             changed.append(forbidden)
     catastrophic = _static_source_is_catastrophic(files_by_path)
     if catastrophic:
+        source_anchor_ids = _linked_anchor_ids(str(files_by_path.get("index.html", {}).get("content", "")))
         fallback = {f["path"]: f for f in premium_static_fallback_files(prompt)}
+        if fallback.get("index.html", {}).get("content"):
+            patched_html, _ = _ensure_linked_anchor_sections(
+                str(fallback["index.html"].get("content", "")),
+                required_ids=source_anchor_ids,
+            )
+            patched_html, _footer_changed = _ensure_footer(patched_html)
+            fallback["index.html"] = {**fallback["index.html"], "content": patched_html, "language": "html"}
         fallback_issues = _static_file_issues(fallback, prompt)
         if fallback_issues:
             raise RuntimeError(
@@ -1374,8 +1500,10 @@ def repair_static_design_family(project: dict, prompt: str, plan: dict | None, g
     html_item = files_by_path.get("index.html")
     html = str(html_item.get("content", "")) if html_item else ""
     html, section_changes = _ensure_customer_sections(html, prompt)
+    html, anchor_sections = _ensure_linked_anchor_sections(html)
     html, hook_changed = _ensure_motion_and_asset_hooks(html)
-    if section_changes or hook_changed or html_item.get("content") != html:
+    html, footer_changed = _ensure_footer(html)
+    if section_changes or anchor_sections or hook_changed or footer_changed or html_item.get("content") != html:
         files_by_path["index.html"] = {**html_item, "content": html, "language": "html"}
         changed.append("index.html")
     css = _generate_coherent_static_css(html, prompt)
@@ -1475,7 +1603,28 @@ def ensure_required_files(project: dict, prompt: str, plan: dict | None, generat
         plan=plan,
     )
     changed.extend(path for path in removed_final if path not in changed)
-    return final_files, changed
+    final_by_path = {
+        str(item.get("path")): item
+        for item in final_files
+        if isinstance(item, dict) and item.get("path")
+    }
+    writeable_categories = {
+        "app_source_file",
+        "static_required_file",
+        "internal_evidence",
+        "runtime_qa_artifact",
+        "media_artifact",
+        "deploy_repo_artifact",
+    }
+    normalized_changed: list[str] = []
+    for path in dict.fromkeys(changed):
+        item = final_by_path.get(path)
+        if not item:
+            continue
+        category = str(classify_generated_file(path).get("category"))
+        if category in writeable_categories:
+            normalized_changed.append(path)
+    return final_files, normalized_changed
 
 
 _SECRET_PATTERNS = [
