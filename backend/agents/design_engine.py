@@ -397,6 +397,66 @@ _DESIGN_STYLES: list[dict[str, Any]] = [
         "mobile": "compact cards, dense information",
         "tailwind_config": "dark mode, orange/stone palette, condensed font via CDN",
     },
+    {
+        "name": "warm-artisan-bakery",
+        "label": "Warm Artisan Bakery",
+        "palette": {
+            "background": "#fdf8f2",
+            "surface": "#ffffff",
+            "border": "#e8d5c4",
+            "accent": "#b5651d",
+            "text_primary": "#2c1810",
+            "text_secondary": "#7a5c44",
+            "cta_bg": "#b5651d",
+            "cta_text": "#fdf8f2",
+        },
+        "typography": {
+            "heading": "'Playfair Display', Georgia, serif",
+            "body": "'Lora', Georgia, serif",
+            "weight_heading": "700",
+            "weight_body": "400",
+        },
+        "font_import": {
+            "link_href": "https://fonts.bunny.net/css?family=playfair-display:400,600,700|lora:400,500&display=swap",
+            "css_vars": "--font-heading: 'Playfair Display', Georgia, serif; --font-body: 'Lora', Georgia, serif;",
+        },
+        "spacing": "generous",
+        "layout_rhythm": "alternating_editorial_sections",
+        "visual_motifs": "warm cream background, terracotta accents, stone borders, rustic warmth, hand-crafted feel",
+        "media_direction": (
+            "Artisan bread and pastry photography integrated into each product section. "
+            "Hero: full-width cinematic bakery image (bread, cafe interior, or flour scene). "
+            "Product sections: individual product/pastry images beside copy. "
+            "Gallery: grid of baked goods, interior, and team shots. "
+            "Events section: catering setup, special occasion cakes, farm-to-table imagery. "
+            "Use inline CSS warm gradient fallbacks (cream/terracotta) if images unavailable — "
+            "never append all images in a bottom gallery."
+        ),
+        "motion": "gentle 300ms ease-out, warm scroll reveal",
+        "mobile": "stacked sections with images above copy, full-width product cards",
+        "tailwind_config": "light mode, amber/stone/terracotta palette, serif CDN fonts",
+        "premium_sections": [
+            "sticky-nav",
+            "cinematic-hero",
+            "about-editorial",
+            "sourdough-product",
+            "pastries-cards",
+            "coffee-section",
+            "gallery-grid",
+            "events-catering",
+            "testimonials",
+            "contact-cta",
+            "footer",
+        ],
+        "section_media_map": {
+            "hero": "cinematic full-width bakery or bread scene",
+            "sourdough-product": "artisan sourdough loaf photography",
+            "pastries-cards": "individual pastry product cards with photos",
+            "coffee-section": "coffee and beverage photography",
+            "gallery-grid": "gallery grid of bakery interior and products",
+            "events-catering": "catering setup and special event photography",
+        },
+    },
 ]
 
 # ── Industry-specific media briefs ────────────────────────────────────────────
@@ -426,7 +486,18 @@ _INDUSTRY_MEDIA_BRIEFS: list[tuple[list[str], str, str]] = [
         "Clean white/neutral backgrounds. Use CSS fade gradients as fallback.",
     ),
     (
-        ["restaurant", "cafe", "food", "cuisine", "dining", "menu", "chef", "bakery"],
+        ["bakery", "sourdough", "artisan bread", "pastry", "patisserie", "boulangerie",
+         "croissant", "cake shop", "confectionery", "bread shop"],
+        "warm-artisan-bakery",
+        "Artisan bread photography in hero section (full-width cinematic shot). "
+        "Individual sourdough/pastry/cake images placed INSIDE each product section beside the copy. "
+        "Gallery grid of baked goods, cafe interior, and community moments. "
+        "Events/catering section with special occasion imagery. "
+        "Use warm CSS fallbacks (cream #fdf8f2 with terracotta #b5651d accents) if images unavailable. "
+        "NEVER append all images to the bottom of the page. Each image must appear in its named section.",
+    ),
+    (
+        ["restaurant", "cafe", "food", "cuisine", "dining", "menu", "chef"],
         "immersive-gradient-studio",
         "Food photography, restaurant ambiance, dish close-ups, kitchen shots. "
         "Warm color tones. Use CSS warm gradient fallbacks (amber/gold tones) if images unavailable.",
@@ -477,10 +548,14 @@ _STYLE_HINTS: list[tuple[list[str], str]] = [
     (["lingerie", "underwear", "intimate", "bra", "nightwear", "sleepwear"], "editorial-luxury"),
     (["fashion", "clothing", "boutique", "apparel", "dress", "couture"], "editorial-luxury"),
     (["finance", "fintech", "bank", "payment", "trading", "crypto", "invest"], "fintech-dashboard"),
-    (["luxury", "premium", "high-end", "exclusive", "jewel", "gold"], "luxury-black-gold"),
     (["nature", "eco", "organic", "plant", "garden", "farm", "green", "sustainable"], "organic-nature"),
     (["horse", "equestrian", "stable"], "organic-nature"),
-    (["restaurant", "cafe", "food", "cuisine", "dining", "menu", "chef", "bakery"], "immersive-gradient-studio"),
+    # Bakery/artisan food checked BEFORE generic luxury/premium to get warm palette
+    (["bakery", "sourdough", "artisan bread", "pastry", "patisserie", "boulangerie",
+      "croissant", "cake shop", "confectionery", "bread shop", "bake"], "warm-artisan-bakery"),
+    (["restaurant", "cafe", "food", "cuisine", "dining", "menu", "chef"], "immersive-gradient-studio"),
+    # Generic luxury/premium — checked after more specific verticals
+    (["luxury", "premium", "high-end", "exclusive", "jewel", "gold"], "luxury-black-gold"),
     (["hotel", "resort", "hospitality", "spa", "retreat"], "luxury-black-gold"),
     (["gym", "fitness", "sport", "workout", "training"], "industrial-command"),
     (["saas", "startup", "product", "app launch", "launch"], "premium-startup-minimal"),
@@ -563,6 +638,24 @@ def make_design_signature(style: dict) -> dict:
     }
 
 
+def _is_bakery_prompt(prompt: str, audience: str) -> bool:
+    """Return True if the prompt is for a bakery / artisan food site."""
+    combined = f"{prompt} {audience}".lower()
+    bakery_keywords = [
+        "bakery", "sourdough", "artisan bread", "pastry", "patisserie",
+        "boulangerie", "croissant", "cake shop", "confectionery", "bread shop",
+        "luma", "stone", "loaf", "bake",
+    ]
+    return any(kw in combined for kw in bakery_keywords)
+
+
+def _is_saas_prompt(prompt: str, audience: str) -> bool:
+    """Return True if the prompt is for a SaaS/tech product."""
+    combined = f"{prompt} {audience}".lower()
+    saas_keywords = ["saas", "software as a service", "dashboard", "api", "devtool", "developer tool"]
+    return any(kw in combined for kw in saas_keywords)
+
+
 def create_design_direction(
     prompt: str,
     project_type: str = "static-site",
@@ -635,6 +728,54 @@ def create_design_direction(
         f"Make the site feel custom and distinctive."
     )
 
+    # ── Premium layout enforcement for bakery / local business ────────────────
+    is_bakery = _is_bakery_prompt(prompt, audience)
+    if is_bakery:
+        premium_sections = style.get("premium_sections", [
+            "sticky-nav", "cinematic-hero", "about-editorial", "product-section",
+            "gallery-grid", "testimonials", "contact-cta", "footer",
+        ])
+        section_media_map = style.get("section_media_map", {})
+        section_list = ", ".join(premium_sections)
+        media_map_lines = "; ".join(
+            f"{section}: {desc}" for section, desc in section_media_map.items()
+        )
+        coder_instructions += (
+            " PREMIUM BAKERY LAYOUT ENFORCEMENT: "
+            f"Required sections in order: {section_list}. "
+            "1) sticky nav with brand name and smooth-scroll links. "
+            "2) Cinematic full-width hero with large serif heading, warm bakery image or "
+            "CSS warm gradient background (cream/terracotta), and a prominent CTA button. "
+            "3) Alternating image/text editorial sections — image on left, copy on right; "
+            "next section reverses (copy left, image right). "
+            "4) Product cards grid with individual pastry/bread images inside each card, "
+            "product name, description, and price. "
+            "5) Gallery section as a CSS grid of 6-9 images. "
+            "6) Events/catering CTA section. "
+            "7) Testimonials with customer names and quotes. "
+            "8) Footer with address, hours, social links. "
+            "MEDIA RULE: each image must appear INSIDE its named section. "
+            f"Section-to-media mapping: {media_map_lines}. "
+            "NEVER append all images in one gallery at the bottom of the page. "
+            "If real images are unavailable, use inline CSS/SVG warm-toned visual placeholders "
+            "(cream background #fdf8f2, terracotta accent #b5651d) inside each section. "
+            "PALETTE RULE: use warm bakery palette — cream, stone, terracotta, cocoa, warm gold. "
+            "Do NOT use generic SaaS dark backgrounds or blue/green/purple tech gradients. "
+            "TYPOGRAPHY: elegant serif headings (Playfair Display), readable body text (Lora), "
+            "minimum body 16px, headings at least 2.5rem. "
+            "MOBILE: images stay with their section text; no huge bottom image dump. "
+            "Sticky nav and CTAs remain usable at 390px width. "
+            "Add CSS @media breakpoints at 768px and 480px to stack sections gracefully. "
+            "Do NOT include any internal/platform/Amarktai/provider/runtime copy in the page."
+        )
+    elif _is_saas_prompt(prompt, audience):
+        # Prevent bakery/warm palette leaking into SaaS pages
+        coder_instructions += (
+            " SAAS LAYOUT: use the clean product/dashboard design — "
+            "feature grid, pricing section, CTA strip, footer. "
+            "Do NOT apply bakery/warm palette or artisan food imagery."
+        )
+
     signature = make_design_signature(style)
 
     return {
@@ -644,6 +785,9 @@ def create_design_direction(
         "project_type": project_type,
         "design_signature": signature,
         "industry_media_brief": industry_media_brief,
+        "is_bakery": is_bakery,
+        "premium_sections": style.get("premium_sections", []),
+        "section_media_map": style.get("section_media_map", {}),
     }
 
 

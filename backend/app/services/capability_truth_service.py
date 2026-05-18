@@ -34,6 +34,14 @@ def _probe_status(provider: str, configured: bool, source: str, cached_probes: d
             return "live_fail", probe.get("error") or f"{provider} live validation failed", probe.get("probed_at")
         if raw == "key_missing":
             return "key_missing", f"{provider.upper()} key not configured", probe.get("probed_at")
+        # Map HTTP 402 to payment_required instead of vague live_fail
+        if raw == "payment_required" or probe.get("http_status") == 402:
+            return "payment_required", f"{provider} returned HTTP 402 Payment Required — check subscription.", probe.get("probed_at")
+        # If readiness has already live-tested this provider, reflect that status
+        live_status = probe.get("live_status")
+        if live_status in {"live_ok", "live_fail", "payment_required"}:
+            reason = probe.get("error") or probe.get("reason") or None
+            return live_status, reason, probe.get("probed_at")
     return "not_tested", "Configured but not live tested", None
 
 
@@ -56,6 +64,9 @@ def _optional_integration(env_key: str, label: str) -> dict[str, Any]:
         "configured": configured,
         "provider": None,
         "live_status": "configured_not_tested" if configured else "setup_needed",
+        "optional": True,
+        "does_not_block_preview": True,
+        "blocks_finalize_if_required": False,
         "reason": f"{label} is optional and not live-tested in this deployment.",
         "fallback": "Core builder remains available without this optional open-source integration.",
         "env_key": env_key,
@@ -224,6 +235,26 @@ class CapabilityTruthService:
                 "model_count": len(model_ids or []),
             }
 
+        # Brave 402 → payment_required label for UI
+        brave_live_status = providers["brave"].get("live_status", "")
+        brave_reason = providers["brave"]["reason"] or "BRAVE_SEARCH_API_KEY not configured"
+        if brave_live_status == "payment_required":
+            brave_reason = "Brave Search returned HTTP 402 Payment Required — subscription needed for this search tier."
+
+        # Pixabay live validation fallback state
+        pixabay_live_status = providers["pixabay"].get("live_status", "")
+        pixabay_fallback = "Use AI images if available or CSS/SVG visuals."
+        if pixabay_ok:
+            pixabay_fallback = "Pixabay stock media is live and available."
+
+        # axe-core: check for JS source file (the Python module is not the relevant check)
+        from pathlib import Path as _Path
+        _axe_candidates = [
+            "/app/frontend/node_modules/axe-core/axe.min.js",
+            "/app/node_modules/axe-core/axe.min.js",
+        ]
+        _axe_available = any(_Path(p).exists() for p in _axe_candidates)
+
         return {
             "text_generation": cap(genx_ok, "genx", providers["genx"]["reason"] or "GENX_API_KEY not configured"),
             "reasoning": cap(genx_ok, "genx", providers["genx"]["reason"] or "GENX_API_KEY not configured"),
@@ -270,14 +301,52 @@ class CapabilityTruthService:
                 model_ids=_genx_models_for(providers["genx"], "avatar") or _genx_models_for(providers["genx"], "avatar_generation"),
             ),
             "github_integration": cap(github_ok, "github", providers["github"]["reason"] or "GITHUB_PAT not configured", "File export remains available."),
-            "web_research": cap(brave_ok, "brave", providers["brave"]["reason"] or "BRAVE_SEARCH_API_KEY not configured", "Scout continues without live web research."),
-            "stock_media": cap(pixabay_ok, "pixabay", providers["pixabay"]["reason"] or "PIXABAY_API_KEY not configured", "Use AI images if available or CSS/SVG visuals."),
-            "preview_generation": {"available": True, "configured": True, "provider": "sandbox", "live_status": "local", "reason": None, "fallback": ""},
-            "runtime_qa": {"available": True, "configured": True, "provider": "local", "live_status": "local", "reason": None, "fallback": ""},
-            "playwright": {"available": _module_available("playwright"), "configured": _module_available("playwright"), "provider": "local" if _module_available("playwright") else None, "live_status": "local" if _module_available("playwright") else "setup_needed", "reason": None if _module_available("playwright") else "Install Playwright/Chromium in the runtime image.", "fallback": ""},
-            "lighthouse": {"available": bool(shutil.which("lighthouse")), "configured": bool(shutil.which("lighthouse")), "provider": "local" if shutil.which("lighthouse") else None, "live_status": "local" if shutil.which("lighthouse") else "setup_needed", "reason": None if shutil.which("lighthouse") else "Install Lighthouse CLI in the runtime image.", "fallback": "Browser performance audit reports setup-needed if Lighthouse is absent."},
-            "axe_core": {"available": _module_available("axe_core") or _module_available("axe_selenium_python"), "configured": _module_available("axe_core") or _module_available("axe_selenium_python"), "provider": "local" if (_module_available("axe_core") or _module_available("axe_selenium_python")) else None, "live_status": "local" if (_module_available("axe_core") or _module_available("axe_selenium_python")) else "setup_needed", "reason": None if (_module_available("axe_core") or _module_available("axe_selenium_python")) else "Install axe-core accessibility runtime.", "fallback": ""},
-            "deployment_finalize": {"available": True, "configured": True, "provider": "local", "live_status": "local", "reason": None, "fallback": ""},
+            "web_research": {
+                **cap(brave_ok, "brave", brave_reason, "Scout continues without live web research."),
+                "payment_required": brave_live_status == "payment_required",
+                "live_status": brave_live_status or (providers["brave"].get("live_status") if providers["brave"].get("configured") else "key_missing"),
+            },
+            "stock_media": {
+                **cap(pixabay_ok, "pixabay", providers["pixabay"]["reason"] or "PIXABAY_API_KEY not configured", pixabay_fallback),
+                "fallback_state": "live" if pixabay_ok else "unavailable",
+                "live_validated": pixabay_ok,
+            },
+            "preview_generation": {"available": True, "configured": True, "provider": "sandbox", "live_status": "local", "reason": None, "fallback": "", "optional": False, "does_not_block_preview": False, "blocks_finalize_if_required": True},
+            "runtime_qa": {"available": True, "configured": True, "provider": "local", "live_status": "local", "reason": None, "fallback": "", "optional": False, "does_not_block_preview": True, "blocks_finalize_if_required": False},
+            "playwright": {
+                "available": _module_available("playwright"),
+                "configured": _module_available("playwright"),
+                "optional": True,
+                "does_not_block_preview": True,
+                "blocks_finalize_if_required": False,
+                "provider": "local" if _module_available("playwright") else None,
+                "live_status": "local" if _module_available("playwright") else "setup_needed",
+                "reason": None if _module_available("playwright") else "Install Playwright/Chromium in the runtime image.",
+                "fallback": "",
+            },
+            "lighthouse": {
+                "available": bool(shutil.which("lighthouse")),
+                "configured": bool(shutil.which("lighthouse")),
+                "optional": True,
+                "does_not_block_preview": True,
+                "blocks_finalize_if_required": False,
+                "provider": "local" if shutil.which("lighthouse") else None,
+                "live_status": "local" if shutil.which("lighthouse") else "setup_needed",
+                "reason": None if shutil.which("lighthouse") else "Install Lighthouse CLI in the runtime image.",
+                "fallback": "Browser performance audit reports setup-needed if Lighthouse is absent.",
+            },
+            "axe_core": {
+                "available": _axe_available,
+                "configured": _axe_available,
+                "optional": True,
+                "does_not_block_preview": True,
+                "blocks_finalize_if_required": False,
+                "provider": "local" if _axe_available else None,
+                "live_status": "local" if _axe_available else "setup_needed",
+                "reason": None if _axe_available else "Run npm install axe-core in the frontend directory, or set AXE_CORE_PATH.",
+                "fallback": "Accessibility score shows tool_unavailable (not score_zero) when axe-core is absent.",
+            },
+            "deployment_finalize": {"available": True, "configured": True, "provider": "local", "live_status": "local", "reason": None, "fallback": "", "optional": False, "does_not_block_preview": True, "blocks_finalize_if_required": True},
             "whisper_stt": _optional_integration("WHISPER_MODEL_PATH", "Whisper/STT"),
             "faiss_vector_memory": _optional_integration("FAISS_INDEX_PATH", "FAISS vector memory/RAG"),
             "stable_diffusion_fallback": _optional_integration("STABLE_DIFFUSION_BASE_URL", "Stable Diffusion image fallback"),

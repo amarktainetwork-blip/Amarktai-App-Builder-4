@@ -14,6 +14,62 @@ import httpx
 _SAFE_OWNER_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,100}$")
 _SAFE_REPO_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,100}$")
 
+# Matches full GitHub URLs (with optional .git suffix) and owner/repo shorthand
+_GITHUB_URL_PAT = re.compile(
+    r"(?:https?://github\.com/)?(?P<owner>[a-zA-Z0-9_.-]{1,100})/(?P<repo>[a-zA-Z0-9_.-]{1,100})(?:\.git)?(?:/.*)?$"
+)
+
+
+def parse_github_url(raw: str) -> dict[str, Any]:
+    """Parse a GitHub repository URL or shorthand into owner/repo components.
+
+    Accepts:
+      - https://github.com/owner/repo
+      - https://github.com/owner/repo.git
+      - owner/repo
+
+    Returns a dict with ``owner``, ``repo``, ``full_name``, ``ok``, and
+    optionally ``error`` for invalid input.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return {"ok": False, "error": "Repository URL or shorthand is required.", "owner": None, "repo": None}
+
+    m = _GITHUB_URL_PAT.match(raw)
+    if not m:
+        return {
+            "ok": False,
+            "error": f"Could not parse GitHub repository from '{raw}'. Expected https://github.com/owner/repo or owner/repo.",
+            "owner": None,
+            "repo": None,
+        }
+
+    owner = m.group("owner")
+    # Strip .git suffix from repo if present
+    repo = m.group("repo").removesuffix(".git") if hasattr("", "removesuffix") else m.group("repo").rstrip(".git").rstrip(".")
+    # Use proper removesuffix for Python 3.9+
+    try:
+        repo = m.group("repo").removesuffix(".git")
+    except AttributeError:
+        repo = m.group("repo")
+        if repo.endswith(".git"):
+            repo = repo[:-4]
+
+    # Validate safety
+    if not _SAFE_OWNER_RE.match(owner):
+        return {"ok": False, "error": f"Owner '{owner}' contains unsafe characters.", "owner": None, "repo": None}
+    if not _SAFE_REPO_RE.match(repo):
+        return {"ok": False, "error": f"Repo '{repo}' contains unsafe characters.", "owner": None, "repo": None}
+
+    return {
+        "ok": True,
+        "owner": owner,
+        "repo": repo,
+        "full_name": f"{owner}/{repo}",
+        "clone_url": f"https://github.com/{owner}/{repo}.git",
+        "html_url": f"https://github.com/{owner}/{repo}",
+    }
+
 
 def _headers(token: str) -> dict[str, str]:
     return {
