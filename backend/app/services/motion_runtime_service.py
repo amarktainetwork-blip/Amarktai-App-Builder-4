@@ -79,6 +79,10 @@ def parse_motion_agent_output(agent_output: str) -> tuple[dict[str, str], list[s
                 )
 
     if not files:
+        if re.search(r"\bsafe\s*snippet\b|\bplaceholder\s+snippet\b", agent_output or "", re.IGNORECASE):
+            warnings.append(
+                "Motion_3D output contained a safe-snippet placeholder; deterministic motion fallback will be applied."
+            )
         warnings.append(
             "Motion_3D output could not be parsed into AMARKTAI_FILE or fenced code blocks. "
             "Existing working files will be preserved."
@@ -132,6 +136,12 @@ def apply_motion_agent_output(
     """
     parsed, warnings = parse_motion_agent_output(agent_output)
     if not parsed:
+        if any("safe-snippet placeholder" in w for w in warnings):
+            fallback_files, _manifest = patch_motion_files(files, prompt="motion fallback", mode="landing_page")
+            warnings.append(
+                "Applied deterministic Motion_3D fallback runtime patch because parsed motion blocks were unavailable."
+            )
+            return fallback_files, warnings
         return files, warnings
 
     by_path = {f.get("path", ""): {**f} for f in files if f.get("path")}

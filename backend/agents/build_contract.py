@@ -66,7 +66,11 @@ MODE_PROJECT_TYPE = {
     "ecommerce_scaffold": ("ecommerce-scaffold", "ecommerce-scaffold"),
     "booking_portal": ("booking-portal", "booking-portal"),
     "ai_chat_rag_app": ("ai-chat-rag-app", "ai-chat-rag-app"),
+    "ai_chat_rag": ("ai-chat-rag-app", "ai-chat-rag-app"),
+    "ai-chat-rag": ("ai-chat-rag-app", "ai-chat-rag-app"),
     "crm_dashboard": ("dashboard", "crm-dashboard"),
+    "crm/dashboard": ("dashboard", "crm-dashboard"),
+    "crm": ("dashboard", "crm-dashboard"),
     "api_service": ("api-service", "api-service"),
     "api-service": ("api-service", "api-service"),
     "repo_fix": ("repo-upgrade", "repo-upgrade"),
@@ -170,6 +174,10 @@ def normalize_mode(mode: str | None) -> str:
         return "website"
     if value == "fullstack_app":
         return "full_stack"
+    if value in ("ai chat rag", "ai chat/rag", "ai-chat-rag-app", "rag-chat"):
+        return "ai_chat_rag_app"
+    if value in ("crm-dashboard", "crm dashboard", "crm/dashboard"):
+        return "crm_dashboard"
     return "web_app"
 
 
@@ -257,6 +265,19 @@ def get_required_files(project_type: str, build_mode: str | None = None,
         return ["README.md", "amarktai.project.json", ".env.example", "package.json", "index.html", "src/main.jsx", "src/App.jsx"]
     if project_type == "repo-upgrade":
         return ["README.md", "amarktai.project.json"]
+    if project_type == "ai-chat-rag-app":
+        return [
+            "README.md",
+            "amarktai.project.json",
+            ".env.example",
+            "package.json",
+            "index.html",
+            "src/main.jsx",
+            "src/App.jsx",
+            "src/App.css",
+            "backend/main.py",
+            "backend/requirements.txt",
+        ]
     if project_type == "automation-bot-scaffold":
         return ["README.md", "amarktai.project.json", ".env.example", "bot/main.py", "bot/config.example.json", "Dockerfile"]
     if project_type == "trading-bot-scaffold":

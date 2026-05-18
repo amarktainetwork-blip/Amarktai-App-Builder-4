@@ -169,6 +169,19 @@ class TestRuntimeQATooling:
             result = run_runtime_qa(ws)
         assert "screenshots" in result
         assert isinstance(result["screenshots"], dict)
+        assert "screenshot_status" in result
+        assert isinstance(result["screenshot_status"], dict)
+
+    def test_browser_launch_options_include_executable_path_when_present(self):
+        from app.services.runtime_qa_service import _browser_launch_options
+        options = _browser_launch_options("/bin/sh")
+        assert options.get("executable_path") == "/bin/sh"
+        assert options.get("headless") is True
+
+    def test_browser_launch_options_skip_executable_for_missing_path(self):
+        from app.services.runtime_qa_service import _browser_launch_options
+        options = _browser_launch_options("/tmp/not-real-chromium-binary")
+        assert "executable_path" not in options
 
     def test_report_distinguishes_tool_unavailable_in_accessibility(self):
         """When axe-core is not available, accessibility must set tool_unavailable, not score 0."""
@@ -305,6 +318,17 @@ class TestMotionPipeline:
         assert "index.html" in paths
         html_file = next(f for f in patched if f["path"] == "index.html")
         assert "<html>" in html_file["content"]
+
+    def test_apply_motion_safe_snippet_output_triggers_fallback_patch(self):
+        from app.services.motion_runtime_service import apply_motion_agent_output
+        existing_files = [
+            {"path": "index.html", "content": "<html><body><section id='hero'></section></body></html>", "language": "html"},
+            {"path": "styles.css", "content": "body { margin: 0; }", "language": "css"},
+        ]
+        patched, warnings = apply_motion_agent_output(existing_files, "Safe snippet: cannot provide direct patch.")
+        paths = {f["path"] for f in patched}
+        assert "motion_manifest.json" in paths
+        assert any("fallback" in w.lower() for w in warnings)
 
     def test_map_asset_to_section_hero(self):
         from app.services.motion_runtime_service import map_asset_to_section
