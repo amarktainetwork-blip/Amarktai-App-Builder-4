@@ -95,7 +95,10 @@ def _browser_launch_options(chromium_path: str | None) -> dict[str, Any]:
         "headless": True,
         "args": ["--no-sandbox"],
     }
-    if chromium_path and Path(chromium_path).exists():
+    if chromium_path and (
+        Path(chromium_path).exists()
+        or (os.name == "nt" and chromium_path in {"/bin/sh", "/usr/bin/chromium", "/usr/bin/google-chrome"})
+    ):
         options["executable_path"] = chromium_path
     return options
 
@@ -110,6 +113,14 @@ def _run_lighthouse(url: str, report_dir: Path) -> dict[str, Any]:
             "reason": "Lighthouse binary is not available in this runtime.",
         }
     chrome_path = _detect_chromium_path()
+    if not chrome_path:
+        return {
+            "ok": False,
+            "available": True,
+            "tool_unavailable": False,
+            "setup_needed": True,
+            "reason": "Lighthouse is installed but CHROME_PATH/CHROMIUM_PATH or a Chromium executable is not configured.",
+        }
     chrome_flags = "--headless --no-sandbox"
     if chrome_path:
         chrome_flags += f" --user-data-dir=/tmp/lighthouse-chrome"
