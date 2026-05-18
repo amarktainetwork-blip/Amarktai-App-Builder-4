@@ -142,6 +142,21 @@ function GenxModelSummary({ runtime }) {
 
 function getStatus(capability, key) {
   if (!capability) return { label: "Setup needed", color: "#FFC107" };
+  if (capability?.dashboard_label) {
+    const colors = {
+      end_to_end_available: "#00E676",
+      provider_discovered: "#53D8FF",
+      runtime_not_tested: "#FFC107",
+      runtime_failed: "#FF5722",
+      rate_limited: "#FFC107",
+      setup_needed: "#A1A1AA",
+      optional: "#A1A1AA",
+    };
+    return {
+      label: capability.dashboard_label,
+      color: colors[capability.capability_status] || "#FFC107",
+    };
+  }
   if (capability?.live_status === "decrypt_failed") return { label: "Needs settings cleanup", color: "#FF5722" };
   if (capability?.live_status === "quota_limited") return { label: "Quota limited", color: "#FFC107" };
   if (capability?.fallback || capability?.source === "fallback") return { label: "Fallback", color: "#FFC107" };

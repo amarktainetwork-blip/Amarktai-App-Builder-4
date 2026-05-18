@@ -99,6 +99,28 @@ def _default_content_type(category: str) -> str:
     return "application/octet-stream"
 
 
+def build_genx_generate_payload(
+    *,
+    model: str,
+    prompt: str,
+    category: str = "image",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the GenX /api/v1/generate payload.
+
+    GenX media generation requires provider-specific inputs under ``params``.
+    Keep the legacy top-level fields as compatibility hints, but never submit a
+    media job without params because the live provider rejects that shape.
+    """
+    params = {"prompt": prompt, **(extra or {})}
+    return {
+        "model": model,
+        "category": category,
+        "prompt": prompt,
+        "params": params,
+    }
+
+
 async def _download(url: str) -> tuple[bytes, str]:
     async with httpx.AsyncClient(timeout=GENX_GENERATE_TIMEOUT, follow_redirects=True) as client:
         response = await client.get(url)
@@ -120,12 +142,12 @@ async def generate_genx_media_job(
     if not model:
         return {"ok": False, "provider": "genx", "error": f"No GenX {category} model configured"}
 
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "category": category,
-        **(extra or {}),
-    }
+    payload = build_genx_generate_payload(
+        model=model,
+        prompt=prompt,
+        category=category,
+        extra=extra,
+    )
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",

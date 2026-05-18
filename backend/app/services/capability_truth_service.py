@@ -110,9 +110,11 @@ class CapabilityTruthService:
         secret_resolver: SecretResolver,
         *,
         cached_probes: dict[str, Any] | None = None,
+        latest_build_evidence: dict[str, Any] | None = None,
     ) -> None:
         self.secret_resolver = secret_resolver
         self.cached_probes = cached_probes or {}
+        self.latest_build_evidence = latest_build_evidence or {}
 
     async def build(self) -> dict[str, Any]:
         resolved = {key: await self._resolve(key) for key in [
@@ -235,6 +237,63 @@ class CapabilityTruthService:
                 "model_count": len(model_ids or []),
             }
 
+        def evidence_cap(item: dict[str, Any], feature_key: str, *, optional: bool = False) -> dict[str, Any]:
+            evidence = self.latest_build_evidence.get(feature_key) or {}
+            provider_discovered = bool(item.get("available") or item.get("configured") or item.get("model_count"))
+            runtime_tested = bool(evidence.get("runtime_call_tested"))
+            runtime_passed = bool(evidence.get("runtime_call_passed"))
+            artifact_persisted = bool(evidence.get("artifact_persisted"))
+            used_in_latest_build = bool(evidence.get("used_in_latest_build"))
+            visible_in_preview = bool(evidence.get("visible_in_preview"))
+            final_gate_enforced = bool(evidence.get("final_gate_enforced"))
+            end_to_end = all([
+                provider_discovered,
+                runtime_tested,
+                runtime_passed,
+                artifact_persisted,
+                used_in_latest_build,
+                visible_in_preview,
+                final_gate_enforced,
+            ])
+            if end_to_end:
+                status = "end_to_end_available"
+                label = "End-to-end available"
+            elif evidence.get("runtime_call_failed") or item.get("live_status") in {"live_fail", "key_present_live_fail", "provider_timeout"}:
+                status = "runtime_failed"
+                label = "Runtime failed"
+            elif evidence.get("rate_limited") or item.get("live_status") == "quota_limited":
+                status = "rate_limited"
+                label = "Rate limited"
+            elif provider_discovered:
+                status = "provider_discovered"
+                label = "Provider discovered"
+            elif item.get("configured"):
+                status = "runtime_not_tested"
+                label = "Runtime not tested"
+            elif optional:
+                status = "optional"
+                label = "Optional"
+            else:
+                status = "setup_needed"
+                label = "Setup needed"
+            return {
+                **item,
+                "proof_chain": {
+                    "provider_configured": bool(item.get("configured")),
+                    "model_provider_discovered": provider_discovered,
+                    "runtime_call_tested": runtime_tested,
+                    "runtime_call_passed": runtime_passed,
+                    "artifact_result_persisted": artifact_persisted,
+                    "injected_used_in_generated_project": used_in_latest_build,
+                    "visible_in_preview": visible_in_preview,
+                    "final_gate_enforces_it": final_gate_enforced,
+                },
+                "end_to_end_available": end_to_end,
+                "capability_status": status,
+                "dashboard_label": label,
+                "latest_build_reason": evidence.get("reason"),
+            }
+
         firecrawl_live_status = providers["firecrawl"].get("live_status", "")
         firecrawl_reason = providers["firecrawl"]["reason"] or "FIRECRAWL_API_KEY not configured"
         if firecrawl_live_status == "quota_limited":
@@ -254,7 +313,7 @@ class CapabilityTruthService:
         ]
         _axe_available = any(_Path(p).exists() for p in _axe_candidates)
 
-        return {
+        capabilities = {
             "text_generation": cap(genx_ok, "genx", providers["genx"]["reason"] or "GENX_API_KEY not configured"),
             "reasoning": cap(genx_ok, "genx", providers["genx"]["reason"] or "GENX_API_KEY not configured"),
             "vision": cap(genx_ok, "genx", providers["genx"]["reason"] or "GENX_API_KEY not configured"),
@@ -376,6 +435,25 @@ class CapabilityTruthService:
                 ],
             },
         }
+        for feature_key in [
+            "image_generation",
+            "video_generation",
+            "audio",
+            "voice_generation",
+            "avatar_generation",
+            "stock_media",
+        ]:
+            capabilities[feature_key] = evidence_cap(capabilities[feature_key], feature_key)
+        for feature_key in [
+            "whisper_stt",
+            "faiss_vector_memory",
+            "stable_diffusion_fallback",
+            "musicgen_fallback",
+            "playwright_traces",
+            "orchestration_graph",
+        ]:
+            capabilities[feature_key] = evidence_cap(capabilities[feature_key], feature_key, optional=True)
+        return capabilities
 
     def _models(self, providers: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         models = []

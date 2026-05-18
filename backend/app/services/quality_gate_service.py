@@ -32,6 +32,7 @@ from typing import Any
 from app.services.content_quality_service import check_content_quality
 from app.services.build_contract_service import is_static_preview_ready_workspace
 from app.services.runtime_qa_service import run_runtime_qa
+from app.services.media_runtime_service import expected_media_sections, summarize_media_section_alignment
 
 logger = logging.getLogger("amarktai.quality_gate")
 
@@ -620,6 +621,111 @@ def check_motion_manifest(ws: Path) -> dict[str, Any]:
     return {"ok": True, "manifest": manifest}
 
 
+def _read_json_file(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _combined_source_text(ws: Path) -> str:
+    snippets = []
+    for path in _iter_source_files(ws, {".html", ".css", ".js", ".jsx", ".tsx"}):
+        try:
+            snippets.append(path.read_text(encoding="utf-8", errors="replace")[:100_000])
+        except Exception:
+            continue
+    return "\n".join(snippets)
+
+
+def _is_premium_prompt(prompt: str, *, strict: bool, require_media: bool) -> bool:
+    return bool(strict or require_media or re.search(r"\b(premium|cinematic|gallery|media|video|motion)\b", prompt or "", re.IGNORECASE))
+
+
+def compute_premium_quality_score(
+    ws: Path,
+    *,
+    prompt: str = "",
+    runtime_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    manifest = _read_json_file(ws / "media_manifest.json")
+    assets = manifest.get("assets") if isinstance(manifest.get("assets"), list) else []
+    attempts = manifest.get("attempts") if isinstance(manifest.get("attempts"), list) else []
+    source_text = _combined_source_text(ws)
+    html_sections = re.findall(r"<section[^>]*(?:id|class)=['\"]([^'\"]+)['\"]", source_text, re.IGNORECASE)
+    expected_sections = expected_media_sections(prompt, html_sections)
+    alignment = manifest.get("section_alignment") or summarize_media_section_alignment(ws, assets, sections=expected_sections)
+    runtime_report = runtime_report or _read_json_file(ws / "runtime-qa" / "runtime-qa-report.json")
+
+    provider_failures = [a for a in attempts if a.get("ok") is False and a.get("provider") in {"genx", "qwen", "pixabay", "pixabay_video"}]
+    fallback_assets = [a for a in assets if a.get("source") in {"local_runtime_fallback", "css_svg_fallback"}]
+    ai_assets = [a for a in assets if a.get("source") in {"genx", "qwen"}]
+    visible_sections = set(alignment.get("aligned_sections") or [])
+    missing_sections = sorted(set(expected_sections) - visible_sections)
+    hero_background = "data-amarktai-hero-background" in source_text or "amarktai-hero-media-layer" in source_text
+    gallery_media = "gallery" in visible_sections or "gallery" not in expected_sections
+    responsive = bool(check_responsive(ws).get("ok"))
+    generic_fallback = bool(re.search(r"Amarktai Builder runtime media|Amarktai media fallback|Local fallback asset", source_text, re.IGNORECASE))
+    runtime_blockers = [str(item) for item in (runtime_report or {}).get("blockers", [])]
+    runtime_warnings = [str(item) for item in (runtime_report or {}).get("warnings", [])]
+    broken_media = bool((runtime_report or {}).get("media_assets", {}).get("broken")) or any("broken runtime media" in b.lower() for b in runtime_blockers)
+    lighthouse_setup = any("lighthouse" in item.lower() for item in runtime_blockers + runtime_warnings) and not (runtime_report or {}).get("performance", {}).get("available")
+    axe_setup = any("axe-core" in item.lower() for item in runtime_blockers + runtime_warnings) and not (runtime_report or {}).get("accessibility", {}).get("available")
+    motion_depth = bool(re.search(r"<video\b|data-motion-runtime|data-amarktai-motion-scene|requestAnimationFrame|@keyframes|animation\s*:", source_text, re.IGNORECASE))
+
+    sub_scores = {
+        "provider_execution": 100 if not provider_failures else 30,
+        "media_persistence": min(100, len(assets) * 34),
+        "media_section_alignment": 100 if not missing_sections and not alignment.get("hero_only") else max(0, 100 - 25 * len(missing_sections) - (35 if alignment.get("hero_only") else 0)),
+        "hero_media_depth": 100 if hero_background else 35,
+        "gallery_media": 100 if gallery_media else 0,
+        "runtime_qa": 100 if (runtime_report or {}).get("pass") else (40 if (axe_setup or lighthouse_setup) and not broken_media else 0),
+        "responsive_css": 100 if responsive else 0,
+        "brand_specificity": 20 if generic_fallback else 100,
+        "motion_video_treatment": 100 if motion_depth else 45,
+        "final_preview_integrity": 0 if broken_media else 100,
+    }
+    score = int(sum(sub_scores.values()) / len(sub_scores))
+    blockers: list[str] = []
+    if provider_failures and fallback_assets and manifest.get("status") in {"ready", "ai_generated", "stock", "fallback"}:
+        blockers.append("Provider media execution failed and fallback assets were used; premium media cannot be reported as complete.")
+    if missing_sections:
+        blockers.append(f"Expected media sections missing: {', '.join(missing_sections)}.")
+    if alignment.get("hero_only") and len(expected_sections) > 1:
+        blockers.append("All media is assigned to hero while premium sections require visual coverage.")
+    if "gallery" in expected_sections and not gallery_media:
+        blockers.append("Gallery was requested but has no visible media.")
+    if broken_media:
+        blockers.append("Broken runtime media assets detected.")
+    if generic_fallback:
+        blockers.append("Generic fallback media wording is visible in the generated project.")
+    if not hero_background:
+        blockers.append("Hero media is not injected as a background/visual layer.")
+    if not responsive:
+        blockers.append("Responsive CSS or viewport support is missing.")
+    if score < int(os.environ.get("PREMIUM_QUALITY_MIN_SCORE", "75")):
+        blockers.append(f"premium_quality_score {score} is below threshold.")
+    warnings = []
+    if axe_setup:
+        warnings.append("axe-core is setup-needed; accessibility runtime score is unavailable.")
+    if lighthouse_setup:
+        warnings.append("Lighthouse/Chrome is setup-needed or misconfigured; performance runtime score is unavailable.")
+    return {
+        "ok": not blockers,
+        "score": score,
+        "sub_scores": sub_scores,
+        "blocker": bool(blockers),
+        "message": "; ".join(blockers) if blockers else "Premium quality evidence passed.",
+        "blockers": blockers,
+        "warnings": warnings,
+        "expected_sections": expected_sections,
+        "section_alignment": alignment,
+        "provider_failures": provider_failures,
+        "fallback_asset_count": len(fallback_assets),
+        "ai_asset_count": len(ai_assets),
+    }
+
+
 def run_quality_gate(
     workspace_path: str | Path,
     *,
@@ -717,6 +823,17 @@ def run_quality_gate(
             runtime_report["policy"] = "static_preview_ready_with_runtime_warnings"
             runtime_report["finalize_locked"] = True
 
+    if _is_premium_prompt(prompt, strict=strict, require_media=require_media):
+        premium_quality = compute_premium_quality_score(ws, prompt=prompt, runtime_report=runtime_report)
+        checks["premium_quality"] = {
+            "ok": premium_quality["ok"],
+            "blocker": bool(premium_quality.get("blockers")),
+            "warning": bool(premium_quality.get("warnings")) and not premium_quality["ok"],
+            "message": premium_quality.get("message", ""),
+            "score": premium_quality["score"],
+            "report": premium_quality,
+        }
+
     blockers = []
     warnings = []
     suggestions = []
@@ -777,6 +894,8 @@ def run_quality_gate(
         "checks": checks,
         "strict": strict,
         "runtime_qa": runtime_report,
+        "premium_quality_score": checks.get("premium_quality", {}).get("score"),
+        "premium_quality_report": checks.get("premium_quality", {}).get("report"),
         "content_quality_report": checks.get("content_quality", {}).get("report"),
         "repair_suggestions": suggestions,
         "workspace_path": str(ws),

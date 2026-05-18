@@ -23,7 +23,11 @@ import pytest
 
 # Point the storage root at a temp directory for tests
 _TMP_ROOT = tempfile.mkdtemp(prefix="amarktai_builds_test_")
-os.environ["BUILDS_STORAGE_ROOT"] = _TMP_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _builds_storage_root(monkeypatch):
+    monkeypatch.setenv("BUILDS_STORAGE_ROOT", _TMP_ROOT)
 
 
 from app.services.build_storage_service import (
