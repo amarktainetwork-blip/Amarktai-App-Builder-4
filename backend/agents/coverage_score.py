@@ -9,6 +9,7 @@ Returns a coverage report used to:
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -153,6 +154,36 @@ def _has_path(files: list[dict], path: str) -> bool:
     return path in _paths(files)
 
 
+def _json_file(files: list[dict], path: str) -> dict[str, Any]:
+    for item in files:
+        if item.get("path") != path:
+            continue
+        try:
+            return item.get("content") if isinstance(item.get("content"), dict) else json.loads(str(item.get("content") or "{}"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _has_static_preview_evidence(files: list[dict]) -> bool:
+    ps = _paths(files)
+    if "index.html" not in ps:
+        return False
+    preview = _json_file(files, "preview-manifest.json")
+    if preview:
+        entry = preview.get("entry") or (preview.get("entry_candidates") or [""])[0]
+        status = str(preview.get("status") or "").lower()
+        if (entry == "index.html" or (entry in ps)) and status in {"ready", "built", "ok", "preview_ready"}:
+            return True
+    project = _json_file(files, "amarktai.project.json")
+    if project:
+        preview_data = project.get("preview") if isinstance(project.get("preview"), dict) else {}
+        entry = preview_data.get("entry") or project.get("preview_entry")
+        if entry == "index.html" or (entry in ps):
+            return True
+    return False
+
+
 def _css_linked_in_pages(files: list[dict]) -> tuple[int, int]:
     """Return (total_html_pages, pages_with_linked_css_or_styling).
 
@@ -227,6 +258,8 @@ def compute_coverage_score(
 
     # ── Core: always check preview or fallback ─────────────────────────────
     has_preview = bool(preview_url) or bool(preview_fallback)
+    if not has_preview and is_static_mode:
+        has_preview = _has_static_preview_evidence(files)
     check("preview or preview fallback available", has_preview, 10)
 
     # ── Core: app files generated ─────────────────────────────────────────
