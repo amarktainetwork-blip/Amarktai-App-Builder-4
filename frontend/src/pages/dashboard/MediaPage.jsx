@@ -63,30 +63,36 @@ export default function MediaPage() {
   };
 
   return (
-    <section className="border border-amk-line bg-amk-panel">
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-amk-line p-5">
+    <section className="premium-card overflow-hidden rounded-3xl">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-amk-line p-6">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-amk-fg3">Media</div>
-          <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight text-white">Media library</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-amk-fg2">Uploaded assets are available to builds. Generated, Qwen, GenX, and Pixabay assets appear only when their providers are configured and produce real files.</p>
+          <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-amk-accent">Media Studio</div>
+          <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight text-white md:text-5xl">Media-rich products without fake green lights.</h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-amk-fg2">Generated media, stock media, uploads, fallbacks, and rate limits stay labeled by evidence. AI media appears when providers are live and artifacts are persisted.</p>
         </div>
-        <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="inline-flex h-10 items-center gap-2 bg-amk-accent px-4 font-mono text-xs uppercase tracking-wider text-black hover:bg-emerald-300 disabled:opacity-50">
+        <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="cta-primary inline-flex h-11 items-center gap-2 rounded-2xl px-5 font-mono text-xs uppercase tracking-wider disabled:opacity-50">
           {uploading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
           {uploading ? "Uploading" : "Upload"}
         </button>
         <input ref={fileInputRef} type="file" multiple accept="image/*,video/*,audio/*,.svg,.pdf" className="hidden" onChange={upload} />
       </div>
 
+      <div className="grid gap-3 border-b border-amk-line p-4 md:grid-cols-4">
+        {["Generated media", "Stock media", "Uploaded assets", "Fallbacks and rate limits"].map((item) => (
+          <div key={item} className="rounded-2xl border border-amk-line bg-amk-base/70 p-3 font-mono text-[10px] uppercase tracking-wider text-amk-fg2">{item}</div>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2 border-b border-amk-line p-4">
-        <input value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") load(); }} placeholder="Search assets..." className="h-9 min-w-[220px] flex-1 border border-amk-line bg-amk-base px-3 font-mono text-xs text-white outline-none focus:border-white" />
-        <button onClick={load} className="inline-flex h-9 items-center gap-2 border border-amk-line px-3 font-mono text-[10px] uppercase tracking-wider text-amk-fg3 hover:bg-amk-base hover:text-white">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") load(); }} placeholder="Search assets..." className="h-10 min-w-[220px] flex-1 rounded-2xl border border-amk-line bg-amk-base px-3 font-mono text-xs text-white outline-none focus:border-amk-accent" />
+        <button onClick={load} className="inline-flex h-10 items-center gap-2 rounded-2xl border border-amk-line px-3 font-mono text-[10px] uppercase tracking-wider text-amk-fg3 hover:bg-amk-base hover:text-white">
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
         </button>
       </div>
 
       <div className="flex gap-1 overflow-x-auto border-b border-amk-line p-3">
         {FILTERS.map((filter) => (
-          <button key={filter} onClick={() => setTypeFilter(filter)} className={`h-8 shrink-0 border px-3 font-mono text-[10px] uppercase tracking-wider ${typeFilter === filter ? "border-amk-accent bg-amk-accent/10 text-amk-accent" : "border-amk-line text-amk-fg3 hover:bg-amk-base hover:text-white"}`}>
+          <button key={filter} onClick={() => setTypeFilter(filter)} className={`h-8 shrink-0 rounded-full border px-3 font-mono text-[10px] uppercase tracking-wider ${typeFilter === filter ? "border-amk-accent bg-amk-accent/10 text-amk-accent" : "border-amk-line text-amk-fg3 hover:bg-amk-base hover:text-white"}`}>
             {filter}
           </button>
         ))}
@@ -97,10 +103,13 @@ export default function MediaPage() {
         {loading ? (
           <div className="grid h-40 place-items-center font-mono text-xs text-amk-fg3">Loading media...</div>
         ) : assets.length === 0 ? (
-          <div className="grid h-44 place-items-center border border-amk-line bg-amk-base text-center">
+          <div className="grid min-h-72 place-items-center rounded-3xl border border-dashed border-amk-line bg-amk-base/60 p-8 text-center">
             <div>
-              <ImageIcon className="mx-auto h-8 w-8 text-amk-fg3" />
-              <p className="mt-3 text-sm text-amk-fg2">No assets yet. Upload a logo, image, video, audio file, SVG, or document.</p>
+              <div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-amk-accent/12">
+                <ImageIcon className="h-8 w-8 text-amk-accent" />
+              </div>
+              <h2 className="mt-5 font-display text-2xl text-white">No media yet</h2>
+              <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-amk-fg2">Upload logos, images, video, audio, SVGs, or documents. Provider-generated assets will appear only after real persistence.</p>
             </div>
           </div>
         ) : (
@@ -117,15 +126,15 @@ function AssetCard({ asset, onDelete }) {
   const Icon = iconFor(asset.media_type);
   const isImage = ["image", "logo", "svg"].includes(asset.media_type);
   return (
-    <article className="group overflow-hidden border border-amk-line bg-amk-base">
-      <div className="grid aspect-video place-items-center bg-black/30">
+    <article className="group overflow-hidden rounded-3xl border border-amk-line bg-amk-base/70">
+      <div className="grid aspect-video place-items-center bg-gradient-to-br from-amk-accent/10 via-amk-blue/10 to-amk-violet/10">
         {isImage ? (
           <img src={Media.thumbnailUrl(asset.id)} alt={asset.original_name} className="h-full w-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />
         ) : (
           <Icon className="h-8 w-8 text-amk-fg3" />
         )}
       </div>
-      <div className="flex items-start justify-between gap-3 p-3">
+      <div className="flex items-start justify-between gap-3 p-4">
         <div className="min-w-0">
           <div className="truncate font-mono text-xs text-white" title={asset.original_name}>{asset.original_name}</div>
           <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-amk-fg3">{asset.source || "upload"} / {asset.media_type}</div>

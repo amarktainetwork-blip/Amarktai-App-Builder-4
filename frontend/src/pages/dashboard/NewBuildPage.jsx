@@ -121,7 +121,7 @@ export default function NewBuildPage() {
   };
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+    <div className="grid gap-6 xl:grid-cols-[1fr_390px]">
       {clarification && (
         <ClarificationModal
           questions={clarification.questions}
@@ -135,30 +135,34 @@ export default function NewBuildPage() {
         />
       )}
 
-      <section className="border border-amk-line bg-amk-panel">
-        <div className="border-b border-amk-line p-5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-amk-fg3">New build</div>
-          <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight text-white">Describe the product. Let the system route the build.</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-amk-fg2">Prompt-first creation with explicit mode, quality, and media constraints. Provider-backed options stay marked as live, fallback, or setup-needed.</p>
+      <section className="premium-card overflow-hidden rounded-3xl">
+        <div className="border-b border-amk-line p-6">
+          <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-amk-accent">New build</div>
+          <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight text-white md:text-5xl">Describe the product. Aiva routes the build.</h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-amk-fg2">Aiva plans it, designs it, builds it, tests it, repairs it, and prepares it for launch. Provider-backed media stays truth-gated.</p>
         </div>
 
-        <form onSubmit={create} className="space-y-5 p-5" data-testid="create-project-form">
+        <form onSubmit={create} className="space-y-6 p-6" data-testid="create-project-form">
           <Field label="Project name">
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Lead Desk" className="field-input" data-testid="project-name-input" />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Aiva Revenue Ops" className="field-input rounded-2xl" data-testid="project-name-input" />
           </Field>
 
           <Field label="Build prompt">
-            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={7} placeholder="Build a modern one-page website for a luxury local bakery with hero, services, gallery, testimonials, contact section, responsive design, and polished visuals." className="field-input resize-none leading-6" data-testid="project-prompt-input" />
-            <p className="mt-2 text-xs leading-5 text-amk-fg3">
-              Examples: a premium product landing page, a PWA for bookings, an admin dashboard, or a repo repair brief.
-            </p>
+            <div className="rounded-3xl border border-amk-line bg-amk-base/70 p-3">
+              <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={8} placeholder="Build a cinematic landing page for a private AI operations platform with hero, product sections, proof, media treatment, runtime truth badges, and a strong access CTA." className="min-h-56 w-full resize-none rounded-2xl border border-amk-line bg-[#030712] px-4 py-4 text-sm leading-7 text-white outline-none placeholder:text-amk-fg3 focus:border-amk-accent" data-testid="project-prompt-input" />
+              <div className="mt-3 grid gap-2 md:grid-cols-3">
+                {["Build a cinematic landing page for...", "Build a SaaS dashboard for...", "Import this repo and fix..."].map((example) => (
+                  <button key={example} type="button" onClick={() => setPrompt(example)} className="rounded-2xl border border-amk-line px-3 py-2 text-left text-xs text-amk-fg3 hover:border-amk-accent hover:text-white">{example}</button>
+                ))}
+              </div>
+            </div>
           </Field>
 
           <div>
             <Label>Build mode</Label>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {MODES.map(([id, label, desc]) => (
-                <button key={id} type="button" onClick={() => setMode(id)} className={`border p-3 text-left ${mode === id ? "border-amk-accent bg-amk-accent/10" : "border-amk-line bg-amk-base hover:bg-amk-surface"}`}>
+                <button key={id} type="button" onClick={() => setMode(id)} className={`rounded-2xl border p-3 text-left transition ${mode === id ? "border-amk-accent bg-amk-accent/10 shadow-[0_0_28px_rgba(34,211,238,.12)]" : "border-amk-line bg-amk-base/70 hover:bg-amk-surface"}`}>
                   <div className="font-mono text-xs text-white">{label}</div>
                   <div className="mt-1 text-[10px] text-amk-fg3">{desc}</div>
                 </button>
@@ -170,7 +174,7 @@ export default function NewBuildPage() {
             <Label>Quality tier</Label>
             <div className="grid gap-2 sm:grid-cols-2" data-testid="quality-tier-selector">
               {QUALITY_TIERS.map((tier) => (
-                <button key={tier.id} type="button" data-testid={`tier-${tier.id}`} onClick={() => setQualityTier(tier.id)} className={`border p-3 text-left ${qualityTier === tier.id ? "border-amk-accent bg-amk-accent/10 text-white" : "border-amk-line bg-amk-base text-amk-fg2 hover:bg-amk-surface"}`}>
+                <button key={tier.id} type="button" data-testid={`tier-${tier.id}`} onClick={() => setQualityTier(tier.id)} className={`rounded-2xl border p-3 text-left transition ${qualityTier === tier.id ? "border-amk-violet bg-amk-violet/10 text-white" : "border-amk-line bg-amk-base/70 text-amk-fg2 hover:bg-amk-surface"}`}>
                   <span className="block font-mono text-xs">{tier.label}</span>
                   <span className="mt-1 block text-[10px] leading-4 text-amk-fg3">{tier.description}</span>
                 </button>
@@ -182,7 +186,7 @@ export default function NewBuildPage() {
             <Label>Media options</Label>
             <div className="grid gap-2 md:grid-cols-2">
               {MEDIA_OPTIONS.map(([id, label, desc, Icon]) => (
-                <button key={id} type="button" onClick={() => setMediaChoice(id)} className={`flex items-start gap-3 border p-3 text-left ${mediaChoice === id ? "border-amk-accent bg-amk-accent/10" : "border-amk-line bg-amk-base hover:bg-amk-surface"}`}>
+                <button key={id} type="button" onClick={() => setMediaChoice(id)} className={`flex items-start gap-3 rounded-2xl border p-3 text-left transition ${mediaChoice === id ? "border-amk-magenta bg-amk-magenta/10" : "border-amk-line bg-amk-base/70 hover:bg-amk-surface"}`}>
                   <Icon className="mt-0.5 h-4 w-4 shrink-0 text-amk-accent" />
                   <span>
                     <span className="block font-mono text-xs text-white">{label}</span>
@@ -193,26 +197,37 @@ export default function NewBuildPage() {
             </div>
           </div>
 
-          <div className="border border-amk-line bg-amk-base p-3">
+          <div className="rounded-3xl border border-amk-line bg-amk-base/70 p-4">
             <div className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3">What happens next</div>
             <p className="mt-2 text-xs leading-5 text-amk-fg2">
               Planner, Scout, Architect, Coder, Reviewer, Media, Motion, Runtime QA, and deployment gates run in order. Failures show a clear next action in the workspace.
             </p>
           </div>
 
-          <Button type="submit" disabled={creating} className="h-11 w-full bg-amk-accent font-mono text-xs uppercase tracking-wider text-black hover:bg-emerald-300" data-testid="create-project-btn">
+          <Button type="submit" disabled={creating} className="h-12 w-full rounded-2xl bg-gradient-to-r from-amk-accent via-amk-blue to-amk-violet font-mono text-xs uppercase tracking-wider text-amk-base hover:opacity-95" data-testid="create-project-btn">
             {creating ? "Starting agents..." : "Begin build"} <Sparkles className="ml-2 h-4 w-4" />
           </Button>
         </form>
       </section>
 
       <aside className="space-y-4">
-        <div className="border border-amk-line bg-amk-panel p-4">
+        <div className="glass-panel rounded-3xl p-5">
           <div className="font-mono text-[10px] uppercase tracking-wider text-amk-fg3">Readiness</div>
           <div className="mt-2 font-mono text-sm uppercase tracking-wider" style={{ color: readiness?.overall === "PASS" ? "#00E676" : "#FFC107" }}>
             {readiness?.overall || "Unknown"}
           </div>
           {readiness?.blockers?.length > 0 && <p className="mt-2 text-xs leading-5 text-agent-scout">{readiness.blockers[0]}</p>}
+        </div>
+        <div className="glass-panel rounded-3xl p-5">
+          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3">Aiva build sequence</div>
+          <div className="mt-4 space-y-2">
+            {["Clarify intent", "Plan product architecture", "Design interface", "Generate files", "Apply media policy", "Preview and QA", "Repair and gate"].map((item, index) => (
+              <div key={item} className="flex items-center gap-3 rounded-2xl bg-amk-base/70 p-3">
+                <span className="grid h-7 w-7 place-items-center rounded-xl bg-amk-accent/15 font-mono text-[10px] text-amk-accent">{index + 1}</span>
+                <span className="text-xs text-amk-fg2">{item}</span>
+              </div>
+            ))}
+          </div>
         </div>
         <CapabilityStatus compact />
       </aside>
