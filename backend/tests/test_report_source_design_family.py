@@ -1,5 +1,8 @@
 import json
 import re
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from agents.build_contract import (
     ensure_required_files,
@@ -8,7 +11,13 @@ from agents.build_contract import (
     repair_static_design_family,
     validate_project_files,
 )
-from agents.orchestrator import _agent_app_files, _reviewer_app_patches
+from agents.orchestrator import (
+    Orchestrator,
+    _agent_app_files,
+    _parse_reviewer_tolerant_output,
+    _reviewer_app_patches,
+    _static_reviewer_failure_can_continue,
+)
 from app.services.content_quality_service import run_content_quality_check_for_files
 
 
@@ -129,3 +138,93 @@ def test_ensure_required_files_does_not_request_reports_as_app_source():
     assert "content_quality_report.json" not in app_paths
     assert not any(re.search(r"(?:_report|-report)\\.json$", path) for path in app_paths)
     assert "index.html" in app_paths
+
+
+def test_markdown_reviewer_output_is_structured():
+    data = _parse_reviewer_tolerant_output("""
+**Verdict:** needs_regeneration
+
+**Issues:**
+- styles.css does not match index.html
+- preview-manifest.json is missing
+""")
+
+    assert data is not None
+    assert data["verdict"] == "needs_regeneration"
+    assert data["issues"] == [
+        "styles.css does not match index.html",
+        "preview-manifest.json is missing",
+    ]
+    assert data["patched_files"] == []
+
+
+@pytest.mark.asyncio
+async def test_reviewer_markdown_run_agent_does_not_raise_invalid_json():
+    provider = MagicMock()
+    provider.complete = AsyncMock(return_value={
+        "text": "**Verdict:** needs_regeneration\n\n**Issues:**\n- styles.css does not match index.html",
+        "model_label": "test-reviewer",
+    })
+    db = MagicMock()
+    db.agent_events.insert_one = AsyncMock()
+    db.messages.insert_one = AsyncMock()
+    db.projects.update_one = AsyncMock()
+    emitted = []
+    async def emit(payload):
+        emitted.append(payload)
+
+    orch = Orchestrator(db, provider, "proj1", emit)
+    result = await orch._run_agent("reviewer", "review", "files")
+
+    assert result["data"]["verdict"] == "needs_regeneration"
+    assert result["data"]["issues"] == ["styles.css does not match index.html"]
+    assert result["data"]["patched_files"] == []
+
+
+def test_reviewer_invalid_json_is_warning_only_for_preview_ready_static_files():
+    files, _changed = ensure_required_files(
+        {"mode": "landing_page"},
+        BAKERY_PROMPT,
+        {},
+        [
+            {"path": "index.html", "language": "html", "content": _bakery_html()},
+            {"path": "styles.css", "language": "css", "content": ":root{--color-bg:#fff;--color-fg:#221}body{color:var(--color-fg)}"},
+        ],
+    )
+
+    assert _parse_reviewer_tolerant_output("not json and not a reviewer audit") is None
+    assert _static_reviewer_failure_can_continue(
+        {"mode": "landing_page", "prompt": BAKERY_PROMPT},
+        files,
+    )
+
+
+def test_markdown_needs_regeneration_triggers_coherent_static_repair():
+    reviewer_data = _parse_reviewer_tolerant_output("""
+**Verdict:** needs_regeneration
+
+**Issues:**
+- styles.css does not match index.html
+- script.js targets missing selectors
+""")
+    files = [
+        {"path": "index.html", "language": "html", "content": _bakery_html()},
+        {"path": "styles.css", "language": "css", "content": ":root{--color-bg:#05070b;--color-fg:#fff}.hero{color:#00e676}"},
+        {"path": "script.js", "language": "javascript", "content": "document.querySelector('.missing-motion').classList.add('x')"},
+    ]
+
+    assert reviewer_data["verdict"] == "needs_regeneration"
+    repaired, changed = repair_static_design_family(
+        {"mode": "landing_page"},
+        BAKERY_PROMPT,
+        {},
+        files,
+        force=True,
+    )
+    by_path = {f["path"]: f for f in repaired}
+
+    assert {"index.html", "styles.css", "script.js"}.issubset(set(changed))
+    assert "Luma & Stone" in by_path["index.html"]["content"]
+    assert "#00e676" not in by_path["styles.css"]["content"].lower()
+    assert ".missing-motion" not in by_path["script.js"]["content"]
+    assert validate_project_files({"mode": "landing_page"}, repaired, prompt=BAKERY_PROMPT)["structureOk"]

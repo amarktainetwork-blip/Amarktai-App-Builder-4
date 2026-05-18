@@ -602,6 +602,131 @@ def _reviewer_app_patches(patched_files: list[dict] | None) -> tuple[list[dict],
     return accepted, ignored
 
 
+def _normalize_reviewer_verdict(raw: Any, has_issues: bool = False) -> str:
+    value = str(raw or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if "needs_regeneration" in value or ("regeneration" in value and "need" in value):
+        return "needs_regeneration"
+    if value in {"patched", "patches_applied"}:
+        return "patched"
+    if value in {"warn", "warning"}:
+        return "warn"
+    if "issue" in value or "block" in value or "fail" in value:
+        return "issues_found"
+    if "pass" in value or "approved" in value or "ok" == value:
+        return "pass"
+    return "issues_found" if has_issues else "pass"
+
+
+def _coerce_reviewer_data(data: Any) -> dict | None:
+    if not isinstance(data, dict):
+        return None
+    raw_issues = data.get("issues", [])
+    if isinstance(raw_issues, str):
+        issues = [line.strip(" -*\t") for line in raw_issues.splitlines() if line.strip(" -*\t")]
+    elif isinstance(raw_issues, list):
+        issues = [str(item).strip() for item in raw_issues if str(item).strip()]
+    else:
+        issues = []
+    patched_files = data.get("patched_files", [])
+    if not isinstance(patched_files, list):
+        patched_files = []
+    verdict = _normalize_reviewer_verdict(data.get("verdict"), bool(issues))
+    normalized = dict(data)
+    normalized.update({
+        "verdict": verdict,
+        "issues": issues,
+        "patched_files": patched_files,
+    })
+    return normalized
+
+
+def _parse_reviewer_markdown_audit(text: str) -> dict | None:
+    """Convert common Markdown reviewer audits into the JSON reviewer contract."""
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+
+    verdict_value = ""
+    issues: list[str] = []
+    in_issues = False
+    reviewer_cue_seen = False
+
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        plain = re.sub(r"[*_`#>]", "", stripped).strip()
+        plain_lower = plain.lower()
+
+        if "verdict" in plain_lower:
+            reviewer_cue_seen = True
+            parts = re.split(r"verdict\s*:", plain, flags=re.IGNORECASE, maxsplit=1)
+            verdict_value = (parts[1] if len(parts) > 1 else plain).strip(" :-")
+            in_issues = False
+            continue
+
+        if plain_lower.rstrip(":") in {"issues", "findings", "problems", "blockers"}:
+            reviewer_cue_seen = True
+            in_issues = True
+            continue
+
+        bullet_match = re.match(r"^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$", stripped)
+        if bullet_match and ("verdict" not in plain_lower):
+            issue = re.sub(r"[*_`]", "", bullet_match.group(1)).strip()
+            if issue:
+                issues.append(issue)
+                reviewer_cue_seen = True
+            continue
+
+        if in_issues and not re.match(r"^\s*(?:#{1,6}\s+)?[A-Za-z ].{0,48}:$", plain):
+            # Accept short issue lines below an Issues heading even if the model
+            # omitted bullet markers.
+            issue = plain.strip(" -")
+            if issue:
+                issues.append(issue)
+                reviewer_cue_seen = True
+
+    if not reviewer_cue_seen:
+        return None
+    verdict = _normalize_reviewer_verdict(verdict_value, bool(issues))
+    return {
+        "verdict": verdict,
+        "issues": list(dict.fromkeys(issues)),
+        "patched_files": [],
+        "summary": "Reviewer returned Markdown; parsed into structured audit data.",
+        "source_format": "markdown",
+    }
+
+
+def _parse_reviewer_tolerant_output(text: str) -> dict | None:
+    """Parse strict/fenced JSON or Markdown reviewer text into reviewer data."""
+    try:
+        parsed = _parse_json(text)
+        coerced = _coerce_reviewer_data(parsed)
+        if coerced:
+            return coerced
+    except Exception:
+        pass
+    return _parse_reviewer_markdown_audit(text)
+
+
+def _static_reviewer_failure_can_continue(project: dict, files: list[dict]) -> bool:
+    """Return True when reviewer parse failure can be warning-only for static preview builds."""
+    if infer_project_type(project.get("mode"), project.get("project_type")) != "static-site":
+        return False
+    by_path = {str(f.get("path") or ""): str(f.get("content") or "") for f in files or []}
+    if not by_path.get("index.html", "").strip():
+        return False
+    if not by_path.get("styles.css", "").strip():
+        return False
+    validation = validate_project_files(project, files, prompt=str(project.get("prompt") or ""))
+    catastrophic = [
+        err for err in validation.get("errors", [])
+        if re.search(r"index\.html.*(missing|empty)|styles\.css.*missing|unsafe|secret", str(err), re.IGNORECASE)
+    ]
+    return bool(validation.get("canPreview") or by_path.get("preview-manifest.json")) and not catastrophic
+
+
 def _has_preview_entry(files: list[dict]) -> bool:
     """Return True if the project has a previewable entry file."""
     return any(f["path"] in _PREVIEW_ENTRY_FILES for f in files)
@@ -900,16 +1025,36 @@ class Orchestrator:
             raise ValueError("Reviewer response exceeded audit-only size limit; Reviewer must return a compact audit/patch plan.")
         try:
             data = _parse_json(result["text"])
+            if agent == "reviewer":
+                data = _coerce_reviewer_data(data) or data
         except Exception as e:
             parse_err = str(e)
-            await self._record_event(agent, "failed",
+            await self._record_event(agent, "warn" if agent == "reviewer" else "failed",
                                      f"JSON parse failed: {parse_err}",
                                      meta={"raw": result["text"][:2000]})
+            if agent == "reviewer":
+                reviewer_data = _parse_reviewer_tolerant_output(result["text"])
+                if reviewer_data:
+                    await self._record_event(
+                        agent,
+                        "warn",
+                        "Reviewer returned non-JSON audit text; parsed into structured reviewer data.",
+                        meta={
+                            "source_format": reviewer_data.get("source_format", "json"),
+                            "verdict": reviewer_data.get("verdict"),
+                            "issues": reviewer_data.get("issues", []),
+                        },
+                    )
+                    await self._record_event(agent, "completed", f"{agent.title()} done.",
+                                             meta={"model": result["model_label"], "tolerant_parse": True})
+                    return {"data": reviewer_data, "model_label": result["model_label"]}
             # Attempt exactly one repair
             try:
                 data = await self._repair_json(agent, result["text"], parse_err)
                 await self._record_event(agent, "repaired",
                                          f"JSON repair succeeded for {agent}.")
+                if agent == "reviewer":
+                    data = _coerce_reviewer_data(data) or data
             except Exception as repair_err:
                 best_effort = parse_best_effort_agent_output(result["text"])
                 if agent in {"planner", "scout"} and best_effort:
@@ -2169,14 +2314,40 @@ class Orchestrator:
             reviewer_passed = not reviewer_blocker
             await self._ensure_contract_files(user_prompt, arch_data)
         except Exception as reviewer_err:
-            # Reviewer failure is non-fatal: record and proceed to deterministic validation.
+            # Reviewer parser failure is non-fatal for preview-ready static builds:
+            # deterministic contract validation and gates still decide readiness.
             err_detail = f"Reviewer returned invalid output; skipping reviewer patches. Detail: {reviewer_err}"
-            reviewer_blocker = err_detail
-            await self._record_event("reviewer", "failed", err_detail,
-                                     meta={"reviewer_error": str(reviewer_err)})
-            await self._record_message("system", None, err_detail,
-                                       meta={"reviewer_nonfatal": not is_premium(project_meta.get("quality_tier", "standard"))})
-            await self._ensure_contract_files(user_prompt, arch_data)
+            ensured_files, _ensure_changed = await self._ensure_contract_files(user_prompt, arch_data)
+            reviewer_can_continue = _static_reviewer_failure_can_continue(
+                {**project_meta, "mode": mode, "prompt": user_prompt},
+                ensured_files,
+            )
+            if reviewer_can_continue:
+                reviewer_blocker = ""
+                reviewer_passed = False
+                warning = (
+                    "Reviewer returned invalid output; continuing with deterministic "
+                    "static validation because preview-ready app files exist."
+                )
+                review_issues.append(warning)
+                await self._record_event(
+                    "reviewer",
+                    "warn",
+                    warning,
+                    meta={"reviewer_error": str(reviewer_err), "warning_only": True},
+                )
+                await self._record_message(
+                    "system",
+                    None,
+                    f"{warning}\n\nDebug detail: {reviewer_err}",
+                    meta={"reviewer_nonfatal": True, "reviewer_warning": True},
+                )
+            else:
+                reviewer_blocker = err_detail
+                await self._record_event("reviewer", "failed", err_detail,
+                                         meta={"reviewer_error": str(reviewer_err)})
+                await self._record_message("system", None, err_detail,
+                                           meta={"reviewer_nonfatal": not is_premium(project_meta.get("quality_tier", "standard"))})
 
         if (
             is_premium(project_meta.get("quality_tier", "standard"))
