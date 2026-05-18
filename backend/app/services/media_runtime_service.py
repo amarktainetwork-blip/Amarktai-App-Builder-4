@@ -138,7 +138,10 @@ def _approved_asset_count(assets: list[dict[str, Any]]) -> int:
     return len([
         asset for asset in assets
         if asset.get("media_type") in {"image", "video", "audio", "logo"}
-        and Path(str(asset.get("path", ""))).suffix.lower() != ".svg"
+        and (
+            Path(str(asset.get("path", ""))).suffix.lower() != ".svg"
+            or asset.get("source") == "css_svg_fallback"
+        )
     ])
 
 
@@ -254,6 +257,15 @@ MEDIA_PROFILES: dict[str, dict[str, Any]] = {
     },
 }
 
+SECTION_ALIASES: dict[str, list[str]] = {
+    "hero": ["hero", "banner", "cover", "intro", "masthead"],
+    "services": ["service", "features", "solutions", "offerings"],
+    "gallery": ["gallery", "portfolio", "showcase", "photos", "work"],
+    "about": ["about", "story", "team", "mission"],
+    "contact": ["contact", "cta", "book", "consult", "reach"],
+    "general": ["general"],
+}
+
 
 def _media_profile(prompt: str, sections: list[str]) -> str:
     text = re.sub(r"[^a-zA-Z0-9 ]+", " ", " ".join([prompt or "", " ".join(sections or [])])).lower()
@@ -314,6 +326,101 @@ def _asset_conflicts_with_prompt(item: dict[str, Any], prompt: str, sections: li
         if term in text and not _explicitly_requested(prompt, term):
             return term
     return ""
+
+
+def _normalize_section_name(name: str) -> str:
+    raw = (name or "").strip().lower().replace("-", "_").replace("/", "_")
+    if raw in {"feature", "features", "service", "services", "products", "product"}:
+        return "services"
+    if raw in {"cta", "book", "booking", "contact", "footer"}:
+        return "contact"
+    if raw in {"portfolio", "showcase", "photos"}:
+        return "gallery"
+    if raw in {"about", "story", "team", "mission"}:
+        return "about"
+    if raw in {"hero", "banner", "intro"}:
+        return "hero"
+    if raw in SECTION_ALIASES:
+        return raw
+    return "general"
+
+
+def _infer_asset_section(asset: dict[str, Any], fallback_order: list[str]) -> str:
+    explicit = _normalize_section_name(str(asset.get("section", "")))
+    if explicit != "general":
+        return explicit
+    text = " ".join(
+        str(asset.get(k, ""))
+        for k in ("prompt", "tags", "title", "description", "remote_url", "path")
+    ).lower()
+    for section, aliases in SECTION_ALIASES.items():
+        if section == "general":
+            continue
+        if any(alias in text for alias in aliases):
+            return section
+    for section in fallback_order:
+        mapped = _normalize_section_name(section)
+        if mapped != "general":
+            return mapped
+    return "general"
+
+
+def _persist_css_svg_fallbacks(
+    workspace: Path,
+    *,
+    prompt: str,
+    sections: list[str],
+    assets: list[dict[str, Any]],
+    attempts: list[dict[str, Any]],
+    minimum_assets: int = 3,
+) -> None:
+    safe_sections = [_normalize_section_name(s) for s in (sections or []) if s]
+    section_cycle = safe_sections or ["hero", "services", "gallery"]
+    while _approved_asset_count(assets) < minimum_assets:
+        index = _approved_asset_count(assets)
+        section = section_cycle[index % len(section_cycle)]
+        asset_id = uuid.uuid4().hex[:12]
+        filename = safe_filename(f"css-svg-fallback-{asset_id}.svg")
+        path = _media_dir(workspace) / filename
+        svg = (
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720' role='img' aria-label='Amarktai fallback visual'>"
+            "<defs><linearGradient id='g' x1='0' x2='1' y1='0' y2='1'>"
+            "<stop offset='0%' stop-color='#050b16'/><stop offset='100%' stop-color='#121f36'/></linearGradient></defs>"
+            "<rect width='1280' height='720' fill='url(#g)'/>"
+            "<circle cx='980' cy='120' r='220' fill='rgba(0,230,118,.16)'/>"
+            "<circle cx='220' cy='600' r='260' fill='rgba(83,216,255,.16)'/>"
+            "<rect x='96' y='112' width='1088' height='496' rx='28' fill='none' stroke='rgba(83,216,255,.5)' stroke-width='3'/>"
+            f"<text x='140' y='220' fill='#F8FAFC' font-size='34' font-family='Inter, Arial, sans-serif'>Amarktai media fallback</text>"
+            f"<text x='140' y='274' fill='#A8B3C7' font-size='22' font-family='Inter, Arial, sans-serif'>Section: {section}</text>"
+            f"<text x='140' y='326' fill='#A8B3C7' font-size='18' font-family='Inter, Arial, sans-serif'>{(prompt or 'production website')[:110]}</text>"
+            "</svg>"
+        )
+        path.write_text(svg, encoding="utf-8")
+        asset = {
+            "id": asset_id,
+            "source": "css_svg_fallback",
+            "provider": "css_svg_fallback",
+            "model": "deterministic-svg-fallback",
+            "media_type": "image",
+            "mime_type": "image/svg+xml",
+            "path": str(path.relative_to(workspace)).replace("\\", "/"),
+            "size_bytes": len(svg.encode("utf-8")),
+            "width": 1280,
+            "height": 720,
+            "prompt": prompt,
+            "section": section,
+            "created_at": _now(),
+            "status": "persisted",
+            "reason": "Generated deterministic CSS/SVG fallback because provider media was unavailable or irrelevant.",
+        }
+        assets.append(asset)
+        attempts.append({
+            "provider": "css_svg_fallback",
+            "ok": True,
+            "status": "persisted",
+            "path": asset["path"],
+            "reason": "Generated deterministic SVG fallback media.",
+        })
 
 
 def _filter_relevant_pixabay_assets(
@@ -534,14 +641,28 @@ async def execute_media_plan(
             minimum_assets=3,
         )
     elif no_relevant_stock:
+        _persist_css_svg_fallbacks(
+            workspace,
+            prompt=prompt,
+            sections=sections,
+            assets=assets,
+            attempts=attempts,
+            minimum_assets=3,
+        )
         attempts.append({
             "provider": "media_relevance_policy",
             "ok": True,
             "status": "fallback",
             "reason": "no_relevant_media_found",
         })
+    section_hints = [_normalize_section_name(s) for s in (sections or []) if s]
+    for idx, asset in enumerate(assets):
+        if not asset.get("section"):
+            fallback = section_hints[idx:] + section_hints[:idx] if section_hints else []
+            asset["section"] = _infer_asset_section(asset, fallback)
 
-    injected_files = inject_media_assets(workspace, assets) if assets else []
+    injected_files = inject_media_assets(workspace, assets, sections=sections) if assets else []
+    section_alignment = summarize_media_section_alignment(workspace, assets, sections=sections)
     manifest = {
         "project_id": project_id,
         "status": "ready" if _approved_asset_count(assets) >= 3 else ("fallback" if no_relevant_stock else "failed"),
@@ -551,13 +672,86 @@ async def execute_media_plan(
         "asset_count": _approved_asset_count(assets),
         "stored_asset_count": len(assets),
         "injected_files": injected_files,
+        "section_alignment": section_alignment,
         "created_at": _now(),
     }
     (workspace / "media_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest
 
 
-def inject_media_assets(workspace: Path, assets: list[dict[str, Any]]) -> list[str]:
+def _build_asset_markup(asset: dict[str, Any]) -> str:
+    if asset.get("media_type") == "video":
+        return (
+            f'<div class="amarktai-inline-media-card"><video data-amarktai-media-asset src="{asset["path"]}" autoplay muted loop playsinline '
+            'aria-label="Persisted generated video asset"></video></div>'
+        )
+    if asset.get("media_type") == "audio":
+        return (
+            f'<div class="amarktai-inline-media-card"><audio data-amarktai-media-asset src="{asset["path"]}" controls '
+            'aria-label="Persisted generated audio asset"></audio></div>'
+        )
+    source_label = "Local runtime fallback" if asset.get("source") in {"local_runtime_fallback", "css_svg_fallback"} else "Persisted generated visual"
+    return (
+        f'<figure class="amarktai-inline-media-card"><img data-amarktai-media-asset src="{asset["path"]}" alt="{source_label} for this build" loading="lazy" /></figure>'
+    )
+
+
+def _inject_markup_into_section(html: str, section: str, markup: str) -> tuple[str, bool]:
+    aliases = SECTION_ALIASES.get(section, [])
+    for alias in aliases:
+        pat = re.compile(
+            rf"(<section[^>]*(?:id|class)=['\"][^'\"]*\b{re.escape(alias)}\b[^'\"]*['\"][^>]*>)(.*?)(</section>)",
+            re.IGNORECASE | re.DOTALL,
+        )
+        if pat.search(html):
+            return pat.sub(rf"\1\2{markup}\3", html, count=1), True
+    return html, False
+
+
+def summarize_media_section_alignment(
+    workspace: Path,
+    assets: list[dict[str, Any]],
+    *,
+    sections: list[str] | None = None,
+) -> dict[str, Any]:
+    html = ""
+    for rel in ("index.html", "public/index.html"):
+        path = workspace / rel
+        if path.exists():
+            html = path.read_text(encoding="utf-8", errors="replace")
+            break
+    found_sections: list[dict[str, str]] = []
+    if html:
+        for match in re.finditer(r"<section(?P<attrs>[^>]*)>", html, re.IGNORECASE):
+            attrs = match.group("attrs") or ""
+            id_match = re.search(r"\bid=['\"]([^'\"]+)['\"]", attrs, re.IGNORECASE)
+            class_match = re.search(r"\bclass=['\"]([^'\"]+)['\"]", attrs, re.IGNORECASE)
+            section_id = id_match.group(1) if id_match else ""
+            class_tokens = (class_match.group(1).split() if class_match else [])
+            label = _normalize_section_name(section_id or (class_tokens[0] if class_tokens else "general"))
+            found_sections.append({"id": section_id or "", "label": label})
+    expected_sections = [_normalize_section_name(s) for s in (sections or []) if s]
+    if not expected_sections:
+        expected_sections = [item["label"] for item in found_sections if item["label"] != "general"]
+    asset_counts: dict[str, int] = {}
+    for asset in assets:
+        key = _normalize_section_name(str(asset.get("section", "general")))
+        asset_counts[key] = asset_counts.get(key, 0) + 1
+    section_ids = [item["id"] for item in found_sections if item["id"]]
+    return {
+        "expected_sections": expected_sections,
+        "page_sections": found_sections,
+        "page_section_count": len(found_sections),
+        "page_section_ids": section_ids,
+        "asset_counts_by_section": asset_counts,
+        "aligned_sections": sorted(
+            section for section in set(expected_sections or asset_counts.keys())
+            if asset_counts.get(section, 0) > 0
+        ),
+    }
+
+
+def inject_media_assets(workspace: Path, assets: list[dict[str, Any]], *, sections: list[str] | None = None) -> list[str]:
     """Inject persisted media assets into static HTML/CSS when generated files omit them."""
     changed: list[str] = []
     media_assets = [
@@ -567,6 +761,7 @@ def inject_media_assets(workspace: Path, assets: list[dict[str, Any]]) -> list[s
     ][:4]
     if not media_assets:
         return changed
+    section_hints = [_normalize_section_name(s) for s in (sections or []) if s]
     for rel in ("index.html", "public/index.html"):
         path = workspace / rel
         if not path.exists():
@@ -574,32 +769,31 @@ def inject_media_assets(workspace: Path, assets: list[dict[str, Any]]) -> list[s
         html = path.read_text(encoding="utf-8", errors="replace")
         if "data-amarktai-media-asset" in html:
             return changed
-        asset_markup = '<div class="amarktai-generated-media-grid">'
-        for asset in media_assets:
-            if asset.get("media_type") == "video":
+        unused: list[dict[str, Any]] = []
+        for idx, asset in enumerate(media_assets):
+            section = _normalize_section_name(str(asset.get("section", "")))
+            if section == "general":
+                fallback = section_hints[idx:] + section_hints[:idx] if section_hints else []
+                section = _infer_asset_section(asset, fallback)
+            markup = _build_asset_markup(asset)
+            html, placed = _inject_markup_into_section(html, section, markup)
+            if not placed:
+                unused.append(asset)
+
+        if unused:
+            overflow_assets = unused
+            asset_markup = '<div class="amarktai-generated-media-grid">'
+            for asset in overflow_assets:
+                asset_markup += _build_asset_markup(asset)
+            asset_markup += "</div>"
+            if any(asset.get("media_type") == "video" for asset in overflow_assets):
                 asset_markup += (
-                    f'<video data-amarktai-media-asset src="{asset["path"]}" autoplay muted loop playsinline '
-                    'aria-label="Persisted generated video asset"></video>'
+                    '<p class="amarktai-media-note">Video media is persisted locally and validated before finalize.</p>'
                 )
-            elif asset.get("media_type") == "audio":
-                asset_markup += (
-                    f'<audio data-amarktai-media-asset src="{asset["path"]}" controls '
-                    'aria-label="Persisted generated audio asset"></audio>'
-                )
+            if "</main>" in html:
+                html = html.replace("</main>", f'<section class="amarktai-generated-media">{asset_markup}</section></main>', 1)
             else:
-                source_label = "Local runtime fallback" if asset.get("source") == "local_runtime_fallback" else "Persisted generated visual"
-                asset_markup += (
-                    f'<img data-amarktai-media-asset src="{asset["path"]}" alt="{source_label} for this build" />'
-                )
-        asset_markup += "</div>"
-        if any(asset.get("media_type") == "video" for asset in media_assets):
-            asset_markup += (
-                '<p class="amarktai-media-note">Video media is persisted locally and validated before finalize.</p>'
-            )
-        if "</main>" in html:
-            html = html.replace("</main>", f'<section class="amarktai-generated-media">{asset_markup}</section></main>', 1)
-        else:
-            html = html.replace("</body>", f'<section class="amarktai-generated-media">{asset_markup}</section></body>', 1)
+                html = html.replace("</body>", f'<section class="amarktai-generated-media">{asset_markup}</section></body>', 1)
         path.write_text(html, encoding="utf-8")
         changed.append(rel)
         break
@@ -607,7 +801,9 @@ def inject_media_assets(workspace: Path, assets: list[dict[str, Any]]) -> list[s
     css = """
 .amarktai-generated-media { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1rem; padding:clamp(2rem,6vw,5rem); }
 .amarktai-generated-media-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:1rem; }
+.amarktai-inline-media-card { margin-top: 1rem; }
 .amarktai-generated-media img, .amarktai-generated-media video, .amarktai-generated-media audio { width:100%; border-radius:20px; object-fit:cover; box-shadow:0 24px 80px rgba(0,0,0,.32); }
+.amarktai-inline-media-card img, .amarktai-inline-media-card video, .amarktai-inline-media-card audio { width:100%; border-radius:16px; object-fit:cover; box-shadow:0 18px 54px rgba(0,0,0,.28); }
 .amarktai-media-note { color:var(--color-muted,#94a3b8); }
 """.strip()
     if css_path.exists() and "amarktai-generated-media" not in css_path.read_text(errors="replace"):

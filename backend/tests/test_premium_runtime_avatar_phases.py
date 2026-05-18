@@ -307,6 +307,21 @@ class TestMotionPipeline:
         assert "body { margin: 0; }" in css_file["content"]
         assert "animation" in css_file["content"]
 
+    def test_apply_motion_agent_output_tags_target_elements(self):
+        from app.services.motion_runtime_service import apply_motion_agent_output
+        existing_files = [
+            {"path": "index.html", "content": "<html><body><section class='hero'></section></body></html>", "language": "html"},
+            {"path": "script.js", "content": "", "language": "javascript"},
+        ]
+        agent_output = (
+            "===AMARKTAI_FILE[script.js]===\n"
+            "document.querySelector('.hero').classList.add('float');\n"
+            "===END_AMARKTAI_FILE[script.js]==="
+        )
+        patched, _warnings = apply_motion_agent_output(existing_files, agent_output)
+        html_file = next(f for f in patched if f["path"] == "index.html")
+        assert "data-motion-target" in html_file["content"]
+
     def test_apply_motion_invalid_output_preserves_files(self):
         from app.services.motion_runtime_service import apply_motion_agent_output
         existing_files = [
@@ -329,6 +344,22 @@ class TestMotionPipeline:
         paths = {f["path"] for f in patched}
         assert "motion_manifest.json" in paths
         assert any("fallback" in w.lower() for w in warnings)
+
+    def test_apply_motion_3d_output_injects_deterministic_fallback(self):
+        from app.services.motion_runtime_service import apply_motion_agent_output
+        existing_files = [
+            {"path": "index.html", "content": "<html><body><main><section id='hero'></section></main></body></html>", "language": "html"},
+            {"path": "styles.css", "content": "", "language": "css"},
+        ]
+        agent_output = (
+            "===AMARKTAI_FILE[script.js]===\n"
+            "const scene = new THREE.Scene();\n"
+            "===END_AMARKTAI_FILE[script.js]==="
+        )
+        patched, warnings = apply_motion_agent_output(existing_files, agent_output)
+        paths = {f["path"] for f in patched}
+        assert "motion_manifest.json" in paths
+        assert any("fallback visuals" in w.lower() for w in warnings)
 
     def test_map_asset_to_section_hero(self):
         from app.services.motion_runtime_service import map_asset_to_section

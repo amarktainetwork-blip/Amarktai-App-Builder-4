@@ -2,29 +2,32 @@ import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { System } from "@/lib/amk-api";
 
-const CAPABILITIES = [
+const CORE_CAPABILITIES = [
   { key: "text_generation", label: "GenX text/reasoning" },
   { key: "code_generation", label: "GenX code generation" },
   { key: "reasoning", label: "Reasoning" },
-  { key: "qwen", label: "Qwen routing" },
   { key: "repo_analysis", label: "GenX repo analysis" },
   { key: "image_generation", label: "Image generation" },
   { key: "video_generation", label: "Video generation" },
-  { key: "audio_generation", label: "Audio/music" },
+  { key: "audio", label: "Audio/music" },
   { key: "voice_generation", label: "Voice / STT / TTS" },
   { key: "avatar_generation", label: "Avatar video" },
-  { key: "github_integration", label: "GitHub import/PR" },
-  { key: "web_research", label: "Brave research" },
-  { key: "stock_media", label: "Pixabay / stock media" },
   { key: "preview_generation", label: "Preview" },
   { key: "runtime_qa", label: "Runtime QA" },
   { key: "playwright", label: "Playwright" },
   { key: "lighthouse", label: "Lighthouse" },
   { key: "deployment_finalize", label: "Deployment / finalize" },
-  { key: "whisper", label: "Whisper", optional: true },
-  { key: "faiss", label: "FAISS", optional: true },
-  { key: "stable_diffusion", label: "Stable Diffusion", optional: true },
-  { key: "musicgen", label: "MusicGen", optional: true },
+];
+
+const OPTIONAL_INTEGRATIONS = [
+  { key: "github_integration", label: "GitHub import/PR" },
+  { key: "web_research", label: "Brave research" },
+  { key: "stock_media", label: "Pixabay / stock media" },
+  { key: "qwen", label: "Qwen routing" },
+  { key: "whisper_stt", label: "Whisper", optional: true },
+  { key: "faiss_vector_memory", label: "FAISS", optional: true },
+  { key: "stable_diffusion_fallback", label: "Stable Diffusion", optional: true },
+  { key: "musicgen_fallback", label: "MusicGen", optional: true },
   { key: "axe_core", label: "axe-core", optional: true },
   { key: "playwright_traces", label: "Playwright traces", optional: true },
   { key: "orchestration_graph", label: "Orchestration graph", optional: true },
@@ -62,7 +65,7 @@ export default function CapabilityStatus({ compact = false }) {
         <GenxModelSummary runtime={data.providers.genx.runtime} />
       )}
       <div className={`grid gap-px bg-amk-line ${compact ? "sm:grid-cols-2 lg:grid-cols-3" : "md:grid-cols-2 xl:grid-cols-3"}`}>
-        {CAPABILITIES.map(({ key, label }) => {
+        {CORE_CAPABILITIES.map(({ key, label }) => {
           const cap = data?.summary?.[key];
           const status = getStatus(cap, key);
           return (
@@ -86,6 +89,29 @@ export default function CapabilityStatus({ compact = false }) {
           );
         })}
       </div>
+      {!compact && (
+        <>
+          <div className="border-y border-amk-line bg-amk-base px-4 py-3">
+            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-amk-fg3">Add Integrations</div>
+            <p className="mt-1 text-xs leading-5 text-amk-fg3">Optional providers and extensions that can be connected when needed.</p>
+          </div>
+          <div className="grid gap-px bg-amk-line md:grid-cols-2 xl:grid-cols-3">
+            {OPTIONAL_INTEGRATIONS.map(({ key, label }) => {
+              const cap = data?.summary?.[key];
+              const status = getStatus(cap, key);
+              return (
+                <div key={key} className="bg-amk-base px-4 py-3">
+                  <div className="font-mono text-[11px] uppercase tracking-wider text-amk-fg">{label}</div>
+                  <div className="mt-1 font-mono text-[10px] uppercase tracking-wider" style={{ color: status.color }}>
+                    {status.label}
+                  </div>
+                  {cap?.reason && <p className="mt-2 text-xs leading-5 text-amk-fg3">{cap.reason}</p>}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -115,10 +141,13 @@ function GenxModelSummary({ runtime }) {
 }
 
 function getStatus(capability, key) {
+  if (!capability) return { label: "Setup needed", color: "#FFC107" };
   if (capability?.live_status === "decrypt_failed") return { label: "Needs settings cleanup", color: "#FF5722" };
+  if (capability?.live_status === "payment_required") return { label: "Setup needed", color: "#FFC107" };
   if (capability?.fallback || capability?.source === "fallback") return { label: "Fallback", color: "#FFC107" };
+  if (capability?.live_status === "configured_not_tested") return { label: "Configured", color: "#FFC107" };
   if (capability && capability.available === false) {
-    return { label: capability.configured ? "Unavailable" : "Missing", color: capability.configured ? "#FF5722" : "#FFC107" };
+    return { label: capability.configured ? "Configured" : "Setup needed", color: capability.configured ? "#FFC107" : "#A1A1AA" };
   }
   if (capability?.live_status === "live_ok" || capability?.live_status === "key_present_live_ok" || capability?.provider === "sandbox") return { label: "Live", color: "#00E676" };
   if (capability?.live_status === "live_fail" || capability?.live_status === "key_present_live_fail" || capability?.live_status === "provider_timeout") {
@@ -130,6 +159,8 @@ function getStatus(capability, key) {
   if (capability?.available) return { label: "Live", color: "#00E676" };
   if (capability?.coming_soon) return { label: "Setup needed", color: "#A1A1AA" };
   if (key === "preview_generation" || key === "runtime_qa" || key === "playwright" || key === "lighthouse" || key === "deployment_finalize") return { label: capability?.available === false ? "Unavailable" : "Live", color: capability?.available === false ? "#FF5722" : "#00E676" };
-  if (["whisper", "faiss", "stable_diffusion", "musicgen", "axe_core", "playwright_traces", "orchestration_graph"].includes(key)) return { label: "Setup needed", color: "#A1A1AA" };
+  if (["whisper_stt", "faiss_vector_memory", "stable_diffusion_fallback", "musicgen_fallback", "axe_core", "playwright_traces", "orchestration_graph"].includes(key)) {
+    return capability?.configured ? { label: "Configured", color: "#FFC107" } : { label: "Setup needed", color: "#A1A1AA" };
+  }
   return { label: "Setup needed", color: "#FFC107" };
 }

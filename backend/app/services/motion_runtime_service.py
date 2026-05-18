@@ -31,6 +31,10 @@ _SECTION_KEYWORDS: dict[str, list[str]] = {
 }
 
 
+_SELECTOR_PAT = re.compile(r"querySelector(?:All)?\(\s*['\"]([^'\"]+)['\"]\s*\)")
+_CSS_SELECTOR_PAT = re.compile(r"(^|[\s,>+~])([#.][a-zA-Z_][\w\-]*)")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -158,7 +162,72 @@ def apply_motion_agent_output(
                 "content": content,
                 "language": lang_map.get(ext, "text"),
             }
+
+    selectors = _extract_motion_selectors(parsed)
+    if selectors and "index.html" in by_path:
+        by_path["index.html"]["content"] = _tag_motion_targets(by_path["index.html"].get("content", ""), selectors)
+
+    parsed_blob = "\n".join(parsed.values()).lower()
+    if re.search(r"\b(three\.js|threejs|three|webgl|shader|babylon)\b", parsed_blob):
+        fallback_files, _manifest = patch_motion_files(list(by_path.values()), prompt="3d fallback", mode="website")
+        fallback_by_path = {f.get("path", ""): f for f in fallback_files if f.get("path")}
+        for path in ("styles.css", "script.js", "motion_manifest.json", "index.html"):
+            if path in fallback_by_path:
+                by_path[path] = fallback_by_path[path]
+        warnings.append(
+            "Motion_3D referenced 3D/WebGL runtime; deterministic CSS/canvas fallback visuals were injected to preserve UX if 3D fails."
+        )
     return list(by_path.values()), warnings
+
+
+def _extract_motion_selectors(parsed: dict[str, str]) -> list[str]:
+    selectors: list[str] = []
+    for content in parsed.values():
+        selectors.extend(_SELECTOR_PAT.findall(content))
+        for _match in _CSS_SELECTOR_PAT.finditer(content):
+            selector = (_match.group(2) or "").strip()
+            if selector:
+                selectors.append(selector)
+    seen: set[str] = set()
+    out: list[str] = []
+    for selector in selectors:
+        clean = selector.strip()
+        if not clean or clean in seen:
+            continue
+        if clean.startswith(".") or clean.startswith("#"):
+            seen.add(clean)
+            out.append(clean)
+    return out[:12]
+
+
+def _tag_motion_targets(html: str, selectors: list[str]) -> str:
+    if not html:
+        return html
+    patched = html
+    for selector in selectors:
+        if selector.startswith("#"):
+            key = re.escape(selector[1:])
+            pat = re.compile(
+                rf"<(?P<tag>[a-zA-Z][\w:-]*)(?P<attrs>[^>]*\bid=['\"]{key}['\"][^>]*)>",
+                re.IGNORECASE,
+            )
+        elif selector.startswith("."):
+            key = re.escape(selector[1:])
+            pat = re.compile(
+                rf"<(?P<tag>[a-zA-Z][\w:-]*)(?P<attrs>[^>]*\bclass=['\"][^'\"]*\b{key}\b[^'\"]*['\"][^>]*)>",
+                re.IGNORECASE,
+            )
+        else:
+            continue
+        if pat.search(patched):
+            patched = pat.sub(
+                lambda m: m.group(0)
+                if "data-motion-target" in m.group("attrs")
+                else f"<{m.group('tag')}{m.group('attrs')} data-motion-target=\"{selector}\">",
+                patched,
+                count=1,
+            )
+    return patched
 
 
 def patch_motion_files(files: list[dict[str, Any]], prompt: str = "", mode: str = "") -> tuple[list[dict[str, Any]], dict[str, Any]]:

@@ -510,6 +510,11 @@ def delete_workspace(workspace_path: Path, confirmed: bool = False) -> dict:
 def detect_and_save_stack(workspace_path: Path, files: list[dict[str, Any]]) -> dict:
     """Run stack detection on workspace files and persist the result."""
     from agents.stack_engine import decide_stack
+    from app.services.continue_build_service import (
+        detect_workspace_stack,
+        detect_missing_pieces,
+        generate_completion_plan,
+    )
     root = get_storage_root()
     resolved = workspace_path.resolve()
     _assert_inside_root(resolved, root)
@@ -518,6 +523,7 @@ def detect_and_save_stack(workspace_path: Path, files: list[dict[str, Any]]) -> 
         stack = decide_stack(prompt="", mode="repo_fix")
         # Try to infer from filenames
         paths = [f.get("path", "") for f in files]
+        workspace_stack = detect_workspace_stack(resolved)
         stack_info: dict[str, Any] = {
             "has_package_json": any("package.json" in p for p in paths),
             "has_requirements_txt": any("requirements.txt" in p for p in paths),
@@ -528,6 +534,9 @@ def detect_and_save_stack(workspace_path: Path, files: list[dict[str, Any]]) -> 
             "has_vite": any("vite.config" in p for p in paths),
             "has_fastapi": any("main.py" in p or "server.py" in p for p in paths),
             "total_files": len(files),
+            "primary": workspace_stack.get("primary", "unknown"),
+            "indicators": workspace_stack.get("indicators", {}),
+            "stack_engine_mode": stack.get("mode"),
         }
         # Derive frontend/backend paths
         frontend_path = ""
@@ -539,10 +548,16 @@ def detect_and_save_stack(workspace_path: Path, files: list[dict[str, Any]]) -> 
         if any("backend/" in p for p in paths):
             backend_path = "backend"
 
+        ws_info = {"workspace_path": str(resolved)}
+        missing_info = detect_missing_pieces(resolved, stack_info.get("primary", "unknown"))
+        plan = generate_completion_plan(ws_info, workspace_stack, missing_info, "Imported repository stack alignment")
+
         update_workspace_metadata(resolved, {
             "detected_stack": stack_info,
             "frontend_path": frontend_path,
             "backend_path": backend_path,
+            "repo_workflow_missing": missing_info,
+            "repo_workflow_plan": plan,
         })
         return stack_info
     except Exception as exc:

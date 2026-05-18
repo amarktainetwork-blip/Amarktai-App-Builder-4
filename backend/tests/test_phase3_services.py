@@ -1319,6 +1319,49 @@ class TestRuntimeMediaMotionServices:
         html = (tmp_path / "index.html").read_text()
         assert "data-amarktai-media-asset" in html
 
+    def test_media_injects_into_matching_sections_before_overflow(self, tmp_path):
+        from app.services.media_runtime_service import inject_media_assets
+        (tmp_path / "index.html").write_text(
+            "<html><body><main>"
+            "<section id='hero'><h1>Hero</h1></section>"
+            "<section id='services'><h2>Services</h2></section>"
+            "</main></body></html>"
+        )
+        (tmp_path / "styles.css").write_text("")
+        (tmp_path / "media").mkdir()
+        (tmp_path / "media" / "hero.jpg").write_bytes(b"h")
+        (tmp_path / "media" / "services.jpg").write_bytes(b"s")
+        changed = inject_media_assets(
+            tmp_path,
+            [
+                {"path": "media/hero.jpg", "media_type": "image", "section": "hero"},
+                {"path": "media/services.jpg", "media_type": "image", "section": "services"},
+            ],
+        )
+        assert "index.html" in changed
+        html = (tmp_path / "index.html").read_text()
+        assert "id='hero'" in html and "media/hero.jpg" in html
+        assert "id='services'" in html and "media/services.jpg" in html
+
+    def test_media_manifest_contains_section_alignment(self, tmp_path):
+        from app.services.media_runtime_service import summarize_media_section_alignment
+        (tmp_path / "index.html").write_text(
+            "<html><body><main>"
+            "<section id='hero'></section><section id='gallery'></section>"
+            "</main></body></html>"
+        )
+        summary = summarize_media_section_alignment(
+            tmp_path,
+            [
+                {"path": "media/a.jpg", "media_type": "image", "section": "hero"},
+                {"path": "media/b.jpg", "media_type": "image", "section": "gallery"},
+            ],
+            sections=["hero", "gallery"],
+        )
+        assert summary["page_section_count"] >= 2
+        assert "hero" in summary["aligned_sections"]
+        assert "gallery" in summary["aligned_sections"]
+
     @pytest.mark.asyncio
     async def test_pixabay_mock_response_persists_manifest_and_injects_assets(self, tmp_path):
         from app.services import media_runtime_service as svc

@@ -145,6 +145,7 @@ export const Builds = {
     api.get("/builds", { params: workspaceType ? { workspace_type: workspaceType } : {} }).then((r) => r.data),
   importGit: (body) => api.post("/builds/import-git", body).then((r) => r.data),
   gitStatus: (projectId, body) => api.post(`/builds/${projectId}/git/status`, body).then((r) => r.data),
+  gitDiff: (projectId, body) => api.post(`/builds/${projectId}/git/diff`, body).then((r) => r.data),
   gitCommit: (projectId, body) => api.post(`/builds/${projectId}/git/commit`, body).then((r) => r.data),
   gitPush: (projectId, body) => api.post(`/builds/${projectId}/git/push`, body).then((r) => r.data),
   gitOpenPR: (projectId, body) => api.post(`/builds/${projectId}/git/open-pr`, body).then((r) => r.data),
