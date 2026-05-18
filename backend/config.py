@@ -31,7 +31,9 @@ REQUIRED_ENV = [
 SECRET_KEYS = {
     "GENX_API_KEY",
     "GITHUB_PAT",
-    "BRAVE_SEARCH_API_KEY",
+    "FIRECRAWL_API_KEY",
+    "FIRECRAWL_BASE_URL",
+    "BRAVE_SEARCH_API_KEY",  # legacy/deprecated; ignored for Scout runtime
     "PIXABAY_API_KEY",
     # Qwen — all optional
     "QWEN_API_KEY",

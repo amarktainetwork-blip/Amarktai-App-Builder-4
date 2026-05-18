@@ -13,7 +13,7 @@ Amarktai App Builder is a self-hosted real-time app builder with Amarktai Assist
 - Amarktai Assistant chat for project iteration.
 - Pull request creation for imported repositories when `GITHUB_PAT` is configured.
 - New GitHub repository creation during finalize when `GITHUB_PAT` is configured.
-- Encrypted settings storage in MongoDB for `GENX_API_KEY`, `GITHUB_PAT`, and `BRAVE_SEARCH_API_KEY`.
+- Encrypted settings storage in MongoDB for `GENX_API_KEY`, `GITHUB_PAT`, and `FIRECRAWL_API_KEY`.
 - Admin user management.
 - Truthful `/api/health` and `/api/readiness` endpoints.
 
@@ -74,14 +74,15 @@ Production startup fails if critical static secrets are missing or weak. `JWT_SE
 ## Optional Environment
 
 - `GITHUB_PAT`: enables private repo import, pull requests, and finalize-to-repo.
-- `BRAVE_SEARCH_API_KEY`: enables web research for Scout.
+- `FIRECRAWL_API_KEY`: enables web research for Scout.
+- `FIRECRAWL_BASE_URL`: optional Firecrawl endpoint override (defaults to `https://api.firecrawl.dev`).
 - `GENX_BASE_URL`: defaults to `https://query.genx.sh/v1`.
 - `GENX_MODEL_REASONING`, `GENX_MODEL_RESEARCH`, `GENX_MODEL_EDITS`.
 - `JWT_TTL_HOURS`, `BACKEND_PORT`, `FRONTEND_PORT`.
 - `QWEN_API_KEY`, `QWEN_BASE_URL`, `QWEN_MODEL_CHAT`, `QWEN_MODEL_CODE`, `QWEN_MODEL_IMAGE`, `QWEN_MODEL_VIDEO`, `QWEN_MODEL_AUDIO`.
 - `PIXABAY_API_KEY`: enables stock media.
 
-When GitHub PAT, Qwen, Brave Search, or Pixabay are missing, their provider-backed actions are disabled and readiness warns. When GenX is missing or invalid, readiness fails and AI actions are disabled.
+When GitHub PAT, Qwen, Firecrawl, or Pixabay are missing, their provider-backed actions are disabled and readiness warns. When GenX is missing or invalid, readiness fails and AI actions are disabled.
 
 ## Settings Encryption Recovery
 
@@ -98,7 +99,7 @@ See `docs/production-settings-recovery.md`.
 
 ## Readiness
 
-`GET https://builder.amarktai.com/api/readiness` returns `PASS` only when required production configuration is strong, Mongo responds, an active admin exists, GenX is configured and live, and source checks pass. Optional GitHub and Brave Search keys produce warnings when absent.
+`GET https://builder.amarktai.com/api/readiness` returns `PASS` only when required production configuration is strong, Mongo responds, an active admin exists, GenX is configured and live, and source checks pass. Optional GitHub and Firecrawl keys produce warnings when absent.
 
 ## Verification
 

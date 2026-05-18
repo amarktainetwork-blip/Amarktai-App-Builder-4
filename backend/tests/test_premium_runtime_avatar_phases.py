@@ -540,7 +540,7 @@ class TestRepoWorkbench:
 # ==============================================================================
 
 class TestCapabilityTruthCleanup:
-    """Phase 6: Brave 402 mapping, optional tool separation, readiness sync."""
+    """Phase 6: Firecrawl quota mapping, optional tool separation, readiness sync."""
 
     async def _build_caps(self, probes: dict | None = None) -> dict:
         from app.services.capability_truth_service import CapabilityTruthService
@@ -551,19 +551,18 @@ class TestCapabilityTruthCleanup:
         svc = CapabilityTruthService(resolver, cached_probes=probes or {})
         return await svc.build()
 
-    def test_brave_402_maps_to_payment_required(self):
+    def test_firecrawl_402_maps_to_quota_limited(self):
         from app.services.capability_truth_service import _probe_status
-        # Simulate a probe result with HTTP 402
-        probe = {"status": "payment_required", "http_status": 402, "live_status": "payment_required"}
-        status, reason, _ = _probe_status("brave", True, "env", {"brave": probe})
-        assert status == "payment_required"
-        assert "402" in (reason or "") or "payment" in (reason or "").lower()
+        probe = {"status": "quota_limited", "http_status": 402, "live_status": "quota_limited"}
+        status, reason, _ = _probe_status("firecrawl", True, "env", {"firecrawl": probe})
+        assert status == "quota_limited"
+        assert "quota" in (reason or "").lower()
 
-    def test_brave_live_fail_does_not_override_402(self):
+    def test_firecrawl_live_fail_does_not_override_quota(self):
         from app.services.capability_truth_service import _probe_status
-        probe = {"http_status": 402, "live_status": "payment_required"}
-        status, reason, _ = _probe_status("brave", True, "env", {"brave": probe})
-        assert status == "payment_required"
+        probe = {"http_status": 402, "live_status": "quota_limited"}
+        status, reason, _ = _probe_status("firecrawl", True, "env", {"firecrawl": probe})
+        assert status == "quota_limited"
 
     def test_optional_integration_has_does_not_block_preview(self):
         from app.services.capability_truth_service import _optional_integration
@@ -608,7 +607,7 @@ class TestCapabilityTruthCleanup:
     def test_not_tested_message_is_accurate(self):
         from app.services.capability_truth_service import _probe_status
         # No probe data — should return not_tested
-        status, reason, _ = _probe_status("brave", True, "env", {})
+        status, reason, _ = _probe_status("firecrawl", True, "env", {})
         assert status == "not_tested"
         assert reason is not None
 

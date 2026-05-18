@@ -38,7 +38,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "web_search",
-        "description": "Search the web with Brave Search when the optional key is configured.",
+        "description": "Search the web with Firecrawl when the optional key is configured.",
         "parameters": {
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -102,23 +102,22 @@ class ProjectFS:
         return await cur.to_list(2000)
 
 
-async def web_search(query: str, api_key: str | None) -> dict:
+async def web_search(query: str, api_key: str | None, base_url: str | None = None) -> dict:
     if not api_key:
         return {"enabled": False, "query": query, "results": []}
-    headers = {
-        "Accept": "application/json",
-        "X-Subscription-Token": api_key,
-    }
-    params = {"q": query, "count": 5, "text_decorations": "false"}
+    endpoint = (base_url or "https://api.firecrawl.dev").rstrip("/")
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {"query": query, "limit": 5}
     async with httpx.AsyncClient(timeout=15.0) as cx:
-        response = await cx.get("https://api.search.brave.com/res/v1/web/search", headers=headers, params=params)
+        response = await cx.post(f"{endpoint}/v1/search", headers=headers, json=payload)
         response.raise_for_status()
         data = response.json()
     results = []
-    for item in data.get("web", {}).get("results", [])[:5]:
+    raw_results = data.get("data", []) if isinstance(data.get("data"), list) else data.get("results", [])
+    for item in raw_results[:5]:
         results.append({
-            "title": item.get("title"),
-            "snippet": item.get("description"),
-            "url": item.get("url"),
+            "title": item.get("title") or item.get("metadata", {}).get("title"),
+            "snippet": item.get("description") or item.get("markdown") or item.get("snippet", ""),
+            "url": item.get("url") or item.get("sourceURL"),
         })
     return {"enabled": True, "query": query, "results": results}

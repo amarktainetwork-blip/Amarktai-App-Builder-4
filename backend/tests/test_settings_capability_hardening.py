@@ -42,7 +42,7 @@ class FakeDB:
 
 def clear_provider_env(monkeypatch):
     for key in [
-        "GENX_API_KEY", "GITHUB_PAT", "BRAVE_SEARCH_API_KEY", "PIXABAY_API_KEY",
+        "GENX_API_KEY", "GITHUB_PAT", "FIRECRAWL_API_KEY", "FIRECRAWL_BASE_URL", "PIXABAY_API_KEY",
         "QWEN_API_KEY", "QWEN_MODEL_CHAT", "QWEN_MODEL_CODE", "QWEN_MODEL_IMAGE",
         "QWEN_MODEL_VIDEO", "QWEN_MODEL_AUDIO",
     ]:
@@ -198,7 +198,7 @@ def test_readiness_refreshes_provider_probe_cache(monkeypatch):
         server._probe_svc._CACHE["all_providers"] = {
             "genx": {"provider": "genx", "status": "key_present_live_ok", "probed_at": "2026-05-13T00:00:00+00:00"},
             "github": {"provider": "github", "status": "key_missing", "probed_at": "2026-05-13T00:00:00+00:00"},
-            "brave": {"provider": "brave", "status": "key_missing", "probed_at": "2026-05-13T00:00:00+00:00"},
+            "firecrawl": {"provider": "firecrawl", "status": "key_missing", "probed_at": "2026-05-13T00:00:00+00:00"},
             "pixabay": {"provider": "pixabay", "status": "key_missing", "probed_at": "2026-05-13T00:00:00+00:00"},
             "qwen": {"provider": "qwen", "status": "key_missing", "probed_at": "2026-05-13T00:00:00+00:00"},
         }

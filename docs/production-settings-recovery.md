@@ -52,7 +52,8 @@ QWEN_MODEL_CODE=qwen3-coder-plus
 QWEN_MODEL_IMAGE=qwen-image-plus
 QWEN_MODEL_VIDEO=qwen3-omni-flash
 QWEN_MODEL_AUDIO=qwen3-asr-flash
-BRAVE_SEARCH_API_KEY=
+FIRECRAWL_API_KEY=
+FIRECRAWL_BASE_URL=https://api.firecrawl.dev
 PIXABAY_API_KEY=
 ```
 

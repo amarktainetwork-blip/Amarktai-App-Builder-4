@@ -21,7 +21,7 @@ const STATUS_KEYS = [
   { key: "GENX_API_KEY", label: "GenX", capability: "text_generation" },
   { key: "QWEN_API_KEY", label: "Qwen", capability: "video_generation" },
   { key: "GITHUB_PAT", label: "GitHub PAT", capability: "github_integration" },
-  { key: "BRAVE_SEARCH_API_KEY", label: "Brave Search", capability: "web_research" },
+  { key: "FIRECRAWL_API_KEY", label: "Firecrawl", capability: "web_research" },
   { key: "PIXABAY_API_KEY", label: "Pixabay", capability: "stock_media" },
 ];
 
@@ -181,13 +181,25 @@ export default function SettingsPanel({ active = true, onClose, embedded = false
 
         <TabsContent value="search" className="m-0 flex-1 space-y-4 overflow-y-auto p-5">
           <SettingRow
-            fieldKey="BRAVE_SEARCH_API_KEY"
-            label="Brave Search API Key"
-            hint="Optional. Enables web research. Without it, research is limited to configured model knowledge."
+            fieldKey="FIRECRAWL_API_KEY"
+            label="Firecrawl API Key"
+            hint="Optional. Enables live web research for Scout. Without it, Scout continues using prompt/model context."
             optional
-            info={state.BRAVE_SEARCH_API_KEY || {}}
-            value={values.BRAVE_SEARCH_API_KEY}
-            onChange={(v) => setValue("BRAVE_SEARCH_API_KEY", v)}
+            info={state.FIRECRAWL_API_KEY || {}}
+            value={values.FIRECRAWL_API_KEY}
+            onChange={(v) => setValue("FIRECRAWL_API_KEY", v)}
+            onClear={clear}
+          />
+          <SettingRow
+            fieldKey="FIRECRAWL_BASE_URL"
+            label="Firecrawl Base URL"
+            hint="Optional. Defaults to https://api.firecrawl.dev."
+            optional
+            inputType="text"
+            inputPlaceholder="https://api.firecrawl.dev"
+            info={state.FIRECRAWL_BASE_URL || {}}
+            value={values.FIRECRAWL_BASE_URL}
+            onChange={(v) => setValue("FIRECRAWL_BASE_URL", v)}
             onClear={clear}
           />
         </TabsContent>

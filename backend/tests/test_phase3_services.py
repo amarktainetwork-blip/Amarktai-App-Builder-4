@@ -449,8 +449,8 @@ class TestLiveProbeService:
         result = asyncio.run(self.svc.probe_github(""))
         assert result["status"] == self.svc.KEY_MISSING
 
-    def test_brave_key_missing_when_no_key(self):
-        result = asyncio.run(self.svc.probe_brave(""))
+    def test_firecrawl_key_missing_when_no_key(self):
+        result = asyncio.run(self.svc.probe_firecrawl(""))
         assert result["status"] == self.svc.KEY_MISSING
 
     def test_pixabay_key_missing_when_no_key(self):

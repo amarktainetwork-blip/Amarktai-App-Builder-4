@@ -6,7 +6,7 @@ const features = [
   { icon: Boxes, title: "Agent workspace", copy: "Manager and specialist agents coordinate planning, code, QA, repair, media, runtime, memory, versioning, and deployment tasks." },
   { icon: Code2, title: "Prompt-first build flow", copy: "Create websites, web apps, dashboards, APIs, full-stack scaffolds, and repo-fix workspaces through the routed dashboard." },
   { icon: GitBranch, title: "Repo workbench", copy: "Public repo import, stack analysis, preview fallback, coverage, and PR workflows. Private repo and PR actions require GITHUB_PAT." },
-  { icon: Image, title: "Media library", copy: "Uploads are always real assets. GenX, Qwen, Brave, and Pixabay features are shown according to configured provider keys." },
+  { icon: Image, title: "Media library", copy: "Uploads are always real assets. GenX, Qwen, Firecrawl, and Pixabay features are shown according to configured provider keys." },
   { icon: Eye, title: "Live preview", copy: "Preview generation is available for previewable builds through a scoped preview token and honest fallback panels." },
   { icon: ShieldCheck, title: "QA, versioning, rollback", copy: "Validation, repair loops, project memory, versions, and rollback support keep iteration auditable." },
 ];

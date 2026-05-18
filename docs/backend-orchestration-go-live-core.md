@@ -20,7 +20,7 @@ Tiers affect model depth, repair budget, and QA strictness. They do not hide pla
 `GET /api/capabilities/status` is the runtime truth source for provider-backed and local capabilities. It separates live provider capabilities from configurable optional integrations:
 
 - GenX text/code/reasoning/image/video/audio/voice/avatar
-- GitHub, Brave Search, Pixabay, Qwen
+- GitHub, Firecrawl, Pixabay, Qwen
 - Runtime QA, preview, deployment/finalize
 - Optional hooks: Whisper/STT, FAISS, Stable Diffusion, MusicGen, Playwright traces, internal orchestration graph
 

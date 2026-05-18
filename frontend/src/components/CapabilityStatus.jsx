@@ -21,7 +21,7 @@ const CORE_CAPABILITIES = [
 
 const OPTIONAL_INTEGRATIONS = [
   { key: "github_integration", label: "GitHub import/PR" },
-  { key: "web_research", label: "Brave research" },
+  { key: "web_research", label: "Firecrawl research" },
   { key: "stock_media", label: "Pixabay / stock media" },
   { key: "qwen", label: "Qwen routing" },
   { key: "whisper_stt", label: "Whisper", optional: true },
@@ -143,7 +143,7 @@ function GenxModelSummary({ runtime }) {
 function getStatus(capability, key) {
   if (!capability) return { label: "Setup needed", color: "#FFC107" };
   if (capability?.live_status === "decrypt_failed") return { label: "Needs settings cleanup", color: "#FF5722" };
-  if (capability?.live_status === "payment_required") return { label: "Setup needed", color: "#FFC107" };
+  if (capability?.live_status === "quota_limited") return { label: "Quota limited", color: "#FFC107" };
   if (capability?.fallback || capability?.source === "fallback") return { label: "Fallback", color: "#FFC107" };
   if (capability?.live_status === "configured_not_tested") return { label: "Configured", color: "#FFC107" };
   if (capability && capability.available === false) {
