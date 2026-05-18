@@ -71,6 +71,18 @@ _OPTIONAL_RUNTIME_TOOLING = re.compile(
 )
 
 
+def _runtime_blocker_can_warn_for_static(message: str, runtime_report: dict[str, Any]) -> bool:
+    if _OPTIONAL_RUNTIME_TOOLING.search(message):
+        return True
+    if re.search(r"accessibility score \d+ below", message, re.IGNORECASE):
+        return not bool(runtime_report.get("accessibility", {}).get("available"))
+    if re.search(r"performance score \d+ below", message, re.IGNORECASE):
+        return not bool(runtime_report.get("performance", {}).get("available"))
+    if re.search(r"broken runtime (?:links|media assets) detected", message, re.IGNORECASE):
+        return True
+    return False
+
+
 def _runtime_qa_can_warn_for_static(ws: Path, mode: str, prompt: str, runtime_report: dict[str, Any]) -> bool:
     """Static preview builds can be ready with QA warnings when only optional browser tooling is missing."""
     if not is_static_preview_ready_workspace(ws, mode, prompt=prompt):
@@ -78,7 +90,7 @@ def _runtime_qa_can_warn_for_static(ws: Path, mode: str, prompt: str, runtime_re
     blockers = [str(b) for b in runtime_report.get("blockers", [])]
     if not blockers:
         return False
-    return all(_OPTIONAL_RUNTIME_TOOLING.search(message) for message in blockers)
+    return all(_runtime_blocker_can_warn_for_static(message, runtime_report) for message in blockers)
 
 
 def _media_fallback_can_warn_for_static(ws: Path, mode: str, prompt: str) -> bool:
@@ -127,6 +139,136 @@ def _iter_source_files(ws: Path, extensions: set[str]) -> list[Path]:
         if p.suffix.lower() in extensions:
             result.append(p)
     return result
+
+
+def _workspace_js(ws: Path) -> str:
+    snippets: list[str] = []
+    for path in _iter_source_files(ws, {".js", ".jsx", ".ts", ".tsx"}):
+        try:
+            snippets.append(path.read_text(errors="replace")[:100_000])
+        except Exception:
+            continue
+    return "\n".join(snippets)
+
+
+def _html_ids(content: str) -> set[str]:
+    return set(re.findall(r'\bid=["\']([^"\']+)["\']', content, re.IGNORECASE))
+
+
+def _extract_attr(attrs: str, name: str) -> str:
+    match = re.search(rf'\b{name}=["\']([^"\']*)["\']', attrs, re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def _has_form_wrapper(prefix: str) -> bool:
+    return prefix.lower().rfind("<form") > prefix.lower().rfind("</form>")
+
+
+def _button_has_runtime_handler(attrs: str, js: str) -> bool:
+    if re.search(r"\bon(?:click|pointerdown|mousedown|submit)\s*=", attrs, re.IGNORECASE):
+        return True
+    label = " ".join([
+        _extract_attr(attrs, "id"),
+        _extract_attr(attrs, "class"),
+        _extract_attr(attrs, "data-action"),
+        _extract_attr(attrs, "data-target"),
+        _extract_attr(attrs, "aria-label"),
+    ]).strip()
+    if not label:
+        return False
+    tokens = [token for token in re.split(r"[^a-zA-Z0-9_-]+", label) if len(token) >= 3]
+    handler_terms = (
+        "addEventListener" in js
+        or "onclick" in js.lower()
+        or "querySelector" in js
+        or "getElementById" in js
+    )
+    if not handler_terms:
+        return False
+    return any(token in js for token in tokens)
+
+
+def _button_is_control(attrs: str, js: str) -> bool:
+    text = " ".join([
+        _extract_attr(attrs, "id"),
+        _extract_attr(attrs, "class"),
+        _extract_attr(attrs, "aria-label"),
+        _extract_attr(attrs, "data-role"),
+    ]).lower()
+    if re.search(r"\b(nav-toggle|menu-toggle|hamburger|carousel|testimonial|slider|dot|tab|accordion)\b", text):
+        return _button_has_runtime_handler(attrs, js)
+    return False
+
+
+def _cta_target(ids: set[str], text: str, attrs: str) -> str:
+    haystack = f"{text} {attrs}".lower()
+    preferred: list[str]
+    if re.search(r"gallery|look|view", haystack):
+        preferred = ["gallery", "contact", "hero"]
+    elif re.search(r"event|catering|private", haystack):
+        preferred = ["events", "catering", "contact", "hero"]
+    elif re.search(r"menu|product|pastr|sourdough|signature|order", haystack):
+        preferred = ["signature", "menu", "pastries", "sourdough", "contact", "hero"]
+    else:
+        preferred = ["contact", "lead-capture", "hero"]
+    for item in preferred:
+        if item in ids:
+            return f"#{item}"
+    return "#hero"
+
+
+def repair_static_dead_ctas(ws: Path, *, mode: str = "", prompt: str = "") -> dict[str, Any]:
+    """Repair inert static CTAs before the strict quality gate evaluates them."""
+    if not is_static_preview_ready_workspace(ws, mode, prompt=prompt):
+        return {"changed": False, "files": [], "repairs": []}
+    js = _workspace_js(ws)
+    changed_files: list[str] = []
+    repairs: list[dict[str, str]] = []
+    for path in _iter_source_files(ws, {".html"}):
+        try:
+            original = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        ids = _html_ids(original)
+        html = original
+
+        def anchor_repl(match: re.Match) -> str:
+            attrs = match.group(1)
+            body = match.group(2)
+            href = _extract_attr(attrs, "href").strip().lower()
+            if href not in {"", "#", "javascript:void(0)", "javascript:void(0);"}:
+                return match.group(0)
+            target = _cta_target(ids, re.sub(r"<[^>]+>", " ", body), attrs)
+            new_attrs = re.sub(r'\bhref=["\'][^"\']*["\']', f'href="{target}"', attrs, flags=re.IGNORECASE)
+            if "href=" not in new_attrs.lower():
+                new_attrs = f' href="{target}"{new_attrs}'
+            repairs.append({"file": str(path.relative_to(ws)), "kind": "anchor", "target": target})
+            return f"<a{new_attrs}>{body}</a>"
+
+        html = re.sub(r"<a\b([^>]*)>([\s\S]*?)</a>", anchor_repl, html, flags=re.IGNORECASE)
+
+        def button_repl(match: re.Match) -> str:
+            attrs = match.group(1)
+            body = match.group(2)
+            prefix = html[:match.start()]
+            btn_type = _extract_attr(attrs, "type").lower()
+            if btn_type == "submit" and _has_form_wrapper(prefix):
+                return match.group(0)
+            if _button_is_control(attrs, js) or _button_has_runtime_handler(attrs, js):
+                return match.group(0)
+            target = _cta_target(ids, re.sub(r"<[^>]+>", " ", body), attrs)
+            cls = _extract_attr(attrs, "class")
+            class_attr = f' class="{cls}"' if cls else ' class="button"'
+            aria = _extract_attr(attrs, "aria-label")
+            aria_attr = f' aria-label="{aria}"' if aria else ""
+            repairs.append({"file": str(path.relative_to(ws)), "kind": "button", "target": target})
+            return f"<a{class_attr}{aria_attr} href=\"{target}\">{body}</a>"
+
+        html = re.sub(r"<button\b([^>]*)>([\s\S]*?)</button>", button_repl, html, flags=re.IGNORECASE)
+        if html != original:
+            path.write_text(html, encoding="utf-8")
+            changed_files.append(str(path.relative_to(ws)))
+    return {"changed": bool(changed_files), "files": changed_files, "repairs": repairs}
 
 
 # ── Individual checks ─────────────────────────────────────────────────────────
@@ -320,18 +462,25 @@ def check_image_alt(ws: Path) -> dict[str, Any]:
 def check_dead_ctas(ws: Path) -> dict[str, Any]:
     """Detect obvious dead links/buttons in UI source."""
     ui_files = _iter_source_files(ws, {".html", ".jsx", ".tsx", ".vue", ".svelte"})
+    js = _workspace_js(ws)
     hits: list[str] = []
     for f in ui_files[:50]:
         try:
             content = f.read_text(errors="replace")
         except Exception:
             continue
-        if re.search(r'href=["\']#["\']', content, re.IGNORECASE):
+        if re.search(r'href=["\'](?:#|javascript:void\(0\);?)?["\']', content, re.IGNORECASE):
             hits.append(str(f.relative_to(ws)))
             continue
         for match in re.finditer(r"<button\b([^>]*)>", content, re.IGNORECASE):
             attrs = match.group(1)
-            if "onClick" not in attrs and "type=" not in attrs:
+            prefix = content[:match.start()]
+            btn_type = _extract_attr(attrs, "type").lower()
+            if btn_type == "submit" and _has_form_wrapper(prefix):
+                continue
+            if _button_is_control(attrs, js) or _button_has_runtime_handler(attrs, js):
+                continue
+            if "onClick" not in attrs:
                 hits.append(str(f.relative_to(ws)))
                 break
     if hits:
@@ -349,8 +498,34 @@ def check_dead_ctas(ws: Path) -> dict[str, Any]:
 def check_preview_manifest(ws: Path) -> dict[str, Any]:
     """Check for a saved preview manifest/status when preview is required."""
     candidates = ["preview-manifest.json", "preview_manifest.json", "preview.json", "status.json"]
-    if any((ws / name).exists() for name in candidates):
+    for name in candidates:
+        path = ws / name
+        if not path.exists():
+            continue
+        if name == "preview-manifest.json":
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                entry = data.get("entry") or (data.get("entry_candidates") or [""])[0]
+                if entry and not (ws / str(entry)).exists():
+                    return {
+                        "ok": False,
+                        "blocker": False,
+                        "warning": True,
+                        "message": f"Preview manifest entry does not exist: {entry}",
+                    }
+            except Exception:
+                pass
         return {"ok": True}
+    project_manifest = ws / "amarktai.project.json"
+    if project_manifest.exists():
+        try:
+            data = json.loads(project_manifest.read_text(encoding="utf-8"))
+            preview = data.get("preview") if isinstance(data.get("preview"), dict) else {}
+            entry = preview.get("entry") or data.get("preview_entry")
+            if entry == "index.html" or (entry and (ws / str(entry)).exists()):
+                return {"ok": True, "source": "amarktai.project.json"}
+        except Exception:
+            pass
     return {
         "ok": False,
         "blocker": False,
@@ -481,6 +656,9 @@ def run_quality_gate(
             "checked_at": _now(),
         }
 
+    cta_repair = repair_static_dead_ctas(ws, mode=mode, prompt=prompt)
+    static_preview_ready = is_static_preview_ready_workspace(ws, mode, prompt=prompt)
+
     checks = {
         "entry_point":  check_entry_point(ws),
         "placeholders": check_placeholders(ws),
@@ -544,6 +722,23 @@ def run_quality_gate(
     suggestions = []
 
     for check_name, result in checks.items():
+        if (
+            static_preview_ready
+            and check_name == "broken_assets"
+            and not result.get("ok")
+            and result.get("blocker")
+        ):
+            result = {
+                **result,
+                "blocker": False,
+                "warning": True,
+                "finalize_locked": True,
+                "message": (
+                    str(result.get("message") or "Broken local media references found.")
+                    + " Static preview remains available; finalize remains locked until media references are repaired."
+                ),
+            }
+            checks[check_name] = result
         if not result.get("ok"):
             if result.get("blocker"):
                 blockers.append({
@@ -558,7 +753,10 @@ def run_quality_gate(
                     "files": result.get("files", []),
                 }
                 if strict and check_name in _STRICT_WARNING_BLOCKERS:
-                    blockers.append(payload)
+                    if static_preview_ready and check_name == "broken_assets":
+                        warnings.append(payload)
+                    else:
+                        blockers.append(payload)
                 else:
                     warnings.append(payload)
             if result.get("suggestion"):
@@ -584,6 +782,12 @@ def run_quality_gate(
         "workspace_path": str(ws),
         "checked_at": _now(),
     }
+    if cta_repair.get("changed"):
+        report["fixes_applied"].append({
+            "type": "dead_cta_repair",
+            "files": cta_repair.get("files", []),
+            "repairs": cta_repair.get("repairs", []),
+        })
     try:
         (ws / "quality-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     except Exception:

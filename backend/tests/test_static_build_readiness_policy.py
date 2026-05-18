@@ -19,7 +19,7 @@ def _static_workspace(tmp_path):
     )
     (tmp_path / "README.md").write_text("# Luma & Stone\n", encoding="utf-8")
     (tmp_path / "amarktai.project.json").write_text('{"mode":"landing_page"}', encoding="utf-8")
-    (tmp_path / "preview-manifest.json").write_text('{"status":"ready","preview_url":"/preview"}', encoding="utf-8")
+    (tmp_path / "preview-manifest.json").write_text('{"status":"ready","entry":"index.html","preview_url":"/preview"}', encoding="utf-8")
     return tmp_path
 
 
@@ -70,6 +70,106 @@ def test_static_runtime_qa_tooling_failure_warns_and_locks_finalize(tmp_path, mo
     assert result["pass"] is True
     assert any(w["check"] == "runtime_qa" for w in result["warnings"])
     assert result["checks"]["runtime_qa"]["finalize_locked"] is True
+
+
+def test_static_runtime_qa_missing_scores_and_broken_refs_warn_and_lock_finalize(tmp_path, monkeypatch):
+    ws = _static_workspace(tmp_path)
+
+    def fake_runtime_qa(_workspace):
+        return {
+            "pass": False,
+            "accessibility": {"available": False, "score": 0},
+            "performance": {"available": False, "score": 0},
+            "blockers": [
+                "axe-core source is not available to the backend runtime.",
+                "Accessibility score 0 below 90.",
+                "Lighthouse execution failed: CHROME_PATH missing.",
+                "Performance score 0 below 70.",
+                "Broken runtime links detected: 1.",
+                "Broken runtime media assets detected: 1.",
+            ],
+            "report_path": str(ws / "runtime-qa" / "runtime-qa-report.json"),
+        }
+
+    monkeypatch.setattr("app.services.quality_gate_service.run_runtime_qa", fake_runtime_qa)
+
+    result = run_quality_gate(ws, require_runtime=True, prompt="Luxury artisan bakery landing page", mode="landing_page")
+
+    assert result["pass"] is True
+    assert result["checks"]["runtime_qa"]["warning"] is True
+    assert result["checks"]["runtime_qa"]["finalize_locked"] is True
+
+
+def test_static_source_broken_media_warning_locks_finalize_without_failing_preview(tmp_path):
+    ws = _static_workspace(tmp_path)
+    html = (ws / "index.html").read_text(encoding="utf-8").replace(
+        "</section>",
+        '<img src="media/missing.jpg" alt="Bakery table"></section>',
+    )
+    (ws / "index.html").write_text(html, encoding="utf-8")
+
+    result = run_quality_gate(ws, prompt="Luxury bakery landing page", mode="landing_page")
+
+    assert result["pass"] is True
+    assert result["checks"]["broken_assets"]["warning"] is True
+    assert result["checks"]["broken_assets"]["finalize_locked"] is True
+
+
+def test_static_runtime_qa_missing_core_files_still_blocks(tmp_path, monkeypatch):
+    (tmp_path / "index.html").write_text("<html><body><main>Hello</main></body></html>", encoding="utf-8")
+
+    def fake_runtime_qa(_workspace):
+        return {
+            "pass": False,
+            "blockers": ["axe-core source is not available to the backend runtime."],
+            "report_path": str(tmp_path / "runtime-qa" / "runtime-qa-report.json"),
+        }
+
+    monkeypatch.setattr("app.services.quality_gate_service.run_runtime_qa", fake_runtime_qa)
+
+    result = run_quality_gate(tmp_path, require_runtime=True, prompt="Landing page", mode="landing_page")
+
+    assert result["pass"] is False
+    assert any(item["check"] == "runtime_qa" for item in result["blockers"])
+
+
+def test_inert_static_cta_is_repaired_to_contact_anchor(tmp_path):
+    ws = _static_workspace(tmp_path)
+    html = (ws / "index.html").read_text(encoding="utf-8").replace(
+        "</main>",
+        '<section id="contact"><h2>Contact</h2></section><a class="button primary" href="#">Book tasting</a><button class="button">Plan an event</button></main>',
+    )
+    (ws / "index.html").write_text(html, encoding="utf-8")
+
+    result = run_quality_gate(ws, prompt="Luxury bakery landing page", mode="landing_page")
+    repaired_html = (ws / "index.html").read_text(encoding="utf-8")
+
+    assert result["pass"] is True
+    assert not any(item["check"] == "dead_ctas" for item in result["warnings"])
+    assert 'href="#contact"' in repaired_html
+    assert any(item["type"] == "dead_cta_repair" for item in result["fixes_applied"])
+
+
+def test_nav_toggle_and_testimonial_buttons_with_handlers_are_not_dead_ctas(tmp_path):
+    ws = _static_workspace(tmp_path)
+    (ws / "index.html").write_text(
+        '<!doctype html><html><head><link rel="stylesheet" href="styles.css"></head>'
+        '<body><button class="nav-toggle" type="button" aria-label="Open menu">Menu</button>'
+        '<section id="hero"><h1>Luma</h1></section>'
+        '<button class="testimonial-next" type="button" aria-label="Next testimonial">Next</button>'
+        '<script src="script.js"></script></body></html>',
+        encoding="utf-8",
+    )
+    (ws / "script.js").write_text(
+        "document.querySelector('.nav-toggle')?.addEventListener('click',()=>{});"
+        "document.querySelector('.testimonial-next')?.addEventListener('click',()=>{});",
+        encoding="utf-8",
+    )
+
+    result = run_quality_gate(ws, prompt="Luxury bakery landing page", mode="landing_page")
+
+    assert not any(item["check"] == "dead_ctas" for item in result["warnings"])
+    assert result["checks"]["dead_ctas"]["ok"] is True
 
 
 def test_final_gate_runtime_artifacts_warn_for_static_preview_but_block_finalize(tmp_path):
@@ -136,6 +236,45 @@ def test_static_landing_coverage_does_not_require_docker_or_env():
 
     assert result["requestSatisfied"] is True
     assert not any("Docker" in item or ".env" in item for item in result["missingRequirements"])
+
+
+def test_static_preview_manifest_ready_satisfies_preview_evidence():
+    files = [
+        {"path": "index.html", "content": "<html><body>Bakery</body></html>"},
+        {"path": "styles.css", "content": "body{}"},
+        {"path": "README.md", "content": "# Bakery"},
+        {"path": "amarktai.project.json", "content": "{}"},
+        {"path": "preview-manifest.json", "content": '{"status":"ready","entry":"index.html"}'},
+    ]
+
+    result = compute_coverage_score("Build landing page", files, mode="landing_page")
+
+    assert "preview or preview fallback available" in result["checkedRequirements"]
+    assert "preview or preview fallback available" not in result["missingRequirements"]
+
+
+def test_static_project_manifest_preview_entry_satisfies_preview_evidence():
+    files = [
+        {"path": "index.html", "content": "<html><body>Bakery</body></html>"},
+        {"path": "styles.css", "content": "body{}"},
+        {"path": "README.md", "content": "# Bakery"},
+        {"path": "amarktai.project.json", "content": '{"preview":{"entry":"index.html"}}'},
+    ]
+
+    result = compute_coverage_score("Build landing page", files, mode="landing_page")
+
+    assert "preview or preview fallback available" in result["checkedRequirements"]
+
+
+def test_full_stack_without_preview_keeps_stricter_preview_requirement():
+    files = [
+        {"path": "README.md", "content": "# API"},
+        {"path": "server.py", "content": "from fastapi import FastAPI\napp=FastAPI()"},
+    ]
+
+    result = compute_coverage_score("Build a full stack API", files, mode="full_stack")
+
+    assert "preview or preview fallback available" in result["missingRequirements"]
 
 
 def test_full_stack_coverage_still_requires_docker_and_env():

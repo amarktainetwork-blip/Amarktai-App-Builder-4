@@ -85,7 +85,29 @@ def is_static_preview_ready_workspace(workspace: str | Path, mode: str | None, *
     contract = get_build_contract(mode, prompt=prompt, quality_tier="standard")
     if contract.project_type != "static-site":
         return False
-    return all((ws / rel).exists() for rel in ("index.html", "styles.css", "preview-manifest.json"))
+    if not all((ws / rel).exists() for rel in ("index.html", "styles.css")):
+        return False
+    preview_manifest = ws / "preview-manifest.json"
+    if preview_manifest.exists():
+        try:
+            data = json.loads(preview_manifest.read_text(encoding="utf-8"))
+            entry = data.get("entry") or (data.get("entry_candidates") or [""])[0]
+            status = str(data.get("status") or "").lower()
+            if (entry == "index.html" or (ws / str(entry)).exists()) and status in {"ready", "built", "ok", "preview_ready"}:
+                return True
+        except Exception:
+            return True
+    project_manifest = ws / "amarktai.project.json"
+    if project_manifest.exists():
+        try:
+            data = json.loads(project_manifest.read_text(encoding="utf-8"))
+            preview = data.get("preview") if isinstance(data.get("preview"), dict) else {}
+            entry = preview.get("entry") or data.get("preview_entry")
+            if entry == "index.html" or (entry and (ws / str(entry)).exists()):
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def enforce_contract_files(project: dict[str, Any], prompt: str, plan: dict | None, files: list[dict]) -> tuple[list[dict], list[str]]:
