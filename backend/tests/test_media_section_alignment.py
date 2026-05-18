@@ -5,7 +5,7 @@ def _write_page(ws: Path) -> None:
     (ws / "index.html").write_text(
         "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head>"
         "<body><main>"
-        "<section id='hero'><h1>Ember & Crumb</h1></section>"
+        "<section id='hero'><h1>Fixture Bakery</h1></section>"
         "<section id='menu'><h2>Menu</h2></section>"
         "<section id='story'><h2>Story</h2></section>"
         "<section id='gallery'><h2>Gallery</h2></section>"

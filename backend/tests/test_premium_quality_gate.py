@@ -10,16 +10,16 @@ def _premium_workspace(ws: Path, *, fallback: bool = False, broken_media: bool =
     (ws / "index.html").write_text(
         "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head>"
         "<body><main>"
-        "<section id='hero'><div class='amarktai-hero-media-layer'><video data-amarktai-media-asset data-amarktai-hero-background src='media/hero.mp4'></video></div><h1>Ember & Crumb</h1></section>"
+        "<section id='hero'><div class='amarktai-hero-media-layer'><video data-amarktai-media-asset data-amarktai-hero-background src='media/hero.mp4'></video></div><h1>Fixture Bakery</h1></section>"
         "<section id='menu'><h2>Wood-fired pastries and sourdough menu</h2><p>Seasonal loaves, laminated pastries, espresso, and tasting boxes.</p><img data-amarktai-media-asset src='media/menu.jpg' alt='Menu'></section>"
         "<section id='story'><h2>Our bakery story</h2><p>Small-batch doughs, cultured butter, and neighborhood hospitality shape every morning.</p><img data-amarktai-media-asset src='media/story.jpg' alt='Story'></section>"
-        f"<section id='gallery'><h2>Gallery</h2><p>See the crumb, crust, pastry layers, and warm counter moments.</p><img data-amarktai-media-asset src='{missing_src}' alt='Gallery'></section>"
-        "<section id='contact'><h2>Visit Ember & Crumb</h2><p>Reserve a tasting, plan a catering box, or ask about weekly specials.</p><img data-amarktai-media-asset src='media/contact.jpg' alt='Contact'><a href='#hero'>Book a tasting</a></section>"
+        f"<section id='gallery'><h2>Gallery</h2><p>See the crust, pastry layers, and warm counter moments.</p><img data-amarktai-media-asset src='{missing_src}' alt='Gallery'></section>"
+        "<section id='contact'><h2>Visit Fixture Bakery</h2><p>Reserve a tasting, plan a catering box, or ask about weekly specials.</p><img data-amarktai-media-asset src='media/contact.jpg' alt='Contact'><a href='#hero'>Book a tasting</a></section>"
         "</main></body></html>",
         encoding="utf-8",
     )
     (ws / "styles.css").write_text("@media (max-width:700px){section{display:block}}", encoding="utf-8")
-    (ws / "README.md").write_text("# Ember\n", encoding="utf-8")
+    (ws / "README.md").write_text("# Fixture Bakery\n", encoding="utf-8")
     (ws / "preview-manifest.json").write_text('{"entry":"index.html"}', encoding="utf-8")
     assets = [
         {"path": "media/hero.mp4", "media_type": "video", "section": "hero", "source": "pixabay" if fallback else "genx"},
@@ -60,7 +60,7 @@ def test_generic_fallback_premium_page_fails(tmp_path):
     from app.services.quality_gate_service import run_quality_gate
 
     ws = _premium_workspace(tmp_path, fallback=True)
-    html = (ws / "index.html").read_text(encoding="utf-8").replace("Ember & Crumb", "Amarktai Builder runtime media")
+    html = (ws / "index.html").read_text(encoding="utf-8").replace("Fixture Bakery", "Amarktai Builder runtime media")
     (ws / "index.html").write_text(html, encoding="utf-8")
     report = run_quality_gate(ws, require_media=True, prompt="premium cinematic bakery gallery menu story")
 

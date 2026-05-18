@@ -1,0 +1,177 @@
+{
+  "audit_timestamp": "2026-05-18",
+  "source_of_truth": "repo evidence and local tests; live provider proof still requires VPS secrets",
+  "items": [
+    {
+      "item": "orchestrator",
+      "status": "working",
+      "evidence_file_or_test": "backend/agents/orchestrator.py; backend/tests/backend_test.py",
+      "endpoint_function_file_path": "backend/agents/orchestrator.py",
+      "fixed_in_this_pr": "No backend logic change; preserved PR #32 behavior.",
+      "remaining_incomplete": "Live end-to-end build retest must run on VPS.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "planner",
+      "status": "working",
+      "evidence_file_or_test": "backend/agents/prompts.py; backend/tests/test_agent_audit.py",
+      "endpoint_function_file_path": "backend/agents/agent_registry.py",
+      "fixed_in_this_pr": "User-facing dashboard copy now refers to Builder Engine instead of the retired persona.",
+      "remaining_incomplete": "No repo-level blocker found.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "creative director",
+      "status": "working",
+      "evidence_file_or_test": "backend/agents/creative_director.py; backend/tests/test_agent_audit.py",
+      "endpoint_function_file_path": "backend/agents/creative_director.py",
+      "fixed_in_this_pr": "No backend logic change.",
+      "remaining_incomplete": "Quality of live outputs should be retested after deploy.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "design engine",
+      "status": "working",
+      "evidence_file_or_test": "backend/agents/design_engine.py; backend/agents/design_dna.py",
+      "endpoint_function_file_path": "backend/agents/design_engine.py",
+      "fixed_in_this_pr": "No backend logic change.",
+      "remaining_incomplete": "No repo-level blocker found.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "frontend generation",
+      "status": "working",
+      "evidence_file_or_test": "backend/tests/backend_test.py; frontend build",
+      "endpoint_function_file_path": "backend/agents/orchestrator.py",
+      "fixed_in_this_pr": "Frontend product shell and public pages recovered to Amarktai branding.",
+      "remaining_incomplete": "Live generated project QA still requires VPS retest.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "backend generation",
+      "status": "working",
+      "evidence_file_or_test": "backend/tests/test_agent_audit.py; backend/agents/prompts.py",
+      "endpoint_function_file_path": "backend/agents/build_contract.py",
+      "fixed_in_this_pr": "No backend logic change.",
+      "remaining_incomplete": "No repo-level blocker found.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "media director",
+      "status": "working",
+      "evidence_file_or_test": "backend/agents/media_director.py; backend/tests/test_media_section_alignment.py",
+      "endpoint_function_file_path": "backend/agents/media_director.py",
+      "fixed_in_this_pr": "No provider truth changes; public/dashboard copy keeps media truth-gated.",
+      "remaining_incomplete": "Live provider media proof depends on configured secrets and runtime calls.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "runtime media",
+      "status": "partial",
+      "evidence_file_or_test": "backend/app/services/media_runtime_service.py; backend/tests/test_genx_media_runtime.py",
+      "endpoint_function_file_path": "backend/server.py /api/builds/{project_id}/media-runtime",
+      "fixed_in_this_pr": "No runtime logic change; UI avoids fake media availability.",
+      "remaining_incomplete": "Provider-dependent media needs VPS secret-backed runtime proof.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "avatar runtime",
+      "status": "setup_needed",
+      "evidence_file_or_test": "backend/app/services/avatar_runtime_service.py; backend/tests/test_premium_runtime_avatar_phases.py",
+      "endpoint_function_file_path": "backend/app/services/avatar_runtime_service.py",
+      "fixed_in_this_pr": "No avatar availability overclaim introduced.",
+      "remaining_incomplete": "Avatar is available only when CapabilityTruthService receives runtime proof.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "voice/avatar runtime",
+      "status": "setup_needed",
+      "evidence_file_or_test": "backend/app/services/voice_avatar_runtime_service.py",
+      "endpoint_function_file_path": "backend/app/services/voice_avatar_runtime_service.py",
+      "fixed_in_this_pr": "No fake voice/avatar success claims.",
+      "remaining_incomplete": "Needs live provider configuration and runtime proof.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "runtime QA",
+      "status": "partial",
+      "evidence_file_or_test": "backend/app/services/runtime_qa_service.py; backend/tests/test_phase3_services.py",
+      "endpoint_function_file_path": "backend/server.py /api/builds/{project_id}/runtime-qa",
+      "fixed_in_this_pr": "System page now surfaces Runtime QA and go-live evidence more clearly.",
+      "remaining_incomplete": "Browser/Lighthouse/axe setup must be validated on VPS.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "quality gate",
+      "status": "working",
+      "evidence_file_or_test": "backend/app/services/quality_gate_service.py; backend/tests/test_premium_quality_gate.py",
+      "endpoint_function_file_path": "backend/server.py /api/builds/{project_id}/quality-gate",
+      "fixed_in_this_pr": "No gate weakening; fixture branding neutralized in tests only.",
+      "remaining_incomplete": "Live build quality should be retested after deploy.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "capability truth",
+      "status": "working",
+      "evidence_file_or_test": "backend/app/services/capability_truth_service.py; backend/tests/test_capability_truth_labels.py",
+      "endpoint_function_file_path": "backend/server.py /api/capabilities/status",
+      "fixed_in_this_pr": "Preserved CapabilityTruthService and only restyled/renamed frontend labels.",
+      "remaining_incomplete": "Live provider proof depends on VPS secrets.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "repo workbench",
+      "status": "partial",
+      "evidence_file_or_test": "frontend/src/pages/dashboard/RepoWorkbenchPage.jsx; backend/app/services/github_repo_service.py",
+      "endpoint_function_file_path": "backend/server.py /api/projects/from-repo and /api/builds/{project_id}/repo-workflow/run",
+      "fixed_in_this_pr": "Removed retired-persona flow label and clarified repo-to-PR cockpit language.",
+      "remaining_incomplete": "Private repo, push, and PR actions need GITHUB_PAT and live workflow verification.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "GitHub PR workflow",
+      "status": "setup_needed",
+      "evidence_file_or_test": "backend/server.py /api/builds/{project_id}/git/open-pr",
+      "endpoint_function_file_path": "backend/app/services/github_repo_service.py",
+      "fixed_in_this_pr": "Dashboard copy makes PAT setup dependency visible.",
+      "remaining_incomplete": "Requires GitHub PAT and a real repo workflow on VPS.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "model routing",
+      "status": "working",
+      "evidence_file_or_test": "backend/app/services/model_router.py; backend/tests/test_backend_go_live_core.py",
+      "endpoint_function_file_path": "backend/server.py /api/models/router-status",
+      "fixed_in_this_pr": "System page now displays router evidence.",
+      "remaining_incomplete": "Live provider model count depends on runtime provider state.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "provider discovery",
+      "status": "working",
+      "evidence_file_or_test": "backend/app/services/live_probe_service.py; backend/app/services/genx_live_probe_service.py",
+      "endpoint_function_file_path": "backend/server.py /api/providers/status and /api/providers/probe",
+      "fixed_in_this_pr": "No backend change; UI continues to separate setup from availability.",
+      "remaining_incomplete": "VPS secrets determine live status.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "provider runtime execution",
+      "status": "partial",
+      "evidence_file_or_test": "backend/app/services/genx_runtime_service.py; backend/tests/test_genx_media_runtime.py",
+      "endpoint_function_file_path": "backend/app/services/genx_runtime_service.py",
+      "fixed_in_this_pr": "No runtime payload changes; PR #32 preserved.",
+      "remaining_incomplete": "Real provider calls must be smoke-tested on VPS with secrets.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "final gate",
+      "status": "working",
+      "evidence_file_or_test": "backend/server.py go_live_status; backend/tests/test_firecrawl_go_live_status.py",
+      "endpoint_function_file_path": "backend/server.py /api/go-live/status",
+      "fixed_in_this_pr": "Dashboard/System labeling now exposes Final Gate explicitly.",
+      "remaining_incomplete": "Live deploy retest must confirm final status reflects runtime blockers.",
+      "blocks_go_live": false
+    }
+  ]
+}

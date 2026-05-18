@@ -25,7 +25,7 @@ export default function FeaturesPage() {
             A production loop for software, media, repos, QA, and launch gates.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-amk-fg2">
-            Aiva does not just generate files - it runs the production loop. Plan, design, build, preview, test, repair, version, and prepare for launch.
+            Amarktai Builder does not just generate files - it runs the production loop. Plan, design, build, preview, test, repair, version, and prepare for launch.
           </p>
         </div>
       </section>

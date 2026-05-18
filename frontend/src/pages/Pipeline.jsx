@@ -4,7 +4,7 @@ import { ArrowRight, Bot, ClipboardCheck, Code2, Eye, GitPullRequest, Layers3, P
 
 const stages = [
   ["Prompt", "Describe the product, workspace, repo change, or launch goal.", Sparkles, "#22D3EE"],
-  ["Clarify", "Aiva asks only when ambiguity could break the build.", Wand2, "#3B82F6"],
+  ["Clarify", "The Builder Engine asks only when ambiguity could break the build.", Wand2, "#3B82F6"],
   ["Plan", "Planner and Scout shape the product route.", Bot, "#8B5CF6"],
   ["Design", "Creative direction becomes layout, copy, sections, and visual treatment.", Palette, "#D946EF"],
   ["Generate", "Coder writes the project files and supporting evidence.", Code2, "#22D3EE"],
@@ -33,7 +33,7 @@ export default function PipelinePage() {
           Builds that prove themselves before launch.
         </h1>
         <p className="mt-6 max-w-2xl text-lg leading-8 text-amk-fg2">
-          From prompt to preview to pull request, Aiva routes every step through specialist work, runtime evidence, and final gate checks.
+          From prompt to preview to pull request, Amarktai Builder routes every step through specialist work, runtime evidence, and final gate checks.
         </p>
       </section>
 

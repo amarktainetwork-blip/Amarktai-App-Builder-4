@@ -132,6 +132,7 @@ export const Models = {
 export const System = {
   health: () => api.get("/health").then((r) => r.data),
   readiness: () => api.get("/readiness").then((r) => r.data),
+  goLiveStatus: () => api.get("/go-live/status").then((r) => r.data),
   githubStatus: () => api.get("/integrations/github/status").then((r) => r.data),
   githubRepos: (params = {}) => api.get("/integrations/github/repos", { params }).then((r) => r.data),
   githubBranches: (owner, repo, params = {}) =>

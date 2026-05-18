@@ -16,7 +16,7 @@ PNG_1X1 = (
 def _workspace(tmp_path: Path) -> Path:
     (tmp_path / "index.html").write_text(
         "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head>"
-        "<body><main><section id='hero'><h1>Ember & Crumb</h1></section>"
+        "<body><main><section id='hero'><h1>Fixture Bakery</h1></section>"
         "<section id='gallery'></section><section id='menu'></section></main></body></html>",
         encoding="utf-8",
     )

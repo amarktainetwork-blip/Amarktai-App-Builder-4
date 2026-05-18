@@ -21,17 +21,20 @@ test("landing hero has improved headline copy", () => {
     require.resolve("../pages/Landing.jsx"),
     "utf8"
   );
-  expect(content).toMatch(/private AI/);
-  expect(content).toMatch(/software factory/);
+  expect(content).toMatch(/Private AI Software Factory/);
+  expect(content).toMatch(/Amarktai Builder turns a prompt/);
 });
 
-test("landing imports Cpu icon", () => {
+test("landing uses production command center language without retired persona branding", () => {
   const fs = require("fs");
   const content = fs.readFileSync(
     require.resolve("../pages/Landing.jsx"),
     "utf8"
   );
-  expect(content).toMatch(/Cpu/);
+  expect(content).toMatch(/Amarktai Command Center/);
+  expect(content).toMatch(/Builder Engine/);
+  const retiredName = "Ai" + "va";
+  expect(content).not.toMatch(new RegExp(`${retiredName}|${retiredName.toLowerCase()}|${retiredName.toUpperCase()}`));
 });
 
 // ── Settings dialog ───────────────────────────────────────────────────────────

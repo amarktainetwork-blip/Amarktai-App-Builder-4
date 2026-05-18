@@ -35,9 +35,9 @@ export default function DashboardHome() {
       <section className="premium-card rounded-3xl p-6 md:p-8">
         <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-amk-accent">Aiva control room</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-amk-accent">Command center</div>
             <h1 className="mt-3 max-w-3xl font-display text-4xl font-semibold leading-tight text-white md:text-6xl">What are we building today?</h1>
-            <p className="mt-4 max-w-2xl text-base leading-7 text-amk-fg2">Start with a prompt, continue a workspace, or send Aiva into a repo.</p>
+            <p className="mt-4 max-w-2xl text-base leading-7 text-amk-fg2">Start with a prompt, continue a workspace, or send the Builder Engine into a repo.</p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link to="/dashboard/new" className="cta-primary inline-flex h-11 items-center gap-2 rounded-2xl px-5 font-mono text-xs uppercase tracking-wider">
                 Start New Build <Sparkles className="h-4 w-4" />
@@ -51,7 +51,7 @@ export default function DashboardHome() {
             </div>
           </div>
           <div className="grid gap-3 rounded-3xl border border-amk-line bg-amk-base/60 p-4">
-            {["Aiva plans", "Specialists build", "Runtime checks", "Final gate decides"].map((item, index) => (
+            {["Plan the work", "Specialists build", "Runtime checks", "Final gate decides"].map((item, index) => (
               <div key={item} className="flex items-center gap-3 rounded-2xl bg-amk-panel/70 p-3">
                 <span className="grid h-8 w-8 place-items-center rounded-xl bg-amk-accent/15 font-mono text-[10px] text-amk-accent">0{index + 1}</span>
                 <span className="font-mono text-xs uppercase tracking-wider text-white">{item}</span>

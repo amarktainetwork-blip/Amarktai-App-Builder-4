@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 
-def _ember_fixture(root: Path, project_id: str) -> Path:
+def _bakery_fixture(root: Path, project_id: str) -> Path:
     ws = root / "generated" / project_id
     (ws / "media").mkdir(parents=True)
     (ws / "runtime-qa").mkdir()
@@ -54,7 +54,7 @@ def test_audit_extracts_provider_failures_and_hero_only_alignment(tmp_path):
     from scripts.audit_project_build_quality import audit_project
 
     project_id = "284c4875-a5bd-4224-9fc8-a99263b7e2b4"
-    _ember_fixture(tmp_path, project_id)
+    _bakery_fixture(tmp_path, project_id)
     report = audit_project(project_id, tmp_path)
 
     assert report["project_id"] == project_id
@@ -66,8 +66,8 @@ def test_audit_extracts_provider_failures_and_hero_only_alignment(tmp_path):
 def test_audit_flags_quality_100_with_runtime_failure_as_inconsistent(tmp_path):
     from scripts.audit_project_build_quality import audit_project
 
-    project_id = "ember-quality"
-    _ember_fixture(tmp_path, project_id)
+    project_id = "bakery-quality"
+    _bakery_fixture(tmp_path, project_id)
     report = audit_project(project_id, tmp_path)
 
     assert report["quality_report_score"] == 100
