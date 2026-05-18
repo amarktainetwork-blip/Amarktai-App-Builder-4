@@ -1357,7 +1357,9 @@ def _static_file_issues(files_by_path: dict[str, dict], prompt: str = "") -> lis
         issues.append("index.html is truncated or missing </html>.")
     if html and not re.search(r"</body\s*>", html, re.IGNORECASE):
         issues.append("index.html is truncated or missing </body>.")
-    if html and not re.search(r"</main\s*>", html, re.IGNORECASE):
+    # Only flag </main> missing when there's an opening <main> tag — pages without <main>
+    # are valid minimal HTML and should not be penalised here.
+    if html and re.search(r"<main[\s>]", html, re.IGNORECASE) and not re.search(r"</main\s*>", html, re.IGNORECASE):
         issues.append("index.html is truncated or missing </main>.")
     if html and _looks_truncated_mid_tag(html):
         issues.append("index.html appears truncated mid-tag or mid-attribute.")

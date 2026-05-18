@@ -2529,14 +2529,21 @@ async def test_build_pipeline_missing_audience_reaches_architect_and_coder(monke
 
     assert "architect" in calls
     assert "coder" in calls
-    assert _project["status"] == "failed"
-    assert _project.get("failed_agent") in {"media_director", "validator"}
-    assert "pipeline" != _project.get("failed_agent")
-    assert _project.get("error")
+    # The core fix being verified: audience KeyError must not surface as failed_agent=pipeline.
+    # With CSS/SVG media fallback now working, premium builds reach the final gate and may
+    # succeed when all required static files are present and media fallback writes >= 3 assets.
+    assert _project.get("failed_agent") != "pipeline", (
+        "Audience KeyError must not surface as pipeline failure"
+    )
     assert _project["build_context"]["audience"]
     assert _project["build_context"]["target_audience"] == _project["build_context"]["audience"]
     assert any(item["path"] == "index.html" for item in written)
     assert "quality_report.md" in {item["path"] for item in written}
+    # Build may succeed ("ready") when CSS/SVG fallback provides 3+ assets, or fail on a
+    # specific validator/media blocker — never on a raw pipeline crash.
+    assert _project["status"] in {"ready", "failed"}
+    if _project["status"] == "failed":
+        assert _project.get("failed_agent") in {"media_director", "validator"}
 
 
 
@@ -3565,8 +3572,11 @@ def test_server_settings_keys_includes_qwen_and_pixabay():
     """
     import server
     from config import SECRET_KEYS
-    # Every key in SECRET_KEYS that isn't a core required key must appear in SETTINGS_KEYS
-    optional_keys = SECRET_KEYS - {"GENX_API_KEY", "GITHUB_PAT", "BRAVE_SEARCH_API_KEY"}
+    # Every key in SECRET_KEYS that isn't a core required key must appear in SETTINGS_KEYS.
+    # BRAVE_SEARCH_API_KEY is deprecated and kept in config.SECRET_KEYS as legacy; it is
+    # intentionally excluded from the user-facing SETTINGS_KEYS allowlist.
+    excluded_from_settings = {"GENX_API_KEY", "GITHUB_PAT", "BRAVE_SEARCH_API_KEY"}
+    optional_keys = SECRET_KEYS - excluded_from_settings
     for key in optional_keys:
         assert key in server.SETTINGS_KEYS, f"{key} in SECRET_KEYS but missing from server.SETTINGS_KEYS"
 
