@@ -14,6 +14,8 @@ from html import unescape
 from pathlib import Path
 from typing import Any
 
+from agents.build_contract import is_report_or_metadata_file
+
 
 GENERIC_COPY_PATTERNS = [
     r"\bLorem ipsum\b",
@@ -47,8 +49,11 @@ def _read_text_files(workspace: Path) -> list[tuple[str, str]]:
         for path in workspace.rglob(f"*{ext}"):
             if any(part in {"node_modules", ".git", "runtime-qa", "media"} for part in path.parts):
                 continue
+            rel = str(path.relative_to(workspace)).replace("\\", "/")
+            if is_report_or_metadata_file(rel):
+                continue
             try:
-                files.append((str(path.relative_to(workspace)).replace("\\", "/"), path.read_text(encoding="utf-8", errors="replace")))
+                files.append((rel, path.read_text(encoding="utf-8", errors="replace")))
             except Exception:
                 continue
     return files[:80]
@@ -199,6 +204,7 @@ def run_content_quality_check_for_files(
         (str(item.get("path", "")), str(item.get("content", "")))
         for item in files
         if Path(str(item.get("path", ""))).suffix.lower() in {".html", ".jsx", ".tsx", ".js", ".md"}
+        and not is_report_or_metadata_file(str(item.get("path", "")))
     ]
     return _run_content_quality(raw_files, prompt=prompt, context=context, strict=strict)
 

@@ -31,6 +31,9 @@ from .build_contract import (
     get_required_files,
     infer_build_mode,
     infer_project_type,
+    is_report_or_metadata_file,
+    REPORT_AND_METADATA_FILES,
+    repair_static_design_family,
     remove_legacy_template_contamination,
     validate_project_files,
 )
@@ -112,7 +115,7 @@ _MAX_ITERATION_HISTORY = 20
 # App files that indicate the project has a previewable entry point
 _PREVIEW_ENTRY_FILES = {"index.html", "index.htm"}
 # Files that are metadata, not app output
-_META_FILES = {"requirements.md", "tech_stack.json"}
+_META_FILES = set(REPORT_AND_METADATA_FILES)
 
 # Modes that do not require index.html to be "ready"
 _NO_PREVIEW_MODES = {
@@ -581,6 +584,22 @@ def _has_app_files(files: list[dict]) -> bool:
 def _agent_app_files(files: list[dict]) -> list[dict]:
     """Filter internal reports/manifests out of model payloads."""
     return filter_app_source_files(files or [])
+
+
+def _reviewer_app_patches(patched_files: list[dict] | None) -> tuple[list[dict], list[str]]:
+    accepted: list[dict] = []
+    ignored: list[str] = []
+    for item in patched_files or []:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        if not path:
+            continue
+        if is_report_or_metadata_file(path):
+            ignored.append(path)
+            continue
+        accepted.append(item)
+    return accepted, ignored
 
 
 def _has_preview_entry(files: list[dict]) -> bool:
@@ -2096,7 +2115,7 @@ class Orchestrator:
         )
         review_input = json.dumps({
             "mode": mode,
-            "required_files": sd.get("required_files", []),
+            "required_files": [p for p in sd.get("required_files", []) if not is_report_or_metadata_file(str(p))],
             "context": normalized_context,
             "files": [{"path": f["path"], "content": f["content"]} for f in _agent_app_files(current_files)],
             "shared_context": shared_ctx,
@@ -2104,6 +2123,7 @@ class Orchestrator:
         review_issues: list[str] = []
         reviewer_blocker = ""
         reviewer_passed = False
+        reviewer_needs_regeneration = False
         try:
             rev = await self._run_agent("reviewer", REVIEWER_PROMPT, review_input)
             await self._check_cancel()
@@ -2112,6 +2132,7 @@ class Orchestrator:
             if verdict == "needs_regeneration":
                 reviewer_blocker = ""
                 reviewer_passed = True
+                reviewer_needs_regeneration = True
                 review_issues.append("Reviewer requested regeneration; continuing into deterministic validation, media runtime, and final quality gates so the build produces actionable artifacts instead of failing with no preview.")
                 await self._record_event(
                     "reviewer",
@@ -2126,7 +2147,15 @@ class Orchestrator:
                 if len(patched_content) > 50_000 and re.search(r"<html|body\s*\{|\.hero|@media", patched_content, re.IGNORECASE):
                     reviewer_blocker = "Reviewer attempted a full-file rewrite instead of a compact audit patch."
                     break
-            for f in rev_data.get("patched_files", []):
+            reviewer_patches, ignored_report_patches = _reviewer_app_patches(rev_data.get("patched_files", []))
+            if ignored_report_patches:
+                await self._record_event(
+                    "reviewer",
+                    "warn",
+                    "Ignored reviewer patches for report/metadata files; reports are handled outside app-source repair.",
+                    meta={"ignored_paths": ignored_report_patches},
+                )
+            for f in reviewer_patches:
                 await self.fs.write(f["path"], f["content"], f.get("language", "text"))
                 await self.emit({"type": "file_written", "data": {"path": f["path"]}})
             await self._record_message(
@@ -2134,7 +2163,7 @@ class Orchestrator:
                 f"**Verdict:** {rev_data.get('verdict', 'pass')}\n\n"
                 + (("**Issues:**\n" + "\n".join(f"- {i}" for i in rev_data.get("issues", [])))
                    if rev_data.get("issues") else "_No issues found._"),
-                meta={"model": rev["model_label"], "patched": [f["path"] for f in rev_data.get("patched_files", [])]},
+                meta={"model": rev["model_label"], "patched": [f["path"] for f in reviewer_patches], "ignored_report_patches": ignored_report_patches},
             )
             review_issues = rev_data.get("issues", [])
             reviewer_passed = not reviewer_blocker
@@ -2151,14 +2180,15 @@ class Orchestrator:
 
         if (
             is_premium(project_meta.get("quality_tier", "standard"))
-            and "requested regeneration" in reviewer_blocker.lower()
+            and reviewer_needs_regeneration
         ):
             regen_files = await self.fs.list_full()
-            regenerated, regen_changed = enforce_static_contract_files(
+            regenerated, regen_changed = repair_static_design_family(
                 {**project_meta, "mode": mode},
                 user_prompt,
                 arch_data,
                 regen_files,
+                force=True,
             )
             if regen_changed:
                 by_path = {f["path"]: f for f in regenerated}
@@ -2257,8 +2287,8 @@ class Orchestrator:
             repair_files = await self.fs.list_full()
             repair_input = json.dumps({
                 "mode": mode,
-                "required_files": required,
-                "missing_files": missing,
+                "required_files": [p for p in required if not is_report_or_metadata_file(str(p))],
+                "missing_files": [p for p in missing if not is_report_or_metadata_file(str(p))],
                 "validation_errors": errors,
                 "repair_attempt": repair_pass + 1,
                 "context": normalized_context,
@@ -2274,7 +2304,13 @@ class Orchestrator:
             try:
                 repair_res = await self._run_agent("reviewer", repair_prompt, repair_input)
                 repair_data = repair_res["data"]
-                patched = repair_data.get("patched_files", [])
+                patched, ignored_report_patches = _reviewer_app_patches(repair_data.get("patched_files", []))
+                if ignored_report_patches:
+                    await self._emit_validation_event(
+                        "repair_warn",
+                        "Ignored repair patches for report/metadata files.",
+                        {"ignored_paths": ignored_report_patches},
+                    )
                 for f in patched:
                     await self.fs.write(f["path"], f["content"], f.get("language", "text"))
                     await self.emit({"type": "file_written", "data": {"path": f["path"]}})
@@ -2545,6 +2581,7 @@ class Orchestrator:
         workspace_checks = workspace_quality.get("checks", {}) if isinstance(workspace_quality, dict) else {}
         warning_ready = bool(
             infer_project_type(mode) == "static-site"
+            and is_premium(project_meta.get("quality_tier", "standard"))
             and isinstance(workspace_quality, dict)
             and (
                 workspace_quality.get("warnings")
@@ -3120,7 +3157,15 @@ class Orchestrator:
                 )
                 rev = await self._run_agent("reviewer", REVIEWER_PROMPT, review_input)
                 rev_data = rev["data"]
-                for f in rev_data.get("patched_files", []):
+                reviewer_patches, ignored_report_patches = _reviewer_app_patches(rev_data.get("patched_files", []))
+                if ignored_report_patches:
+                    await self._record_event(
+                        "reviewer",
+                        "warn",
+                        "Ignored reviewer retry patches for report/metadata files.",
+                        meta={"ignored_paths": ignored_report_patches},
+                    )
+                for f in reviewer_patches:
                     await self.fs.write(f["path"], f["content"], f.get("language", "text"))
                     await self.emit({"type": "file_written", "data": {"path": f["path"]}})
                 project = await self._load_project()
@@ -3137,7 +3182,8 @@ class Orchestrator:
                     + (("**Issues:**\n" + "\n".join(f"- {i}" for i in rev_data.get("issues", [])))
                        if rev_data.get("issues") else "_No issues found._"),
                     meta={"model": rev["model_label"],
-                          "patched": [f["path"] for f in rev_data.get("patched_files", [])],
+                          "patched": [f["path"] for f in reviewer_patches],
+                          "ignored_report_patches": ignored_report_patches,
                           "retry": True},
                 )
                 await self._set_status("ready", {"completed_at": _now(), "failed_agent": None, "error": None})

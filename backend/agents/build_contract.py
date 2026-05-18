@@ -142,6 +142,8 @@ _HTML_CLOSE_RE = re.compile(r"</html\s*>", re.IGNORECASE)
 _SECTION_RE = re.compile(r"<section\b", re.IGNORECASE)
 _CSS_SELECTOR_RE = re.compile(r"(^|\})\s*[.#]?[A-Za-z][^{]{0,80}\{", re.MULTILINE)
 _STATIC_SECRET_RE = re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*=\s*(?!change_me|example|your_|localhost)[A-Za-z0-9_\-]{16,}")
+_BAKERY_HINTS = re.compile(r"\b(bakery|baker|bread|sourdough|pastr(?:y|ies)|cafe|coffee|catering)\b", re.IGNORECASE)
+_PLATFORM_HINTS = re.compile(r"\b(amarktai|app builder|software factory|repo|runtime qa|provider|github|agent orchestration)\b", re.IGNORECASE)
 
 
 def _now() -> str:
@@ -273,6 +275,29 @@ def language_for(path: str) -> str:
 
 def _file(path: str, content: str) -> dict:
     return {"path": path, "language": language_for(path), "content": content}
+
+
+def _html_classes(html: str) -> set[str]:
+    groups = re.findall(r'class=["\']([^"\']+)["\']', html or "")
+    return {part for group in groups for part in group.split() if re.match(r"^[A-Za-z][A-Za-z0-9_-]*$", part)}
+
+
+def _html_ids(html: str) -> set[str]:
+    return set(re.findall(r'id=["\']([^"\']+)["\']', html or ""))
+
+
+def _selector_exists(selector: str, html: str) -> bool:
+    if selector.startswith("#"):
+        return selector[1:] in _html_ids(html)
+    if selector.startswith("."):
+        return selector[1:] in _html_classes(html)
+    if selector.startswith("[") and selector.endswith("]"):
+        attr = selector.strip("[]").split("=", 1)[0]
+        return attr in html
+    tag_attr = re.match(r"^([a-zA-Z][a-zA-Z0-9-]*)\[", selector)
+    if tag_attr:
+        return bool(re.search(rf"<{re.escape(tag_attr.group(1))}[\s>]", html, re.IGNORECASE))
+    return bool(re.search(rf"<{re.escape(selector)}[\s>]", html, re.IGNORECASE))
 
 
 def _project_name(prompt: str, fallback: str = "Amarktai Project") -> str:
@@ -452,6 +477,52 @@ def _premium_static_index(prompt: str) -> str:
   <footer class="site-footer">
     <p>Amarktai Builder | Production AI software factory | Files, media, motion, QA, and deployment evidence must be real.</p>
   </footer>
+  <script src="script.js"></script>
+</body>
+</html>
+"""
+
+
+def _bakery_static_index(prompt: str) -> str:
+    title = "Luma & Stone" if "luma" in (prompt or "").lower() else escape(_project_name(prompt, "Artisan Bakery"))
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title} | Artisan Bakery</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-motion-runtime="pending">
+  <header class="site-header">
+    <a class="brand" href="#hero">{title}</a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="#sourdough">Sourdough</a>
+      <a href="#pastries">Pastries</a>
+      <a href="#coffee">Coffee</a>
+      <a href="#events">Events</a>
+      <a href="#contact">Visit</a>
+    </nav>
+  </header>
+  <main>
+    <section id="hero" class="hero bakery-hero" data-amarktai-motion-scene data-reveal>
+      <div class="hero-copy">
+        <p class="eyebrow">Luxury artisan bakery</p>
+        <h1>Warm ovens, slow craft, and pastries worth crossing town for.</h1>
+        <p class="lede">{title} is an editorial bakery experience built around naturally leavened bread, seasonal pastry, thoughtful coffee, and quiet hospitality.</p>
+        <div class="actions"><a class="button primary" href="#contact">Plan a visit</a><a class="button secondary" href="#gallery">View the bakery</a></div>
+      </div>
+      <div class="hero-visual" aria-label="Warm artisan bakery table with bread and coffee"></div>
+    </section>
+    <section id="sourdough" class="story-section sourdough-section" data-amarktai-motion-scene data-reveal><p class="eyebrow">Artisan sourdough</p><h2>Long fermentation, deep flavor, crackling crust.</h2><p>Every loaf is mixed, folded, shaped, and baked with patience so the bread feels rustic, refined, and generous.</p></section>
+    <section id="pastries" class="story-section pastries-section split" data-amarktai-motion-scene data-reveal><div><p class="eyebrow">Seasonal pastries</p><h2>Small-batch pastry guided by the market.</h2><p>Expect laminated dough, fruit tarts, morning buns, and rotating weekend specials finished with a light hand.</p></div><article><h3>Today from the case</h3><p>Croissants, rye chocolate babka, citrus danish, almond cakes, and savory galettes.</p></article></section>
+    <section id="coffee" class="story-section coffee-section" data-amarktai-motion-scene data-reveal><p class="eyebrow">Coffee experience</p><h2>A calm room for espresso, filter coffee, and warm pastry.</h2><p>The coffee program is designed to complement butter, grain, chocolate, and fruit without overwhelming the bake.</p></section>
+    <section id="gallery" class="story-section gallery-section" data-amarktai-motion-scene data-reveal><p class="eyebrow">Bakery gallery</p><h2>Texture, steam, and golden morning light.</h2><div class="gallery-grid"><article>Bread shelves</article><article>Pastry case</article><article>Coffee bar</article><article>Private table</article></div></section>
+    <section id="events" class="story-section events-section split" data-amarktai-motion-scene data-reveal><div><p class="eyebrow">Private catering and events</p><h2>Elegant trays for gatherings that should feel personal.</h2><p>Breakfast meetings, intimate dinners, seasonal parties, and weekend celebrations can be built around bread, pastry, coffee, and dessert.</p></div><article><h3>Event rhythm</h3><p>Choose a bread board, pastry selection, coffee service, and a seasonal dessert finish.</p></article></section>
+    <section id="testimonials" class="story-section testimonial-section" data-amarktai-motion-scene data-reveal><p class="eyebrow">Testimonials</p><h2>Beloved for warmth as much as craft.</h2><div class="grid"><article class="testimonial is-active">The sourdough has a deep, caramel crust and the room feels like a quiet celebration.</article><article class="testimonial">Our catering table looked beautiful and disappeared in minutes.</article><article class="testimonial">Coffee, pastry, and service all feel considered without being precious.</article></div></section>
+    <section id="contact" class="story-section contact-section lead-capture" data-amarktai-motion-scene data-reveal><div><p class="eyebrow">Contact and visit</p><h2>Visit for the morning bake or plan a private order.</h2><p>Open Wednesday through Sunday with catering inquiries welcomed for seasonal events.</p></div><form class="access-form" action="#contact"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required><label for="request">What can we prepare?</label><textarea id="request" name="request" rows="4" required></textarea><button class="button primary" type="submit">Send inquiry</button></form></section>
+  </main>
+  <footer class="site-footer">© {title}. Artisan bread, seasonal pastry, coffee, and private catering.</footer>
   <script src="script.js"></script>
 </body>
 </html>
@@ -671,11 +742,286 @@ def _motion_script() -> str:
 """.lstrip()
 
 
+def _is_bakery_prompt(prompt: str) -> bool:
+    return bool(_BAKERY_HINTS.search(prompt or ""))
+
+
+def _is_platform_prompt(prompt: str) -> bool:
+    return bool(_PLATFORM_HINTS.search(prompt or ""))
+
+
+def _requires_deep_static_sections(prompt: str) -> bool:
+    return bool(re.search(r"\b(premium|cinematic|luxury|editorial)\b", prompt or "", re.IGNORECASE) or _is_bakery_prompt(prompt) or _is_platform_prompt(prompt))
+
+
+def _customer_section_requirements(prompt: str) -> list[tuple[str, str, str]]:
+    if _is_bakery_prompt(prompt):
+        return [
+            ("hero", "Cinematic hero", "A warm editorial opening with handcrafted bakery atmosphere and a clear reservation or visit CTA."),
+            ("sourdough", "Artisan sourdough", "Naturally leavened loaves, long fermentation, crackling crusts, and daily bake rhythm."),
+            ("pastries", "Seasonal pastries", "Rotating viennoiserie, fruit tarts, laminated dough, and small-batch pastry craft."),
+            ("coffee", "Coffee experience", "A calm cafe ritual pairing espresso, filter coffee, and bakery seating."),
+            ("gallery", "Bakery gallery", "Visual moments for bread shelves, pastry cases, coffee service, and warm interior details."),
+            ("events", "Private catering and events", "Thoughtful catering for intimate gatherings, office breakfasts, and seasonal celebrations."),
+            ("testimonials", "Testimonials", "Customer proof with specific warmth, service, and craft details."),
+            ("contact", "Contact and visit", "Hours, location cue, inquiry path, and a direct call to plan a visit."),
+        ]
+    if _is_platform_prompt(prompt):
+        return [
+            ("hero", "Cinematic hero", "A clear platform opening with the main value proposition."),
+            ("media-showcase", "AI image, video, and voice showcase", "Provider-backed media evidence and local persisted assets."),
+            ("sales-agent", "AI sales-agent conversation demo", "A guided conversation that turns interest into a precise build brief."),
+            ("repo-workbench", "Repo Workbench", "Repository analysis, patch, test, and pull request workflow."),
+            ("runtime-qa", "Runtime QA evidence", "Browser rendering, accessibility, performance, links, media, and motion proof."),
+            ("media-evidence", "Media manifest evidence", "Local media paths and manifest truth for generated assets."),
+            ("production-readiness", "Deployment and production readiness", "Provider truth, quality gates, and deploy notes."),
+            ("lead-capture", "CTA lead capture form", "A conversion point for access or project intake."),
+        ]
+    if not _requires_deep_static_sections(prompt):
+        return []
+    return [
+        ("hero", "Cinematic hero", "A clear above-the-fold story with customer-specific positioning and a primary CTA."),
+        ("proof", "Transformation proof", "Concrete proof that the offer solves the requested customer problem."),
+        ("gallery", "Immersive media", "A visual or editorial section that supports the product story."),
+        ("testimonials", "Testimonials", "Credible customer proof or outcome-oriented validation."),
+        ("contact", "Contact and CTA", "A conversion section with a direct next action."),
+    ]
+
+
+def _html_has_section(html: str, section_id: str, title: str) -> bool:
+    if section_id in _html_ids(html):
+        return True
+    title_pat = re.compile(rf"<(?:h2|h3)[^>]*>\s*{re.escape(title)}", re.IGNORECASE)
+    return bool(title_pat.search(html or ""))
+
+
+def _ensure_customer_sections(html: str, prompt: str) -> tuple[str, list[str]]:
+    """Patch missing customer sections into otherwise-valid static HTML."""
+    changed: list[str] = []
+    additions: list[str] = []
+    for section_id, title, body in _customer_section_requirements(prompt):
+        if _html_has_section(html, section_id, title):
+            continue
+        changed.append(section_id)
+        additions.append(
+            f"""    <section id="{section_id}" class="story-section {section_id}-section" data-amarktai-motion-scene data-reveal>
+      <p class="eyebrow">{escape(title)}</p>
+      <h2>{escape(title)}</h2>
+      <p>{escape(body)}</p>
+    </section>"""
+        )
+    if not additions:
+        return html, changed
+    insertion = "\n\n".join(additions) + "\n"
+    if "</main>" in html:
+        html = html.replace("</main>", insertion + "  </main>", 1)
+    elif "</body>" in html:
+        html = html.replace("</body>", f"<main>\n{insertion}</main>\n</body>", 1)
+    else:
+        html += "\n<main>\n" + insertion + "</main>\n</body></html>"
+    return html, changed
+
+
+def _ensure_motion_and_asset_hooks(html: str) -> tuple[str, bool]:
+    changed = False
+    if "data-amarktai-motion-scene" not in html:
+        html, count = re.subn(r"<section\b", "<section data-amarktai-motion-scene data-reveal", html, count=12, flags=re.IGNORECASE)
+        changed = changed or bool(count)
+    if "data-motion-runtime" not in html:
+        if "<body" in html:
+            html, count = re.subn(r"<body([^>]*)>", r'<body\1 data-motion-runtime="pending">', html, count=1, flags=re.IGNORECASE)
+            changed = changed or bool(count)
+        elif "</html>" in html:
+            html = html.replace(
+                "</html>",
+                '<body data-motion-runtime="pending"><main><section id="hero" class="hero" data-amarktai-motion-scene data-reveal><h1>Generated landing page</h1><p>Preview-ready static landing page.</p></section></main></body></html>',
+                1,
+            )
+            changed = True
+        else:
+            html = html.replace("<main", '<main data-motion-runtime="pending"', 1)
+            changed = True
+    if 'src="script.js"' not in html and "src='script.js'" not in html:
+        if "</body>" in html:
+            html = html.replace("</body>", '  <script src="script.js"></script>\n</body>', 1)
+        else:
+            html += '\n<script src="script.js"></script>\n'
+        changed = True
+    if "styles.css" not in html:
+        link = '  <link rel="stylesheet" href="styles.css">\n'
+        if "</head>" in html:
+            html = html.replace("</head>", link + "</head>", 1)
+        else:
+            html = link + html
+        changed = True
+    return html, changed
+
+
+def _brand_palette(prompt: str) -> dict[str, str]:
+    if _is_bakery_prompt(prompt):
+        return {
+            "bg": "#24160f",
+            "surface": "#fff4e4",
+            "panel": "#3a2318",
+            "fg": "#fffaf0",
+            "muted": "#d8b98c",
+            "accent": "#c98242",
+            "accent2": "#f2c879",
+            "font_heading": '"Cormorant Garamond", Georgia, serif',
+            "font_body": '"Inter", "Avenir Next", Arial, sans-serif',
+        }
+    return {
+        "bg": "#0d1117",
+        "surface": "#f8fafc",
+        "panel": "#151b23",
+        "fg": "#f8fafc",
+        "muted": "#a7b2c3",
+        "accent": "#7dd3fc",
+        "accent2": "#f0abfc",
+        "font_heading": '"Space Grotesk", Inter, sans-serif',
+        "font_body": 'Inter, "Avenir Next", Arial, sans-serif',
+    }
+
+
+def _generate_coherent_static_css(html: str, prompt: str) -> str:
+    palette = _brand_palette(prompt)
+    classes = sorted(_html_classes(html))
+    class_rules = "\n".join(
+        f".{name} {{ position: relative; }}" for name in classes
+        if name not in {"button", "primary", "secondary"}
+    )
+    return f"""
+:root {{
+  --color-bg: {palette['bg']};
+  --color-fg: {palette['fg']};
+  --color-muted: {palette['muted']};
+  --color-surface: {palette['surface']};
+  --color-panel: {palette['panel']};
+  --color-accent: {palette['accent']};
+  --color-accent-2: {palette['accent2']};
+  --font-heading: {palette['font_heading']};
+  --font-body: {palette['font_body']};
+  color-scheme: dark;
+}}
+* {{ box-sizing: border-box; }}
+html {{ scroll-behavior: smooth; }}
+body {{
+  margin: 0;
+  background: radial-gradient(circle at 20% 0%, color-mix(in srgb, var(--color-accent) 26%, transparent), transparent 36rem), var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-body);
+  line-height: 1.65;
+}}
+a {{ color: inherit; }}
+.site-header {{
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 1rem clamp(1rem, 5vw, 4rem);
+  background: color-mix(in srgb, var(--color-bg) 82%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-muted) 24%, transparent);
+  backdrop-filter: blur(18px);
+}}
+.brand {{ font-family: var(--font-heading); font-size: clamp(1.3rem, 3vw, 2rem); text-decoration: none; letter-spacing: .02em; }}
+nav {{ display: flex; flex-wrap: wrap; gap: .85rem; }}
+nav a {{ text-decoration: none; color: var(--color-muted); font-size: .9rem; }}
+main {{ overflow: hidden; }}
+section, .story-section {{
+  padding: clamp(4rem, 8vw, 8rem) clamp(1rem, 6vw, 5rem);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-muted) 14%, transparent);
+}}
+.hero {{
+  min-height: 88vh; display: grid; align-items: center;
+  grid-template-columns: minmax(0, 1.1fr) minmax(260px, .9fr); gap: clamp(2rem, 5vw, 5rem);
+}}
+h1, h2, h3 {{ font-family: var(--font-heading); line-height: .96; letter-spacing: 0; margin: 0 0 1rem; }}
+h1 {{ font-size: clamp(3.4rem, 9vw, 8.5rem); max-width: 12ch; }}
+h2 {{ font-size: clamp(2.4rem, 6vw, 5rem); max-width: 12ch; }}
+h3 {{ font-size: clamp(1.3rem, 3vw, 2rem); }}
+p {{ max-width: 68ch; }}
+.lede {{ font-size: clamp(1.1rem, 2vw, 1.45rem); color: var(--color-muted); max-width: 56ch; }}
+.eyebrow {{ color: var(--color-accent-2); text-transform: uppercase; letter-spacing: .14em; font-size: .78rem; font-weight: 700; }}
+.button, button {{
+  display: inline-flex; align-items: center; justify-content: center; min-height: 3rem;
+  border-radius: 999px; padding: .85rem 1.25rem; border: 1px solid color-mix(in srgb, var(--color-accent) 52%, transparent);
+  background: var(--color-accent); color: #190f09; font-weight: 800; text-decoration: none;
+}}
+.secondary {{ background: transparent; color: var(--color-fg); }}
+.actions {{ display: flex; flex-wrap: wrap; gap: .85rem; margin-top: 1.5rem; }}
+.split {{ display: grid; grid-template-columns: minmax(0, .95fr) minmax(280px, 1fr); gap: clamp(2rem, 5vw, 5rem); align-items: center; }}
+.grid, .cards, .feature-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }}
+article, .evidence-panel, .conversation, .access-form, .gallery-grid > *, .testimonial {{
+  background: color-mix(in srgb, var(--color-panel) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-muted) 20%, transparent);
+  border-radius: 24px; padding: clamp(1.2rem, 3vw, 2rem);
+  box-shadow: 0 24px 90px rgba(0,0,0,.28);
+}}
+.gallery-grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }}
+.access-form {{ display: grid; gap: .75rem; max-width: 560px; }}
+input, textarea {{ width: 100%; border: 1px solid color-mix(in srgb, var(--color-muted) 28%, transparent); border-radius: 16px; padding: .9rem 1rem; background: rgba(255,255,255,.08); color: var(--color-fg); font: inherit; }}
+.site-footer {{ padding: 2rem clamp(1rem, 6vw, 5rem); color: var(--color-muted); }}
+[data-amarktai-motion-scene], [data-reveal] {{ opacity: .72; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }}
+.motion-in-view {{ opacity: 1; transform: translateY(0); }}
+@keyframes gentle-float {{ 0%,100% {{ transform: translateY(0); }} 50% {{ transform: translateY(-10px); }} }}
+.hero-visual, .visual, .hero-preview {{ min-height: 320px; border-radius: 36px; background: linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 40%, transparent), color-mix(in srgb, var(--color-panel) 90%, transparent)); animation: gentle-float 7s ease-in-out infinite; }}
+{class_rules}
+@media (max-width: 900px) {{
+  .hero, .split, .grid, .cards, .feature-grid, .gallery-grid {{ grid-template-columns: 1fr; }}
+  .site-header {{ position: relative; align-items: flex-start; flex-direction: column; }}
+  h1 {{ font-size: clamp(3rem, 16vw, 5rem); }}
+}}
+@media (prefers-reduced-motion: reduce) {{
+  *, *::before, *::after {{ animation: none !important; transition: none !important; scroll-behavior: auto !important; }}
+  [data-amarktai-motion-scene], [data-reveal] {{ opacity: 1; transform: none; }}
+}}
+""".strip() + "\n"
+
+
+def _generate_coherent_static_script(html: str) -> str:
+    has_nav_toggle = "nav-toggle" in _html_classes(html)
+    nav_selector = ".site-nav" if "site-nav" in _html_classes(html) else ("nav" if "<nav" in html else "")
+    has_testimonials = any(name in _html_classes(html) for name in {"testimonial", "testimonial-track", "testimonial-dot"})
+    motion_selector = "[data-reveal], [data-amarktai-motion-scene]" if ("data-reveal" in html or "data-amarktai-motion-scene" in html) else "[data-motion-runtime]"
+    lines = [
+        "(() => {",
+        "  document.documentElement.dataset.motionRuntime = 'active';",
+        "  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;",
+        "  if (!prefersReduced) {",
+        f"    const revealTargets = document.querySelectorAll('{motion_selector}');",
+        "    const observer = new IntersectionObserver((entries) => {",
+        "      entries.forEach((entry) => { if (entry.isIntersecting) entry.target.classList.add('motion-in-view'); });",
+        "    }, { threshold: 0.16 });",
+        "    revealTargets.forEach((target) => observer.observe(target));",
+        "  }",
+        "  document.querySelectorAll('a[href^=\"#\"]').forEach((link) => {",
+        "    link.addEventListener('click', (event) => {",
+        "      const target = document.querySelector(link.getAttribute('href'));",
+        "      if (target) { event.preventDefault(); target.scrollIntoView({ behavior: prefersReduced ? 'auto' : 'smooth', block: 'start' }); }",
+        "    });",
+        "  });",
+    ]
+    if has_nav_toggle and nav_selector:
+        lines.extend([
+            "  const navToggle = document.querySelector('.nav-toggle');",
+            f"  const nav = document.querySelector('{nav_selector}');",
+            "  if (navToggle && nav) navToggle.addEventListener('click', () => nav.toggleAttribute('data-open'));",
+        ])
+    if has_testimonials:
+        lines.extend([
+            "  const testimonials = Array.from(document.querySelectorAll('.testimonial'));",
+            "  if (testimonials.length > 1) {",
+            "    let active = 0;",
+            "    setInterval(() => { testimonials[active]?.classList.remove('is-active'); active = (active + 1) % testimonials.length; testimonials[active]?.classList.add('is-active'); }, 5000);",
+            "  }",
+        ])
+    lines.append("})();")
+    return "\n".join(lines) + "\n"
+
+
 def premium_static_fallback_files(prompt: str) -> list[dict]:
     """Generate a complete static premium site without React scaffold files."""
-    html = _premium_static_index(prompt)
-    css = _premium_styles()
-    script = _motion_script()
+    html = _bakery_static_index(prompt) if _is_bakery_prompt(prompt) else _premium_static_index(prompt)
+    css = _generate_coherent_static_css(html, prompt)
+    script = _generate_coherent_static_script(html)
     motion_manifest = {
         "status": "ready",
         "runtime": "static-css-js",
@@ -875,20 +1221,19 @@ def _ensure_html_pages_link_css(files_by_path: dict[str, dict]) -> list[str]:
     return patched
 
 
-def _static_file_issues(files_by_path: dict[str, dict]) -> list[str]:
+def _static_file_issues(files_by_path: dict[str, dict], prompt: str = "") -> list[str]:
     issues: list[str] = []
     html = str(files_by_path.get("index.html", {}).get("content", ""))
     css = str(files_by_path.get("styles.css", {}).get("content", ""))
     script = str(files_by_path.get("script.js", {}).get("content", "") or files_by_path.get("motion.js", {}).get("content", ""))
     if html and not _HTML_CLOSE_RE.search(html):
         issues.append("index.html is truncated or missing </html>.")
-    if html and len(_SECTION_RE.findall(html)) < 8:
+    if html and _requires_deep_static_sections(prompt) and len(_SECTION_RE.findall(html)) < 8:
         issues.append("index.html has fewer than 8 sections.")
     if css and (len(css) < 1200 or ":root" not in css or "--color" not in css or "@media" not in css):
         issues.append("styles.css is stub-level or missing design tokens/responsive rules.")
     if css and html:
-        classes = set(re.findall(r'class=["\']([^"\']+)["\']', html))
-        class_names = {part for group in classes for part in group.split()}
+        class_names = _html_classes(html)
         missing_selectors = [name for name in sorted(class_names)[:25] if f".{name}" not in css]
         if len(missing_selectors) > 6:
             issues.append("styles.css does not match key selectors referenced by index.html.")
@@ -897,25 +1242,23 @@ def _static_file_issues(files_by_path: dict[str, dict]) -> list[str]:
         for href in re.findall(r'href=["\']#([^"\']+)["\']', html):
             if href and href not in ids:
                 issues.append(f"index.html contains broken anchor: #{href}.")
-        required_sections = {
-            "hero",
-            "media-showcase",
-            "sales-agent",
-            "repo-workbench",
-            "runtime-qa",
-            "media-evidence",
-            "production-readiness",
-            "lead-capture",
-        }
-        missing_sections = sorted(required_sections - ids)
+        missing_sections = [
+            section_id
+            for section_id, title, _body in _customer_section_requirements(prompt)
+            if section_id not in ids and not _html_has_section(html, section_id, title)
+        ]
         if missing_sections:
             issues.append(f"index.html is missing required premium sections: {', '.join(missing_sections)}.")
     if script:
         for selector in re.findall(r"querySelector(?:All)?\(['\"]([^'\"]+)['\"]\)", script):
-            if selector.startswith("#") and selector[1:] not in re.findall(r'id=["\']([^"\']+)["\']', html):
-                issues.append(f"script.js targets missing selector: {selector}.")
-            if selector.startswith(".") and f'class="' in html and selector[1:] not in re.findall(r'class=["\']([^"\']+)["\']', html):
-                issues.append(f"script.js targets missing selector: {selector}.")
+            parts = [s.strip() for s in selector.split(",") if s.strip()]
+            if len(parts) > 1:
+                if not any(_selector_exists(part, html) for part in parts):
+                    issues.append(f"script.js targets missing selector: {selector}.")
+                continue
+            for part in parts:
+                if not _selector_exists(part, html):
+                    issues.append(f"script.js targets missing selector: {part}.")
     if not script or "data-motion-runtime" not in html and "motionRuntime" not in script:
         issues.append("script.js/motion hooks are missing.")
     for manifest_path in ("preview-manifest.json", "motion_manifest.json", "amarktai.project.json"):
@@ -934,6 +1277,101 @@ def _static_file_issues(files_by_path: dict[str, dict]) -> list[str]:
     return issues
 
 
+def _static_source_is_catastrophic(files_by_path: dict[str, dict]) -> bool:
+    html = str(files_by_path.get("index.html", {}).get("content", ""))
+    if not filter_app_source_files(list(files_by_path.values())):
+        return True
+    if not html.strip():
+        return True
+    if html and not _HTML_CLOSE_RE.search(html):
+        return True
+    if _STATIC_SECRET_RE.search(html):
+        return True
+    return False
+
+
+def _regenerate_static_manifests(files_by_path: dict[str, dict], prompt: str) -> list[str]:
+    changed: list[str] = []
+    file_paths = sorted(path for path in files_by_path if not is_report_or_metadata_file(path))
+    preview = json.dumps({
+        "required": True,
+        "strategy": "static",
+        "status": "ready",
+        "entry": "index.html",
+        "files": file_paths,
+    }, indent=2)
+    motion = json.dumps({
+        "status": "ready",
+        "runtime": "static-css-js",
+        "selectors": ["[data-amarktai-motion-scene]", "[data-motion-runtime]", "[data-reveal]"],
+        "changed_files": ["index.html", "styles.css", "script.js"],
+        "reduced_motion_supported": True,
+        "created_at": _now(),
+    }, indent=2)
+    for path, content in {
+        "preview-manifest.json": preview,
+        "motion_manifest.json": motion,
+    }.items():
+        if files_by_path.get(path, {}).get("content") != content:
+            files_by_path[path] = _file(path, content)
+            changed.append(path)
+    manifest = _manifest("static-site", "landing-page", prompt, list(files_by_path.values()))
+    if files_by_path.get("amarktai.project.json", {}).get("content") != manifest:
+        files_by_path["amarktai.project.json"] = _file("amarktai.project.json", manifest)
+        changed.append("amarktai.project.json")
+    return changed
+
+
+def repair_static_design_family(project: dict, prompt: str, plan: dict | None, generated_files: list[dict], *, force: bool = False) -> tuple[list[dict], list[str]]:
+    """Repair static HTML/CSS/JS as one coherent family without replacing valid customer HTML."""
+    project_type = infer_project_type(project.get("mode"), project.get("project_type"))
+    if project_type != "static-site":
+        return generated_files or [], []
+    files_by_path = {
+        str(item.get("path")): dict(item)
+        for item in (generated_files or [])
+        if isinstance(item, dict) and item.get("path")
+    }
+    changed: list[str] = []
+    for forbidden in list(STATIC_FORBIDDEN_FILES):
+        if forbidden in files_by_path:
+            files_by_path.pop(forbidden, None)
+            changed.append(forbidden)
+    catastrophic = _static_source_is_catastrophic(files_by_path)
+    if catastrophic:
+        fallback = {f["path"]: f for f in premium_static_fallback_files(prompt)}
+        fallback_issues = _static_file_issues(fallback, prompt)
+        if fallback_issues:
+            raise RuntimeError(
+                "premium_static_fallback_files produced invalid output: "
+                + "; ".join(fallback_issues)
+            )
+        changed.extend(path for path in files_by_path if path not in fallback)
+        changed.extend(path for path in fallback if files_by_path.get(path, {}).get("content") != fallback[path].get("content"))
+        return list(fallback.values()), list(dict.fromkeys(changed))
+
+    html_item = files_by_path.get("index.html")
+    html = str(html_item.get("content", "")) if html_item else ""
+    html, section_changes = _ensure_customer_sections(html, prompt)
+    html, hook_changed = _ensure_motion_and_asset_hooks(html)
+    if section_changes or hook_changed or html_item.get("content") != html:
+        files_by_path["index.html"] = {**html_item, "content": html, "language": "html"}
+        changed.append("index.html")
+    css = _generate_coherent_static_css(html, prompt)
+    if force or files_by_path.get("styles.css", {}).get("content") != css:
+        files_by_path["styles.css"] = _file("styles.css", css)
+        changed.append("styles.css")
+    script = _generate_coherent_static_script(html)
+    if force or files_by_path.get("script.js", {}).get("content") != script:
+        files_by_path["script.js"] = _file("script.js", script)
+        changed.append("script.js")
+    if "README.md" not in files_by_path:
+        files_by_path["README.md"] = _file("README.md", _premium_static_readme(prompt))
+        changed.append("README.md")
+    changed.extend(_regenerate_static_manifests(files_by_path, prompt))
+    return list(files_by_path.values()), list(dict.fromkeys(changed))
+
+
 def enforce_static_contract_files(project: dict, prompt: str, plan: dict | None, generated_files: list[dict]) -> tuple[list[dict], list[str]]:
     """Remove React scaffold from static builds and repair incomplete premium static output."""
     project_type = infer_project_type(project.get("mode"), project.get("project_type"))
@@ -949,22 +1387,14 @@ def enforce_static_contract_files(project: dict, prompt: str, plan: dict | None,
         if forbidden in files_by_path:
             files_by_path.pop(forbidden, None)
             changed.append(forbidden)
-    issues = _static_file_issues(files_by_path)
+    issues = _static_file_issues(files_by_path, prompt)
     has_secret_like_content = any(
         _STATIC_SECRET_RE.search(str(item.get("content", "")))
         for item in files_by_path.values()
     )
     if issues and not has_secret_like_content:
-        fallback = {f["path"]: f for f in premium_static_fallback_files(prompt)}
-        fallback_issues = _static_file_issues(fallback)
-        if fallback_issues:
-            raise RuntimeError(
-                "premium_static_fallback_files produced invalid output: "
-                + "; ".join(fallback_issues)
-            )
-        changed.extend(path for path in files_by_path if path not in fallback)
-        changed.extend(path for path in fallback if files_by_path.get(path, {}).get("content") != fallback[path].get("content"))
-        files_by_path = fallback
+        repaired, repair_changed = repair_static_design_family(project, prompt, plan, list(files_by_path.values()), force=True)
+        return repaired, list(dict.fromkeys(changed + repair_changed))
     return list(files_by_path.values()), list(dict.fromkeys(changed))
 
 
@@ -1074,7 +1504,7 @@ def validate_project_files(project: dict, files: list[dict], prompt: str = "", p
             errors.append(f"Preview entry does not exist: {preview_entry}")
 
     if project_type == "static-site":
-        errors.extend(_static_file_issues(by_path))
+        errors.extend(_static_file_issues(by_path, prompt))
 
     if project_type in {"react-app", "pwa", "next-app", "dashboard"} and "package.json" in by_path:
         try:
