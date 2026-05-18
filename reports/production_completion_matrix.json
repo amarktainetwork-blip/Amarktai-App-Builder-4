@@ -10,7 +10,11 @@
     "Promoted Runtime QA, Capability Center, and Final Gate labels in dashboard navigation.",
     "Upgraded System Health into a Runtime QA / Go-Live evidence surface using existing readiness, go-live, and router endpoints.",
     "Polished /login into the same premium private-access visual system.",
-    "Kept CapabilityTruthService authoritative and did not change provider truth gates."
+    "Kept CapabilityTruthService authoritative and did not change provider truth gates.",
+    "Added premium design QA for originality, cinematic quality, motion sophistication, typography, responsiveness, atmosphere, emotional quality, storytelling, and premium feel.",
+    "Integrated premium design QA into the premium quality gate so runtime-valid but generic output fails.",
+    "Added layout fingerprinting, repeated composition detection, and creative director archetype rotation for less template-like generated output.",
+    "Added a truthful cinematic showcase website generator that uses capability truth labels and does not fake setup-needed media/avatar/voice systems."
   ],
   "working_verified": [
     "Routes are declared for public website, dashboard, system health, admin, and workspace pages in frontend/src/App.js.",
@@ -18,6 +22,8 @@
     "Premium quality gate tests exist in backend/tests/test_premium_quality_gate.py.",
     "Runtime QA service exists and is covered by backend/tests/test_phase3_services.py.",
     "Repo workflow endpoints exist for import, diff, commit, open PR, runtime QA, quality gate, and repo-workflow run.",
+    "Premium design QA is covered by backend/tests/test_premium_design_qa.py.",
+    "Showcase website generation is covered by backend/tests/test_showcase_website_service.py.",
     "Local verification passed: backend compile, full backend pytest, focused truth/quality/agent tests, frontend tests, and frontend build."
   ],
   "fixed_in_this_pr": [
@@ -27,13 +33,17 @@
     "Capability/settings dashboard surface production polish.",
     "Dashboard navigation clarity for Runtime QA, Capability Center, and Final Gate.",
     "Public and dashboard copy alignment with truthful provider/media status.",
-    "Frontend smoke tests updated to assert current production copy and absence of retired persona branding."
+    "Frontend smoke tests updated to assert current production copy and absence of retired persona branding.",
+    "Premium design QA and originality engine added without changing provider truth semantics.",
+    "Showcase website service added as a repo-level proof artifact generator."
   ],
   "incomplete_or_still_needed": [
     "Live provider/runtime proof must still be verified on the VPS using real secrets and browser/runtime tooling.",
     "GitHub private repo browsing, push, and PR creation require GITHUB_PAT configured on the VPS.",
     "Avatar, voice, and provider-backed media must remain setup_needed or runtime_failed until live runtime proof exists.",
-    "Lighthouse/axe/browser runtime tooling must be validated on the VPS after deployment."
+    "Lighthouse/axe/browser runtime tooling must be validated on the VPS after deployment.",
+    "Premium design QA heuristics should be calibrated against live customer builds after deployment.",
+    "The showcase website service is not yet exposed through a public endpoint or dashboard action."
   ],
   "blocked_by_environment_or_provider": [
     "GenX/Qwen/Pixabay runtime media proof depends on configured live provider credentials and rate limits.",
@@ -49,12 +59,13 @@
   "verification": {
     "python_m_compileall_backend": "passed",
     "focused_backend_truth_quality_agent_tests": "63 passed, 1 warning",
-    "full_pytest": "1049 passed, 2 skipped, 1 warning",
+    "focused_premium_design_showcase_quality_tests": "9 passed",
+    "full_pytest": "1054 passed, 2 skipped, 1 warning",
     "frontend_yarn_install_frozen_lockfile": "passed with existing dependency warnings",
     "frontend_yarn_test_watchAll_false": "43 passed",
     "frontend_yarn_build": "passed",
     "git_diff_check": "passed with Windows LF-to-CRLF normalization warnings",
     "requested_grep_command": "grep executable was not available in this Windows PowerShell environment",
-    "equivalent_branding_scan": "PowerShell Select-String equivalent returned zero matches outside excluded generated directories"
+    "equivalent_branding_scan": "rg returned zero matches outside excluded generated directories"
   }
 }

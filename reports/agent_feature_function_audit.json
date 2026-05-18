@@ -172,6 +172,33 @@
       "fixed_in_this_pr": "Dashboard/System labeling now exposes Final Gate explicitly.",
       "remaining_incomplete": "Live deploy retest must confirm final status reflects runtime blockers.",
       "blocks_go_live": false
+    },
+    {
+      "item": "premium design QA",
+      "status": "working",
+      "evidence_file_or_test": "backend/app/services/premium_design_qa_service.py; backend/tests/test_premium_design_qa.py; backend/tests/test_premium_quality_gate.py",
+      "endpoint_function_file_path": "backend/app/services/premium_design_qa_service.py; backend/app/services/quality_gate_service.py",
+      "fixed_in_this_pr": "Added local originality, cinematic quality, motion, typography, responsiveness, atmosphere, emotional quality, storytelling, and premium feel scoring. Integrated blockers into the premium quality gate so runtime-valid but generic output can fail.",
+      "remaining_incomplete": "Scores are heuristic and should be calibrated further against live generated projects after VPS deployment.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "originality engine",
+      "status": "working",
+      "evidence_file_or_test": "backend/app/services/premium_design_qa_service.py; backend/agents/creative_director.py; backend/tests/test_premium_design_qa.py",
+      "endpoint_function_file_path": "backend/app/services/premium_design_qa_service.py; backend/agents/creative_director.py",
+      "fixed_in_this_pr": "Added layout fingerprinting, section archetype diversity checks, repeated-card/grid detection, showcase-specific archetypes, and stronger creative director motion/originality instructions.",
+      "remaining_incomplete": "Does not yet compare against a persistent cross-project fingerprint history; current scoring is per workspace.",
+      "blocks_go_live": false
+    },
+    {
+      "item": "showcase website generator",
+      "status": "working",
+      "evidence_file_or_test": "backend/app/services/showcase_website_service.py; backend/tests/test_showcase_website_service.py",
+      "endpoint_function_file_path": "backend/app/services/showcase_website_service.py",
+      "fixed_in_this_pr": "Added a truthful cinematic showcase workspace generator that renders platform proof sections and labels media/avatar/voice/provider capabilities from supplied capability truth data without faking setup-needed systems.",
+      "remaining_incomplete": "No public endpoint was added in this PR; integration into a user-triggered showcase build flow can follow after launch if desired.",
+      "blocks_go_live": false
     }
   ]
 }

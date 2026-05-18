@@ -33,6 +33,7 @@ from app.services.content_quality_service import check_content_quality
 from app.services.build_contract_service import is_static_preview_ready_workspace
 from app.services.runtime_qa_service import run_runtime_qa
 from app.services.media_runtime_service import expected_media_sections, summarize_media_section_alignment
+from app.services.premium_design_qa_service import run_premium_design_qa
 
 logger = logging.getLogger("amarktai.quality_gate")
 
@@ -672,6 +673,7 @@ def compute_premium_quality_score(
     lighthouse_setup = any("lighthouse" in item.lower() for item in runtime_blockers + runtime_warnings) and not (runtime_report or {}).get("performance", {}).get("available")
     axe_setup = any("axe-core" in item.lower() for item in runtime_blockers + runtime_warnings) and not (runtime_report or {}).get("accessibility", {}).get("available")
     motion_depth = bool(re.search(r"<video\b|data-motion-runtime|data-amarktai-motion-scene|requestAnimationFrame|@keyframes|animation\s*:", source_text, re.IGNORECASE))
+    design_qa = run_premium_design_qa(ws, prompt=prompt)
 
     sub_scores = {
         "provider_execution": 100 if not provider_failures else 30,
@@ -684,6 +686,7 @@ def compute_premium_quality_score(
         "brand_specificity": 20 if generic_fallback else 100,
         "motion_video_treatment": 100 if motion_depth else 45,
         "final_preview_integrity": 0 if broken_media else 100,
+        "premium_design_qa": design_qa.get("score", 0),
     }
     score = int(sum(sub_scores.values()) / len(sub_scores))
     blockers: list[str] = []
@@ -703,6 +706,8 @@ def compute_premium_quality_score(
         blockers.append("Hero media is not injected as a background/visual layer.")
     if not responsive:
         blockers.append("Responsive CSS or viewport support is missing.")
+    if not design_qa.get("ok"):
+        blockers.extend(str(item) for item in design_qa.get("blockers", []))
     if score < int(os.environ.get("PREMIUM_QUALITY_MIN_SCORE", "75")):
         blockers.append(f"premium_quality_score {score} is below threshold.")
     warnings = []
@@ -723,6 +728,7 @@ def compute_premium_quality_score(
         "provider_failures": provider_failures,
         "fallback_asset_count": len(fallback_assets),
         "ai_asset_count": len(ai_assets),
+        "premium_design_qa": design_qa,
     }
 
 

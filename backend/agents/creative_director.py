@@ -38,40 +38,57 @@ from .design_engine import create_design_direction
 _SECTION_ARCHETYPES: dict[str, list[str]] = {
     "landing_page": [
         "cinematic_hero",          # Tension + vision above the fold
+        "kinetic_typography_band", # Original identity moment before the first grid
         "transformation_proof",    # Before/after or pain-to-outcome proof
         "capability_reveal_rail",  # Horizontal/vertical capability rail
         "immersive_media_scene",   # Local media assets/video/visual proof
+        "story_chapter_split",     # Human context and emotional reason to care
         "runtime_evidence_strip",  # QA/media/PR metrics and artifacts
         "outcome_spotlight",       # Business outcome and trust
+        "motion_scene",            # Parallax/SVG/canvas/motion treatment with fallback
         "premium_cta_band",        # Focused conversion moment
         "conversion_climax",       # Final decisive CTA/form
         "footer_rich",            # Rich footer with links
     ],
     "website": [
-        "split_hero",
-        "about_story",
-        "services_grid",
-        "portfolio_masonry",
-        "team_profiles",
-        "contact_split",
+        "cinematic_split_hero",
+        "editorial_origin_story",
+        "signature_services_rail",
+        "immersive_gallery_scene",
+        "proof_and_testimonial_chapter",
+        "contact_command_split",
         "footer_minimal",
     ],
     "pwa": [
         "app_hero",
+        "installable_product_scene",
         "feature_highlights",
-        "install_prompt",
+        "offline_capability_proof",
+        "gesture_interaction_panel",
         "screenshots_carousel",
         "rating_badge",
         "download_cta",
         "footer_minimal",
     ],
     "dashboard": [
-        "kpi_cards_row",
-        "primary_chart",
-        "data_table",
-        "secondary_metrics",
-        "activity_feed",
+        "command_center_shell",
+        "readiness_truth_strip",
+        "primary_decision_surface",
+        "live_operations_rail",
+        "evidence_table",
+        "activity_timeline",
         "quick_actions_panel",
+    ],
+    "showcase": [
+        "cinematic_proof_hero",
+        "capability_truth_theater",
+        "generation_modes_stage",
+        "repo_to_pr_cockpit",
+        "media_avatar_voice_scene",
+        "runtime_qa_lighthouse_gate",
+        "agent_orchestration_map",
+        "deployment_finale",
+        "conversion_climax",
     ],
     "ecommerce": [
         "hero_promo_banner",
@@ -122,6 +139,33 @@ _ANIMATION_TONES: dict[str, dict] = {
                        "Glassmorphism panels slide in from below.",
         "keyframes": "slide-up 0.35s cubic-bezier(0.22,0.61,0.36,1) forwards",
         "hover": "backdrop-filter: blur(12px) saturate(1.2)",
+    },
+    "cinematic-tactile-world": {
+        "tone": "cinematic-tactile",
+        "description": "Scene-paced reveals, tactile grain, kinetic type, and slow parallax depth. "
+                       "Use proof panels and atmospheric layers without hiding capability truth.",
+        "keyframes": "scene-focus 0.75s cubic-bezier(0.16,1,0.3,1) forwards",
+        "hover": "transform: translateY(-4px); box-shadow: 0 28px 90px rgba(34,211,238,0.18)",
+    },
+    "futuristic-mesh": {
+        "tone": "immersive",
+        "description": "Layered mesh movement, kinetic type reveals, and slow parallax depth. "
+                       "Use reduced-motion fallbacks and avoid distracting constant motion.",
+        "keyframes": "kinetic-reveal 0.7s cubic-bezier(0.16,1,0.3,1) forwards",
+        "hover": "transform: translateY(-4px); box-shadow: 0 24px 80px rgba(124,58,237,0.24)",
+    },
+    "immersive-gradient-studio": {
+        "tone": "cinematic",
+        "description": "Animated gradient atmosphere, staged scroll reveals, and tactile hover depth. "
+                       "Motion should feel like scene choreography, not decoration.",
+        "keyframes": "scene-rise 0.65s cubic-bezier(0.16,1,0.3,1) forwards",
+        "hover": "transform: translateY(-5px) scale(1.01); filter: saturate(1.08)",
+    },
+    "luxury-black-gold": {
+        "tone": "restrained-luxury",
+        "description": "Slow editorial reveals, subtle light sweeps, and deliberate section pacing.",
+        "keyframes": "luxury-fade 0.8s ease forwards",
+        "hover": "transform: translateY(-2px); box-shadow: 0 18px 60px rgba(200,169,110,0.16)",
     },
     "bold-tech": {
         "tone": "snappy",
@@ -223,6 +267,12 @@ Cinematic Narrative:
   Typography: oversized headlines, controlled line widths, strong contrast, and intentional whitespace.
   Required premium beats: cinematic hero, transformation/proof section, immersive media section, premium CTA band, conversion climax.
 
+Originality and Motion:
+  Layout fingerprint must not feel like a repeated centered hero plus repeated card grids.
+  Use at least four distinct composition archetypes and a clear section-to-section pacing change.
+  Motion must be story-supporting, performant, and paired with reduced-motion fallbacks.
+  Treat provider-backed media, avatar, voice, and deployment claims as truth-gated by runtime evidence.
+
 This blueprint is NON-NEGOTIABLE. Every file you write must honour these decisions.
 """
 
@@ -280,6 +330,9 @@ def run_creative_director(
 
     # Section archetypes — pick based on mode
     mode_key = _normalise_mode_key(mode)
+    prompt_lc = prompt.lower()
+    if any(token in prompt_lc for token in ("showcase", "proof website", "platform proof", "demonstrate all working systems")):
+        mode_key = "showcase"
     archetypes = _SECTION_ARCHETYPES.get(mode_key, _SECTION_ARCHETYPES["default"])
 
     # Animation tone — matched to style
